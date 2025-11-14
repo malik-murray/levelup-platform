@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import Link from "next/link";
 
 export default function DashboardPage() {
     const [email, setEmail] = useState<string | null>(null);
@@ -69,9 +70,12 @@ export default function DashboardPage() {
                         <p className="text-xs text-slate-400 mb-2">
                             Visualize your cashflow, savings, and long-term goals.
                         </p>
-                        <button className="text-xs rounded-md bg-slate-800 px-3 py-1 text-slate-200">
-                            Coming soon
-                        </button>
+                        <Link
+                            href="/finance"
+                            className="inline-block text-xs rounded-md bg-emerald-500 px-3 py-1 font-semibold text-black hover:bg-emerald-400"
+                        >
+                            Open
+                        </Link>
                     </div>
                 </div>
             </section>
