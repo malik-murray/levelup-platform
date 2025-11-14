@@ -11,7 +11,7 @@ export default function DashboardPage() {
             if (!data.user) {
                 window.location.href = '/login';
             } else {
-                setEmail(data.user.email);
+                setEmail(data.user.email ?? null);
             }
         });
     }, []);
