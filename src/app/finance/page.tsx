@@ -62,7 +62,38 @@ export default function FinancePage() {
     // simple in-app notification text
     const [notification, setNotification] = useState<string | null>(null);
 
-    const month = new Date().toISOString().slice(0, 7); // YYYY-MM
+    // month selector state: store the first day of the currently selected month
+    const [monthDate, setMonthDate] = useState<Date>(() => {
+        const now = new Date();
+        return new Date(now.getFullYear(), now.getMonth(), 1);
+    });
+
+    // YYYY-MM string for queries and filtering
+    const monthStr = useMemo(
+        () =>
+            `${monthDate.getFullYear()}-${String(
+                monthDate.getMonth() + 1
+            ).padStart(2, '0')}`,
+        [monthDate]
+    );
+
+    // Pretty label like "November 2025"
+    const monthLabel = useMemo(
+        () =>
+            monthDate.toLocaleString('default', {
+                month: 'long',
+                year: 'numeric',
+            }),
+        [monthDate]
+    );
+
+    const goToPrevMonth = () => {
+        setMonthDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+    };
+
+    const goToNextMonth = () => {
+        setMonthDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+    };
 
     useEffect(() => {
         const load = async () => {
@@ -81,7 +112,19 @@ export default function FinancePage() {
             const { data: budgetsData } = await supabase
                 .from('category_budgets')
                 .select('id, category_id, month, amount')
-                .eq('month', month);
+                .eq('month', monthStr);
+
+            // calculate start and end of the selected month for tx query
+            const startOfMonth = new Date(
+                monthDate.getFullYear(),
+                monthDate.getMonth(),
+                1
+            );
+            const endOfMonth = new Date(
+                monthDate.getFullYear(),
+                monthDate.getMonth() + 1,
+                1
+            );
 
             const { data: txData } = await supabase
                 .from('transactions')
@@ -96,8 +139,9 @@ export default function FinancePage() {
           categories ( name )
         `
                 )
-                .order('date', { ascending: false })
-                .limit(50);
+                .gte('date', startOfMonth.toISOString())
+                .lt('date', endOfMonth.toISOString())
+                .order('date', { ascending: false });
 
             setAccounts(accountsData || []);
             setCategories(categoriesData || []);
@@ -121,11 +165,11 @@ export default function FinancePage() {
         };
 
         void load();
-    }, [month]);
+    }, [monthDate, monthStr]);
 
     const thisMonthTx = useMemo(
-        () => transactions.filter((tx) => tx.date.startsWith(month)),
-        [transactions, month]
+        () => transactions.filter((tx) => tx.date.startsWith(monthStr)),
+        [transactions, monthStr]
     );
 
     const totalIn = thisMonthTx
@@ -179,7 +223,18 @@ export default function FinancePage() {
             return;
         }
 
-        // Reload list after insert
+        // Reload list after insert, scoped to the currently selected month
+        const startOfMonth = new Date(
+            monthDate.getFullYear(),
+            monthDate.getMonth(),
+            1
+        );
+        const endOfMonth = new Date(
+            monthDate.getFullYear(),
+            monthDate.getMonth() + 1,
+            1
+        );
+
         const { data: txData } = await supabase
             .from('transactions')
             .select(
@@ -193,8 +248,9 @@ export default function FinancePage() {
         categories ( name )
       `
             )
-            .order('date', { ascending: false })
-            .limit(50);
+            .gte('date', startOfMonth.toISOString())
+            .lt('date', endOfMonth.toISOString())
+            .order('date', { ascending: false });
 
         const rows = (txData ?? []) as TxRow[];
 
@@ -219,7 +275,7 @@ export default function FinancePage() {
             if (budgetRecord) {
                 // recompute thisMonthTx from newTransactions
                 const updatedThisMonthTx = newTransactions.filter((tx) =>
-                    tx.date.startsWith(month)
+                    tx.date.startsWith(monthStr)
                 );
                 const updatedSpendingByCategory = new Map<string, number>();
                 updatedThisMonthTx.forEach((tx) => {
@@ -384,9 +440,29 @@ export default function FinancePage() {
                     {/* Right: Summary + budgets + recent transactions */}
                     <div className="space-y-4">
                         <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
-                            <h2 className="mb-2 text-sm font-semibold">
-                                This month ({month})
-                            </h2>
+                            <div className="mb-2 flex items-center justify-between">
+                                <button
+                                    type="button"
+                                    onClick={goToPrevMonth}
+                                    className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:bg-slate-800"
+                                >
+                                    ◀
+                                </button>
+                                <div className="text-center">
+                                    <h2 className="text-sm font-semibold">{monthLabel}</h2>
+                                    <p className="text-[10px] text-slate-400">
+                                        {monthStr}
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={goToNextMonth}
+                                    className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:bg-slate-800"
+                                >
+                                    ▶
+                                </button>
+                            </div>
+
                             <div className="grid grid-cols-3 gap-3">
                                 <div>
                                     <div className="text-slate-400">Money in</div>
@@ -446,9 +522,9 @@ export default function FinancePage() {
                                                 <div className="flex justify-between items-center mb-1">
                                                     <span className="font-medium">{name}</span>
                                                     <span className="text-[11px] text-slate-400">
-                            Spent ${spent.toFixed(2)} / $
+                                                        Spent ${spent.toFixed(2)} / $
                                                         {b.amount.toFixed(2)}
-                          </span>
+                                                    </span>
                                                 </div>
                                                 <div className="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
                                                     <div
