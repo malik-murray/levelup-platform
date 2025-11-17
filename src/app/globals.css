@@ -1,26 +1,26 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+    --lu-bg: #000000;
+    --lu-accent: #f4b73f;
+    --lu-text: #ffffff;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+    background-color: var(--lu-bg);
+    color: var(--lu-text);
+}
+
+/* Optional: reusable gold button */
+.btn-gold {
+    background-color: var(--lu-accent);
+    color: #000000;
+    font-weight: 600;
+    border-radius: 9999px;
+    padding: 0.4rem 0.9rem;
+    font-size: 0.75rem;
+}
+
+.btn-gold:hover {
+    background-color: #ffcc5a; /* slightly brighter gold */
 }

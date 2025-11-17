@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
+console.log('FINANCE PAGE LOADED, URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
+
 type Account = {
     id: string;
     name: string;
@@ -59,6 +61,10 @@ export default function FinancePage() {
     const [person, setPerson] = useState<string>('Malik');
     const [note, setNote] = useState<string>('');
 
+    // budget editor state
+    const [budgetCategoryId, setBudgetCategoryId] = useState<string>('');
+    const [budgetAmount, setBudgetAmount] = useState<string>('');
+
     // simple in-app notification text
     const [notification, setNotification] = useState<string | null>(null);
 
@@ -71,9 +77,10 @@ export default function FinancePage() {
     // YYYY-MM string for queries and filtering
     const monthStr = useMemo(
         () =>
-            `${monthDate.getFullYear()}-${String(
-                monthDate.getMonth() + 1
-            ).padStart(2, '0')}`,
+            `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(
+                2,
+                '0'
+            )}`,
         [monthDate]
     );
 
@@ -88,33 +95,71 @@ export default function FinancePage() {
     );
 
     const goToPrevMonth = () => {
-        setMonthDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+        setMonthDate(
+            prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1)
+        );
     };
 
     const goToNextMonth = () => {
-        setMonthDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+        setMonthDate(
+            prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1)
+        );
     };
 
+    // 🔥 Main data load effect
     useEffect(() => {
         const load = async () => {
             setLoading(true);
+            console.log('RUNNING SUPABASE QUERIES...');
 
-            const { data: accountsData } = await supabase
+            // 🔍 DEBUG: raw fetch directly to Supabase REST API
+            try {
+                const rawUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/accounts?select=id,name&limit=1`;
+                console.log('DEBUG RAW FETCH URL:', rawUrl);
+
+                const rawRes = await fetch(rawUrl, {
+                    headers: {
+                        apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string,
+                        Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+                    },
+                });
+
+                const text = await rawRes.text();
+                console.log('DEBUG RAW FETCH STATUS:', rawRes.status);
+                console.log('DEBUG RAW FETCH BODY:', text);
+            } catch (err) {
+                console.error('DEBUG RAW FETCH ERROR:', err);
+            }
+
+            // 1) ACCOUNTS
+            const { data: accountsData, error: accountsError } = await supabase
                 .from('accounts')
                 .select('id, name')
                 .order('name');
 
-            const { data: categoriesData } = await supabase
+            console.log('ACCOUNTS RESULT:', { accountsData, accountsError });
+
+            // 2) CATEGORIES
+            const { data: categoriesData, error: categoriesError } = await supabase
                 .from('categories')
                 .select('id, name, type')
                 .order('name');
 
-            const { data: budgetsData } = await supabase
+            console.log('CATEGORIES RESULT:', { categoriesData, categoriesError });
+
+            // 3) BUDGETS
+            const { data: budgetsData, error: budgetsError } = await supabase
                 .from('category_budgets')
                 .select('id, category_id, month, amount')
                 .eq('month', monthStr);
 
-            // calculate start and end of the selected month for tx query
+            console.log('BUDGETS RESULT:', { budgetsData, budgetsError });
+
+            setAccounts(accountsData ?? []);
+            setCategories(categoriesData ?? []);
+            setBudgets(budgetsData ?? []);
+
+            // 4) TRANSACTIONS scoped to selected month
             const startOfMonth = new Date(
                 monthDate.getFullYear(),
                 monthDate.getMonth(),
@@ -126,7 +171,7 @@ export default function FinancePage() {
                 1
             );
 
-            const { data: txData } = await supabase
+            const { data: txData, error: txError } = await supabase
                 .from('transactions')
                 .select(
                     `
@@ -143,14 +188,12 @@ export default function FinancePage() {
                 .lt('date', endOfMonth.toISOString())
                 .order('date', { ascending: false });
 
-            setAccounts(accountsData || []);
-            setCategories(categoriesData || []);
-            setBudgets(budgetsData || []);
+            console.log('TX RESULT:', { txData, txError });
 
             const rows = (txData ?? []) as TxRow[];
 
             setTransactions(
-                rows.map((tx) => ({
+                rows.map(tx => ({
                     id: tx.id,
                     date: tx.date,
                     amount: Number(tx.amount),
@@ -164,26 +207,29 @@ export default function FinancePage() {
             setLoading(false);
         };
 
-        void load();
+        load().catch(err => {
+            console.error('LOAD() FAILED:', err);
+            setLoading(false);
+        });
     }, [monthDate, monthStr]);
 
     const thisMonthTx = useMemo(
-        () => transactions.filter((tx) => tx.date.startsWith(monthStr)),
+        () => transactions.filter(tx => tx.date.startsWith(monthStr)),
         [transactions, monthStr]
     );
 
     const totalIn = thisMonthTx
-        .filter((tx) => tx.amount > 0)
+        .filter(tx => tx.amount > 0)
         .reduce((sum, tx) => sum + tx.amount, 0);
     const totalOut = thisMonthTx
-        .filter((tx) => tx.amount < 0)
+        .filter(tx => tx.amount < 0)
         .reduce((sum, tx) => sum + tx.amount, 0);
     const net = totalIn + totalOut;
 
     // helper: spending per category for this month (expenses only, as positive number)
     const spendingByCategoryName = useMemo(() => {
         const map = new Map<string, number>();
-        thisMonthTx.forEach((tx) => {
+        thisMonthTx.forEach(tx => {
             if (!tx.category) return;
             if (tx.amount >= 0) return; // only count expenses
             const prev = map.get(tx.category) || 0;
@@ -194,7 +240,7 @@ export default function FinancePage() {
 
     const budgetsByCategoryId = useMemo(() => {
         const map = new Map<string, CategoryBudget>();
-        budgets.forEach((b) => {
+        budgets.forEach(b => {
             map.set(b.category_id, b);
         });
         return map;
@@ -235,7 +281,7 @@ export default function FinancePage() {
             1
         );
 
-        const { data: txData } = await supabase
+        const { data: txData, error: reloadError } = await supabase
             .from('transactions')
             .select(
                 `
@@ -252,9 +298,13 @@ export default function FinancePage() {
             .lt('date', endOfMonth.toISOString())
             .order('date', { ascending: false });
 
+        if (reloadError) {
+            console.error(reloadError);
+        }
+
         const rows = (txData ?? []) as TxRow[];
 
-        const newTransactions: Transaction[] = rows.map((tx) => ({
+        const newTransactions: Transaction[] = rows.map(tx => ({
             id: tx.id,
             date: tx.date,
             amount: Number(tx.amount),
@@ -267,18 +317,18 @@ export default function FinancePage() {
         setTransactions(newTransactions);
 
         // compute notification about remaining budget for this category
-        const selectedCategory = categories.find((c) => c.id === categoryId);
+        const selectedCategory = categories.find(c => c.id === categoryId);
         const selectedCategoryName = selectedCategory?.name ?? null;
 
         if (selectedCategoryName) {
             const budgetRecord = budgetsByCategoryId.get(categoryId);
             if (budgetRecord) {
                 // recompute thisMonthTx from newTransactions
-                const updatedThisMonthTx = newTransactions.filter((tx) =>
+                const updatedThisMonthTx = newTransactions.filter(tx =>
                     tx.date.startsWith(monthStr)
                 );
                 const updatedSpendingByCategory = new Map<string, number>();
-                updatedThisMonthTx.forEach((tx) => {
+                updatedThisMonthTx.forEach(tx => {
                     if (!tx.category) return;
                     if (tx.amount >= 0) return;
                     const prev = updatedSpendingByCategory.get(tx.category) || 0;
@@ -320,6 +370,82 @@ export default function FinancePage() {
         setNote('');
     };
 
+    const handleSaveBudget = async (e: FormEvent) => {
+        e.preventDefault();
+
+        if (!budgetCategoryId) return;
+
+        const numAmount = Number(budgetAmount);
+        if (Number.isNaN(numAmount)) return;
+
+        setNotification(null);
+
+        // Check if a budget already exists for this category + month
+        const { data: existingRows, error: fetchError } = await supabase
+            .from('category_budgets')
+            .select('id')
+            .eq('category_id', budgetCategoryId)
+            .eq('month', monthStr)
+            .limit(1);
+
+        if (fetchError) {
+            console.error(fetchError);
+            setNotification('Error loading existing budget. Check console/logs.');
+            return;
+        }
+
+        if (existingRows && existingRows.length > 0) {
+            // Update existing
+            const id = existingRows[0].id;
+            const { error: updateError } = await supabase
+                .from('category_budgets')
+                .update({ amount: numAmount })
+                .eq('id', id);
+
+            if (updateError) {
+                console.error(updateError);
+                setNotification('Error updating budget. Check console/logs.');
+                return;
+            }
+        } else {
+            // Insert new
+            const { error: insertError } = await supabase
+                .from('category_budgets')
+                .insert({
+                    category_id: budgetCategoryId,
+                    month: monthStr,
+                    amount: numAmount,
+                });
+
+            if (insertError) {
+                console.error(insertError);
+                setNotification('Error creating budget. Check console/logs.');
+                return;
+            }
+        }
+
+        // Reload budgets for this month
+        const { data: budgetsData, error: budgetsError } = await supabase
+            .from('category_budgets')
+            .select('id, category_id, month, amount')
+            .eq('month', monthStr);
+
+        if (budgetsError) {
+            console.error(budgetsError);
+            setNotification('Budget saved, but failed to reload budgets.');
+        } else {
+            setBudgets(budgetsData || []);
+            const catName =
+                categories.find(c => c.id === budgetCategoryId)?.name ||
+                'This category';
+            setNotification(
+                `Budget set for ${catName} in ${monthLabel}: $${numAmount.toFixed(
+                    2
+                )}.`
+            );
+        }
+    };
+
     return (
         <main className="min-h-screen bg-slate-950 text-white">
             <header className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
@@ -331,7 +457,7 @@ export default function FinancePage() {
                 </div>
             </header>
 
-            <section className="px-6 py-4 space-y-4">
+            <section className="space-y-4 px-6 py-4">
                 {notification && (
                     <div className="rounded-md border border-emerald-600 bg-emerald-950 px-4 py-2 text-xs text-emerald-200">
                         {notification}
@@ -352,7 +478,7 @@ export default function FinancePage() {
                                     type="date"
                                     className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
                                     value={date}
-                                    onChange={(e) => setDate(e.target.value)}
+                                    onChange={e => setDate(e.target.value)}
                                 />
                             </div>
 
@@ -361,10 +487,10 @@ export default function FinancePage() {
                                 <select
                                     className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
                                     value={accountId}
-                                    onChange={(e) => setAccountId(e.target.value)}
+                                    onChange={e => setAccountId(e.target.value)}
                                 >
                                     <option value="">Select</option>
-                                    {accounts.map((a) => (
+                                    {accounts.map(a => (
                                         <option key={a.id} value={a.id}>
                                             {a.name}
                                         </option>
@@ -377,10 +503,10 @@ export default function FinancePage() {
                                 <select
                                     className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
                                     value={categoryId}
-                                    onChange={(e) => setCategoryId(e.target.value)}
+                                    onChange={e => setCategoryId(e.target.value)}
                                 >
                                     <option value="">Select</option>
-                                    {categories.map((c) => (
+                                    {categories.map(c => (
                                         <option key={c.id} value={c.id}>
                                             {c.type === 'income' ? '⬆️' : '⬇️'} {c.name}
                                         </option>
@@ -395,7 +521,7 @@ export default function FinancePage() {
                                     step="0.01"
                                     className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
                                     value={amount}
-                                    onChange={(e) => setAmount(e.target.value)}
+                                    onChange={e => setAmount(e.target.value)}
                                 />
                                 <p className="text-[10px] text-slate-500">
                                     Use positive for income, negative for expenses (e.g. -45.23
@@ -408,7 +534,7 @@ export default function FinancePage() {
                                 <select
                                     className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
                                     value={person}
-                                    onChange={(e) => setPerson(e.target.value)}
+                                    onChange={e => setPerson(e.target.value)}
                                 >
                                     <option value="Malik">Malik</option>
                                     <option value="Mikia">Mikia</option>
@@ -423,7 +549,7 @@ export default function FinancePage() {
                                 <input
                                     className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
                                     value={note}
-                                    onChange={(e) => setNote(e.target.value)}
+                                    onChange={e => setNote(e.target.value)}
                                     placeholder="ex. Giant groceries, date night, etc."
                                 />
                             </div>
@@ -439,6 +565,7 @@ export default function FinancePage() {
 
                     {/* Right: Summary + budgets + recent transactions */}
                     <div className="space-y-4">
+                        {/* Month summary + switcher */}
                         <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
                             <div className="mb-2 flex items-center justify-between">
                                 <button
@@ -450,9 +577,7 @@ export default function FinancePage() {
                                 </button>
                                 <div className="text-center">
                                     <h2 className="text-sm font-semibold">{monthLabel}</h2>
-                                    <p className="text-[10px] text-slate-400">
-                                        {monthStr}
-                                    </p>
+                                    <p className="text-[10px] text-slate-400">{monthStr}</p>
                                 </div>
                                 <button
                                     type="button"
@@ -489,25 +614,77 @@ export default function FinancePage() {
                             </div>
                         </div>
 
-                        {/* Budget vs spending per category */}
+                        {/* Budget vs spending per category + budget editor */}
                         <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
                             <h2 className="mb-2 text-sm font-semibold">
                                 Budgets this month
                             </h2>
+
+                            {/* Budget editor */}
+                            <form
+                                onSubmit={handleSaveBudget}
+                                className="mb-3 flex flex-col gap-2 text-[11px] md:flex-row md:items-end"
+                            >
+                                <div className="flex-1 space-y-1">
+                                    <label className="block text-slate-300">Category</label>
+                                    <select
+                                        className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                        value={budgetCategoryId}
+                                        onChange={e => {
+                                            const id = e.target.value;
+                                            setBudgetCategoryId(id);
+
+                                            // prefill budget amount if this category already has a budget
+                                            const existing = budgetsByCategoryId.get(id);
+                                            if (existing) {
+                                                setBudgetAmount(existing.amount.toString());
+                                            } else {
+                                                setBudgetAmount('');
+                                            }
+                                        }}
+                                    >
+                                        <option value="">Select category</option>
+                                        {categories.map(c => (
+                                            <option key={c.id} value={c.id}>
+                                                {c.type === 'income' ? '⬆️' : '⬇️'} {c.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="w-full space-y-1 md:w-32">
+                                    <label className="block text-slate-300">
+                                        Budget amount
+                                    </label>
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                        value={budgetAmount}
+                                        onChange={e => setBudgetAmount(e.target.value)}
+                                        placeholder="0.00"
+                                    />
+                                </div>
+                                <button
+                                    type="submit"
+                                    className="rounded-md bg-emerald-500 px-3 py-2 text-[11px] font-semibold text-black hover:bg-emerald-400"
+                                >
+                                    Save budget
+                                </button>
+                            </form>
+
                             {budgets.length === 0 ? (
                                 <p className="text-slate-400">
-                                    No budgets set yet. You can add rows in{' '}
-                                    <code>category_budgets</code> in Supabase for now.
+                                    No budgets set yet for {monthLabel}. Set one using the
+                                    form above.
                                 </p>
                             ) : (
-                                <div className="space-y-1 max-h-56 overflow-y-auto">
-                                    {budgets.map((b) => {
+                                <div className="max-h-56 space-y-1 overflow-y-auto">
+                                    {budgets.map(b => {
                                         const cat = categories.find(
-                                            (c) => c.id === b.category_id
+                                            c => c.id === b.category_id
                                         );
                                         const name = cat?.name ?? 'Unknown';
-                                        const spent =
-                                            spendingByCategoryName.get(name) || 0;
+                                        const spent = spendingByCategoryName.get(name) || 0;
                                         const remaining = b.amount - spent;
                                         const pct = Math.min(
                                             100,
@@ -519,14 +696,14 @@ export default function FinancePage() {
                                                 key={b.id}
                                                 className="rounded-md border border-slate-800 bg-slate-950 px-3 py-2"
                                             >
-                                                <div className="flex justify-between items-center mb-1">
+                                                <div className="mb-1 flex items-center justify-between">
                                                     <span className="font-medium">{name}</span>
                                                     <span className="text-[11px] text-slate-400">
-                                                        Spent ${spent.toFixed(2)} / $
+                            Spent ${spent.toFixed(2)} / $
                                                         {b.amount.toFixed(2)}
-                                                    </span>
+                          </span>
                                                 </div>
-                                                <div className="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
+                                                <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
                                                     <div
                                                         className={`h-full rounded-full ${
                                                             pct < 80
@@ -548,6 +725,7 @@ export default function FinancePage() {
                             )}
                         </div>
 
+                        {/* Recent transactions */}
                         <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
                             <h2 className="mb-2 text-sm font-semibold">
                                 Recent transactions
@@ -559,8 +737,8 @@ export default function FinancePage() {
                                     No transactions yet. Add your first one on the left.
                                 </p>
                             ) : (
-                                <div className="max-h-72 overflow-y-auto space-y-2">
-                                    {transactions.map((tx) => (
+                                <div className="max-h-72 space-y-2 overflow-y-auto">
+                                    {transactions.map(tx => (
                                         <div
                                             key={tx.id}
                                             className="flex items-center justify-between rounded-md border border-slate-800 bg-slate-950 px-3 py-2"

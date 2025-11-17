@@ -22,41 +22,48 @@ export default function DashboardPage() {
             name: "Habit Tracker",
             href: "/habit",
             description: "Track daily habits, XP, streaks, and life scores.",
+            status: "coming" as const,
         },
         {
             name: "Finance Tracker",
             href: "/finance",
             description: "Visualize your cashflow, savings, and long-term goals.",
+            status: "open" as const,
         },
         {
             name: "Resume Generator",
             href: "/resume",
             description: "Generate job-specific resumes and cover letters in seconds.",
+            status: "coming" as const,
         },
         {
             name: "Emotional Tracker",
             href: "/emotions",
             description: "Log emotions, triggers, and coping strategies.",
+            status: "coming" as const,
         },
         {
             name: "Stock & Crypto Analyzer",
             href: "/markets",
             description: "Monitor portfolios, track watchlists, and analyze moves.",
+            status: "coming" as const,
         },
         {
             name: "Newsfeed Summarizer",
             href: "/newsfeed",
             description: "Turn information overload into short daily briefs.",
+            status: "coming" as const,
         },
         {
             name: "Reflection to Lesson",
             href: "/reflection",
             description: "Convert journal entries into lessons and action steps.",
+            status: "coming" as const,
         },
     ];
 
     return (
-        <main className="min-h-screen bg-slate-950 text-white">
+        <main className="min-h-screen bg-black text-white">
             <header className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
                 <div>
                     <h1 className="text-xl font-semibold">LevelUpSolutions Dashboard</h1>
@@ -92,21 +99,23 @@ export default function DashboardPage() {
                 <div className="grid gap-4 md:grid-cols-3">
                     {apps.map((app) => (
                         <div
-                            key={app.href}
-                            className="rounded-lg border border-slate-800 bg-slate-900 p-4 flex flex-col justify-between"
+                            key={app.name}
+                            className="rounded-xl border border-[#f4b73f]/25 bg-[#050505] p-4 shadow-lg shadow-black/60"
                         >
-                            <div>
-                                <h3 className="text-sm font-semibold mb-1">{app.name}</h3>
-                                <p className="text-xs text-slate-400 mb-3">{app.description}</p>
-                            </div>
-                            <div>
-                                <Link
-                                    href={app.href}
-                                    className="inline-block text-xs rounded-md bg-emerald-500 px-3 py-1 font-semibold text-black hover:bg-emerald-400"
-                                >
+                            <h2 className="font-semibold mb-1 text-white">{app.name}</h2>
+                            <p className="text-xs text-neutral-400 mb-3">
+                                {app.description}
+                            </p>
+
+                            {app.status === "open" ? (
+                                <Link href={app.href} className="btn-gold">
                                     Open
                                 </Link>
-                            </div>
+                            ) : (
+                                <span className="inline-block rounded-full border border-neutral-700 px-3 py-1 text-[11px] text-neutral-400">
+                  Coming soon
+                </span>
+                            )}
                         </div>
                     ))}
                 </div>
