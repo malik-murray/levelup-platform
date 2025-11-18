@@ -22,8 +22,12 @@ type Transaction = {
     amount: number;
     person: string;
     note: string | null;
+    // display values
     account: string | null;
     category: string | null;
+    // IDs for CRUD
+    accountId: string | null;
+    categoryId: string | null;
 };
 
 type CategoryBudget = {
@@ -39,9 +43,17 @@ type TxRow = {
     amount: number;
     person: string;
     note: string | null;
-    // Supabase returns these relations as arrays
-    accounts: { name: string | null }[] | null;
-    categories: { name: string | null }[] | null;
+    account_id: string | null;
+    category_id: string | null;
+    // Supabase might return a single object or an array
+    accounts:
+        | { id: string | null; name: string | null }
+        | { id: string | null; name: string | null }[]
+        | null;
+    categories:
+        | { id: string | null; name: string | null }
+        | { id: string | null; name: string | null }[]
+        | null;
 };
 
 export default function FinancePage() {
@@ -60,6 +72,9 @@ export default function FinancePage() {
     const [amount, setAmount] = useState<string>('0');
     const [person, setPerson] = useState<string>('Malik');
     const [note, setNote] = useState<string>('');
+
+    // which transaction are we editing? null = adding new
+    const [editingId, setEditingId] = useState<string | null>(null);
 
     // budget editor state
     const [budgetCategoryId, setBudgetCategoryId] = useState<string>('');
@@ -105,6 +120,108 @@ export default function FinancePage() {
             prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1)
         );
     };
+
+    // helper to load transactions for the currently selected month
+    const reloadTransactionsForMonth = async (): Promise<Transaction[]> => {
+        const startOfMonth = new Date(
+            monthDate.getFullYear(),
+            monthDate.getMonth(),
+            1
+        );
+        const endOfMonth = new Date(
+            monthDate.getFullYear(),
+            monthDate.getMonth() + 1,
+            1
+        );
+
+// ✅ Only keep the date part for a DATE column
+        const startStr = startOfMonth.toISOString().slice(0, 10); // "YYYY-MM-DD"
+        const endStr = endOfMonth.toISOString().slice(0, 10);     // "YYYY-MM-DD"
+
+        const { data: txData, error: txError } = await supabase
+            .from('transactions')
+            .select(`
+        id,
+        date,
+        amount,
+        person,
+        note,
+        account_id,
+        category_id,
+        accounts ( id, name ),
+        categories ( id, name )
+    `)
+            .gte('date', startStr)
+            .lt('date', endStr)
+            .order('date', { ascending: false });
+
+
+        console.log('TX RESULT:', { txData, txError });
+
+        if (txError) {
+            console.error(txError);
+            return [];
+        }
+
+        const rows = (txData ?? []) as TxRow[];
+        const getRelName = (
+            rel:
+                | { id: string | null; name: string | null }
+                | { id: string | null; name: string | null }[]
+                | null
+        ) => {
+            if (!rel) return null;
+
+            // If it's an array → use first element
+            if (Array.isArray(rel)) {
+                return rel.length > 0 ? rel[0].name ?? null : null;
+            }
+
+            // If it's a single object
+            return rel.name ?? null;
+        };
+
+        const mapped: Transaction[] = rows.map(tx => ({
+            id: tx.id,
+            date: tx.date,
+            amount: Number(tx.amount),
+            person: tx.person,
+            note: tx.note,
+            account: getRelName(tx.accounts),
+            category: getRelName(tx.categories),
+            accountId: tx.account_id,
+            categoryId: tx.category_id,
+        }));
+
+
+        setTransactions(mapped);
+        return mapped;
+    };
+    useEffect(() => {
+        console.log('FINANCE PAGE EFFECT RUNNING');
+
+        const loadDebug = async () => {
+            console.log('FINANCE: starting debug Supabase queries');
+
+            const { data: accountsData, error: accountsError } = await supabase
+                .from('accounts')
+                .select('id, name')
+                .order('name');
+
+            console.log('FINANCE DEBUG ACCOUNTS:', { accountsData, accountsError });
+
+            const { data: categoriesData, error: categoriesError } = await supabase
+                .from('categories')
+                .select('id, name, type')
+                .order('name');
+
+            console.log('FINANCE DEBUG CATEGORIES:', { categoriesData, categoriesError });
+        };
+
+        loadDebug().catch((err) => {
+            console.error('FINANCE DEBUG LOAD FAILED:', err);
+        });
+    }, []);
 
     // 🔥 Main data load effect
     useEffect(() => {
@@ -160,49 +277,7 @@ export default function FinancePage() {
             setBudgets(budgetsData ?? []);
 
             // 4) TRANSACTIONS scoped to selected month
-            const startOfMonth = new Date(
-                monthDate.getFullYear(),
-                monthDate.getMonth(),
-                1
-            );
-            const endOfMonth = new Date(
-                monthDate.getFullYear(),
-                monthDate.getMonth() + 1,
-                1
-            );
-
-            const { data: txData, error: txError } = await supabase
-                .from('transactions')
-                .select(
-                    `
-          id,
-          date,
-          amount,
-          person,
-          note,
-          accounts ( name ),
-          categories ( name )
-        `
-                )
-                .gte('date', startOfMonth.toISOString())
-                .lt('date', endOfMonth.toISOString())
-                .order('date', { ascending: false });
-
-            console.log('TX RESULT:', { txData, txError });
-
-            const rows = (txData ?? []) as TxRow[];
-
-            setTransactions(
-                rows.map(tx => ({
-                    id: tx.id,
-                    date: tx.date,
-                    amount: Number(tx.amount),
-                    person: tx.person,
-                    note: tx.note,
-                    account: tx.accounts?.[0]?.name ?? null,
-                    category: tx.categories?.[0]?.name ?? null,
-                }))
-            );
+            await reloadTransactionsForMonth();
 
             setLoading(false);
         };
@@ -225,6 +300,9 @@ export default function FinancePage() {
         .filter(tx => tx.amount < 0)
         .reduce((sum, tx) => sum + tx.amount, 0);
     const net = totalIn + totalOut;
+    const totalIncome = totalIn;
+    const totalExpenses = Math.abs(totalOut);
+    const netWorth = totalIncome - totalExpenses; // temp net worth = monthly net
 
     // helper: spending per category for this month (expenses only, as positive number)
     const spendingByCategoryName = useMemo(() => {
@@ -246,7 +324,17 @@ export default function FinancePage() {
         return map;
     }, [budgets]);
 
-    const handleAddTransaction = async (e: FormEvent) => {
+    const resetFormToDefault = () => {
+        setDate(new Date().toISOString().slice(0, 10));
+        setAccountId('');
+        setCategoryId('');
+        setAmount('0');
+        setPerson('Malik');
+        setNote('');
+        setEditingId(null);
+    };
+
+    const handleAddOrUpdateTransaction = async (e: FormEvent) => {
         e.preventDefault();
 
         const numAmount = Number(amount);
@@ -254,67 +342,45 @@ export default function FinancePage() {
 
         setNotification(null);
 
-        const { error } = await supabase.from('transactions').insert({
-            date,
-            account_id: accountId,
-            category_id: categoryId,
-            amount: numAmount,
-            person,
-            note: note || null,
-        });
+        if (editingId) {
+            // UPDATE existing transaction
+            const { error } = await supabase
+                .from('transactions')
+                .update({
+                    date,
+                    account_id: accountId,
+                    category_id: categoryId,
+                    amount: numAmount,
+                    person,
+                    note: note || null,
+                })
+                .eq('id', editingId);
 
-        if (error) {
-            console.error(error);
-            setNotification('Error saving transaction. Check console/logs.');
-            return;
+            if (error) {
+                console.error(error);
+                setNotification('Error updating transaction. Check console/logs.');
+                return;
+            }
+        } else {
+            // INSERT new transaction
+            const { error } = await supabase.from('transactions').insert({
+                date,
+                account_id: accountId,
+                category_id: categoryId,
+                amount: numAmount,
+                person,
+                note: note || null,
+            });
+
+            if (error) {
+                console.error(error);
+                setNotification('Error saving transaction. Check console/logs.');
+                return;
+            }
         }
 
-        // Reload list after insert, scoped to the currently selected month
-        const startOfMonth = new Date(
-            monthDate.getFullYear(),
-            monthDate.getMonth(),
-            1
-        );
-        const endOfMonth = new Date(
-            monthDate.getFullYear(),
-            monthDate.getMonth() + 1,
-            1
-        );
-
-        const { data: txData, error: reloadError } = await supabase
-            .from('transactions')
-            .select(
-                `
-        id,
-        date,
-        amount,
-        person,
-        note,
-        accounts ( name ),
-        categories ( name )
-      `
-            )
-            .gte('date', startOfMonth.toISOString())
-            .lt('date', endOfMonth.toISOString())
-            .order('date', { ascending: false });
-
-        if (reloadError) {
-            console.error(reloadError);
-        }
-
-        const rows = (txData ?? []) as TxRow[];
-
-        const newTransactions: Transaction[] = rows.map(tx => ({
-            id: tx.id,
-            date: tx.date,
-            amount: Number(tx.amount),
-            person: tx.person,
-            note: tx.note,
-            account: tx.accounts?.[0]?.name ?? null,
-            category: tx.categories?.[0]?.name ?? null,
-        }));
-
-        setTransactions(newTransactions);
+        // Reload list after insert/update, scoped to the currently selected month
+        const newTransactions = await reloadTransactionsForMonth();
 
         // compute notification about remaining budget for this category
         const selectedCategory = categories.find(c => c.id === categoryId);
@@ -323,7 +389,6 @@ export default function FinancePage() {
         if (selectedCategoryName) {
             const budgetRecord = budgetsByCategoryId.get(categoryId);
             if (budgetRecord) {
-                // recompute thisMonthTx from newTransactions
                 const updatedThisMonthTx = newTransactions.filter(tx =>
                     tx.date.startsWith(monthStr)
                 );
@@ -346,7 +411,7 @@ export default function FinancePage() {
                 const remainingStr = remaining.toFixed(2);
 
                 setNotification(
-                    `You just logged ${
+                    `You just ${editingId ? 'updated' : 'logged'} ${
                         numAmount < 0 ? '-' : '+'
                     }$${Math.abs(numAmount).toFixed(
                         2
@@ -356,7 +421,7 @@ export default function FinancePage() {
                 );
             } else {
                 setNotification(
-                    `You just logged ${
+                    `You just ${editingId ? 'updated' : 'logged'} ${
                         numAmount < 0 ? '-' : '+'
                     }$${Math.abs(numAmount).toFixed(
                         2
@@ -365,9 +430,8 @@ export default function FinancePage() {
             }
         }
 
-        // Reset amount + note
-        setAmount('0');
-        setNote('');
+        // Reset form state after save/update
+        resetFormToDefault();
     };
 
     const handleSaveBudget = async (e: FormEvent) => {
@@ -446,31 +510,165 @@ export default function FinancePage() {
         }
     };
 
-    return (
-        <main className="min-h-screen bg-slate-950 text-white">
-            <header className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
-                <div>
-                    <h1 className="text-xl font-semibold">LevelUp Financial</h1>
-                    <p className="text-xs text-slate-400">
-                        Shared money dashboard for you and your family.
-                    </p>
-                </div>
-            </header>
+    // ---- Transaction row CRUD handlers ----
 
+    const handleEditTransaction = (tx: Transaction) => {
+        setEditingId(tx.id);
+        // date input expects YYYY-MM-DD
+        setDate(tx.date.slice(0, 10));
+        setAmount(tx.amount.toString());
+        setPerson(tx.person);
+        setNote(tx.note ?? '');
+
+        // Prefer stored IDs; fall back to matching by name
+        if (tx.accountId) {
+            setAccountId(tx.accountId);
+        } else if (tx.account) {
+            const acc = accounts.find(a => a.name === tx.account);
+            setAccountId(acc?.id ?? '');
+        } else {
+            setAccountId('');
+        }
+
+        if (tx.categoryId) {
+            setCategoryId(tx.categoryId);
+        } else if (tx.category) {
+            const cat = categories.find(c => c.name === tx.category);
+            setCategoryId(cat?.id ?? '');
+        } else {
+            setCategoryId('');
+        }
+    };
+
+    const handleCancelEdit = () => {
+        resetFormToDefault();
+    };
+
+    const handleDeleteTransaction = async (id: string) => {
+        setNotification(null);
+
+        // optional confirm
+        if (typeof window !== 'undefined') {
+            const ok = window.confirm('Delete this transaction?');
+            if (!ok) return;
+        }
+
+        const { error } = await supabase
+            .from('transactions')
+            .delete()
+            .eq('id', id);
+
+        if (error) {
+            console.error(error);
+            setNotification('Error deleting transaction. Check console/logs.');
+            return;
+        }
+
+        await reloadTransactionsForMonth();
+
+        // if we were editing this one, reset the form
+        if (editingId === id) {
+            resetFormToDefault();
+        }
+
+        setNotification('Transaction deleted.');
+    };
+
+    const handleDuplicateTransaction = async (tx: Transaction) => {
+        setNotification(null);
+
+        // resolve account/category IDs (use stored ids, else match by name)
+        let accId: string | null = tx.accountId;
+        if (!accId && tx.account) {
+            const acc = accounts.find(a => a.name === tx.account);
+            accId = acc?.id ?? null;
+        }
+
+        let catId: string | null = tx.categoryId;
+        if (!catId && tx.category) {
+            const cat = categories.find(c => c.name === tx.category);
+            catId = cat?.id ?? null;
+        }
+
+        if (!accId || !catId) {
+            setNotification(
+                'Cannot duplicate this transaction: missing account or category.'
+            );
+            return;
+        }
+
+        const { error } = await supabase.from('transactions').insert({
+            // keep same date; ensure YYYY-MM-DD format
+            date: tx.date.slice(0, 10),
+            account_id: accId,
+            category_id: catId,
+            amount: tx.amount,
+            person: tx.person,
+            note: tx.note,
+        });
+
+        if (error) {
+            console.error(error);
+            setNotification('Error duplicating transaction. Check console/logs.');
+            return;
+        }
+
+        await reloadTransactionsForMonth();
+        setNotification('Transaction duplicated.');
+    };
+
+    return (
             <section className="space-y-4 px-6 py-4">
                 {notification && (
                     <div className="rounded-md border border-emerald-600 bg-emerald-950 px-4 py-2 text-xs text-emerald-200">
                         {notification}
                     </div>
                 )}
+                {/* 🔹 NEW: Dashboard Summary */}
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+                    {/* Net Worth */}
+                    <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
+                        <p className="text-xs uppercase text-slate-400">Net Worth</p>
+                        <p className="text-2xl font-semibold text-white">${netWorth}</p>
+                    </div>
+
+                    {/* Income */}
+                    <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
+                        <p className="text-xs uppercase text-slate-400">Income</p>
+                        <p className="text-2xl font-semibold text-green-400">${totalIncome}</p>
+                    </div>
+
+                    {/* Expenses */}
+                    <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
+                        <p className="text-xs uppercase text-slate-400">Expenses</p>
+                        <p className="text-2xl font-semibold text-red-400">${totalExpenses}</p>
+                    </div>
+
+                    {/* Cashflow */}
+                    <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
+                        <p className="text-xs uppercase text-slate-400">Cashflow</p>
+                        <p className={`text-2xl font-semibold ${net >= 0 ? "text-green-400" : "text-red-400"}`}>
+                            ${net}
+                        </p>
+                    </div>
+                </div>
 
                 <div className="grid gap-6 md:grid-cols-[2fr,3fr]">
-                    {/* Left: Add transaction form */}
+                    {/* Left: Add / Edit transaction form */}
                     <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-                        <h2 className="mb-3 text-sm font-semibold">Add transaction</h2>
+                        <div className="mb-1 flex items-center justify-between">
+                            <h2 className="text-sm font-semibold">
+                                {editingId ? 'Edit transaction' : 'Add transaction'}
+                            </h2>
+                            {editingId && (
+                                <span className="text-[10px] text-slate-400">
+                                    Editing existing transaction
+                                </span>
+                            )}
+                        </div>
                         <form
                             className="space-y-3 text-xs"
-                            onSubmit={handleAddTransaction}
+                            onSubmit={handleAddOrUpdateTransaction}
                         >
                             <div className="space-y-1">
                                 <label className="block text-slate-300">Date</label>
@@ -554,12 +752,23 @@ export default function FinancePage() {
                                 />
                             </div>
 
-                            <button
-                                type="submit"
-                                className="mt-2 w-full rounded-md bg-emerald-500 py-2 text-xs font-semibold text-black hover:bg-emerald-400"
-                            >
-                                Save transaction
-                            </button>
+                            <div className="mt-2 flex gap-2">
+                                <button
+                                    type="submit"
+                                    className="w-full rounded-md bg-emerald-500 py-2 text-xs font-semibold text-black hover:bg-emerald-400"
+                                >
+                                    {editingId ? 'Update transaction' : 'Save transaction'}
+                                </button>
+                                {editingId && (
+                                    <button
+                                        type="button"
+                                        onClick={handleCancelEdit}
+                                        className="w-full rounded-md border border-slate-600 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
+                                    >
+                                        Cancel edit
+                                    </button>
+                                )}
+                            </div>
                         </form>
                     </div>
 
@@ -614,116 +823,6 @@ export default function FinancePage() {
                             </div>
                         </div>
 
-                        {/* Budget vs spending per category + budget editor */}
-                        <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
-                            <h2 className="mb-2 text-sm font-semibold">
-                                Budgets this month
-                            </h2>
-
-                            {/* Budget editor */}
-                            <form
-                                onSubmit={handleSaveBudget}
-                                className="mb-3 flex flex-col gap-2 text-[11px] md:flex-row md:items-end"
-                            >
-                                <div className="flex-1 space-y-1">
-                                    <label className="block text-slate-300">Category</label>
-                                    <select
-                                        className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
-                                        value={budgetCategoryId}
-                                        onChange={e => {
-                                            const id = e.target.value;
-                                            setBudgetCategoryId(id);
-
-                                            // prefill budget amount if this category already has a budget
-                                            const existing = budgetsByCategoryId.get(id);
-                                            if (existing) {
-                                                setBudgetAmount(existing.amount.toString());
-                                            } else {
-                                                setBudgetAmount('');
-                                            }
-                                        }}
-                                    >
-                                        <option value="">Select category</option>
-                                        {categories.map(c => (
-                                            <option key={c.id} value={c.id}>
-                                                {c.type === 'income' ? '⬆️' : '⬇️'} {c.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div className="w-full space-y-1 md:w-32">
-                                    <label className="block text-slate-300">
-                                        Budget amount
-                                    </label>
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
-                                        value={budgetAmount}
-                                        onChange={e => setBudgetAmount(e.target.value)}
-                                        placeholder="0.00"
-                                    />
-                                </div>
-                                <button
-                                    type="submit"
-                                    className="rounded-md bg-emerald-500 px-3 py-2 text-[11px] font-semibold text-black hover:bg-emerald-400"
-                                >
-                                    Save budget
-                                </button>
-                            </form>
-
-                            {budgets.length === 0 ? (
-                                <p className="text-slate-400">
-                                    No budgets set yet for {monthLabel}. Set one using the
-                                    form above.
-                                </p>
-                            ) : (
-                                <div className="max-h-56 space-y-1 overflow-y-auto">
-                                    {budgets.map(b => {
-                                        const cat = categories.find(
-                                            c => c.id === b.category_id
-                                        );
-                                        const name = cat?.name ?? 'Unknown';
-                                        const spent = spendingByCategoryName.get(name) || 0;
-                                        const remaining = b.amount - spent;
-                                        const pct = Math.min(
-                                            100,
-                                            Math.max(0, (spent / b.amount) * 100)
-                                        );
-
-                                        return (
-                                            <div
-                                                key={b.id}
-                                                className="rounded-md border border-slate-800 bg-slate-950 px-3 py-2"
-                                            >
-                                                <div className="mb-1 flex items-center justify-between">
-                                                    <span className="font-medium">{name}</span>
-                                                    <span className="text-[11px] text-slate-400">
-                            Spent ${spent.toFixed(2)} / $
-                                                        {b.amount.toFixed(2)}
-                          </span>
-                                                </div>
-                                                <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
-                                                    <div
-                                                        className={`h-full rounded-full ${
-                                                            pct < 80
-                                                                ? 'bg-emerald-500'
-                                                                : pct < 100
-                                                                    ? 'bg-yellow-400'
-                                                                    : 'bg-red-500'
-                                                        }`}
-                                                        style={{ width: `${pct}%` }}
-                                                    />
-                                                </div>
-                                                <div className="mt-1 text-[11px] text-slate-400">
-                                                    Remaining: ${remaining.toFixed(2)}
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </div>
 
                         {/* Recent transactions */}
                         <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
@@ -738,7 +837,7 @@ export default function FinancePage() {
                                 </p>
                             ) : (
                                 <div className="max-h-72 space-y-2 overflow-y-auto">
-                                    {transactions.map(tx => (
+                                    {transactions.slice(0, 5).map(tx => (
                                         <div
                                             key={tx.id}
                                             className="flex items-center justify-between rounded-md border border-slate-800 bg-slate-950 px-3 py-2"
@@ -753,15 +852,46 @@ export default function FinancePage() {
                                                     {tx.note ? ` • ${tx.note}` : ''}
                                                 </div>
                                             </div>
-                                            <div
-                                                className={`text-xs font-semibold ${
-                                                    tx.amount >= 0
-                                                        ? 'text-emerald-400'
-                                                        : 'text-red-400'
-                                                }`}
-                                            >
-                                                {tx.amount >= 0 ? '+' : '-'}$
-                                                {Math.abs(tx.amount).toFixed(2)}
+                                            <div className="flex flex-col items-end gap-1">
+                                                <div
+                                                    className={`text-xs font-semibold ${
+                                                        tx.amount >= 0
+                                                            ? 'text-emerald-400'
+                                                            : 'text-red-400'
+                                                    }`}
+                                                >
+                                                    {tx.amount >= 0 ? '+' : '-'}$
+                                                    {Math.abs(tx.amount).toFixed(2)}
+                                                </div>
+                                                <div className="flex gap-2 text-[10px] text-slate-400">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            handleEditTransaction(tx)
+                                                        }
+                                                        className="hover:text-emerald-300"
+                                                    >
+                                                        Edit
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            handleDuplicateTransaction(tx)
+                                                        }
+                                                        className="hover:text-sky-300"
+                                                    >
+                                                        Duplicate
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            handleDeleteTransaction(tx.id)
+                                                        }
+                                                        className="hover:text-red-400"
+                                                    >
+                                                        Delete
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                     ))}
@@ -771,6 +901,5 @@ export default function FinancePage() {
                     </div>
                 </div>
             </section>
-        </main>
     );
 }
