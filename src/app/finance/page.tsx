@@ -134,9 +134,9 @@ export default function FinancePage() {
             1
         );
 
-// ✅ Only keep the date part for a DATE column
+        // ✅ Only keep the date part for a DATE column
         const startStr = startOfMonth.toISOString().slice(0, 10); // "YYYY-MM-DD"
-        const endStr = endOfMonth.toISOString().slice(0, 10);     // "YYYY-MM-DD"
+        const endStr = endOfMonth.toISOString().slice(0, 10); // "YYYY-MM-DD"
 
         const { data: txData, error: txError } = await supabase
             .from('transactions')
@@ -154,7 +154,6 @@ export default function FinancePage() {
             .gte('date', startStr)
             .lt('date', endStr)
             .order('date', { ascending: false });
-
 
         console.log('TX RESULT:', { txData, txError });
 
@@ -193,10 +192,10 @@ export default function FinancePage() {
             categoryId: tx.category_id,
         }));
 
-
         setTransactions(mapped);
         return mapped;
     };
+
     useEffect(() => {
         console.log('FINANCE PAGE EFFECT RUNNING');
 
@@ -215,10 +214,13 @@ export default function FinancePage() {
                 .select('id, name, type')
                 .order('name');
 
-            console.log('FINANCE DEBUG CATEGORIES:', { categoriesData, categoriesError });
+            console.log('FINANCE DEBUG CATEGORIES:', {
+                categoriesData,
+                categoriesError,
+            });
         };
 
-        loadDebug().catch((err) => {
+        loadDebug().catch(err => {
             console.error('FINANCE DEBUG LOAD FAILED:', err);
         });
     }, []);
@@ -618,288 +620,297 @@ export default function FinancePage() {
     };
 
     return (
-            <section className="space-y-4 px-6 py-4">
-                {notification && (
-                    <div className="rounded-md border border-emerald-600 bg-emerald-950 px-4 py-2 text-xs text-emerald-200">
-                        {notification}
-                    </div>
-                )}
-                {/* 🔹 NEW: Dashboard Summary */}
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-                    {/* Net Worth */}
-                    <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
-                        <p className="text-xs uppercase text-slate-400">Net Worth</p>
-                        <p className="text-2xl font-semibold text-white">${netWorth}</p>
-                    </div>
-
-                    {/* Income */}
-                    <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
-                        <p className="text-xs uppercase text-slate-400">Income</p>
-                        <p className="text-2xl font-semibold text-green-400">${totalIncome}</p>
-                    </div>
-
-                    {/* Expenses */}
-                    <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
-                        <p className="text-xs uppercase text-slate-400">Expenses</p>
-                        <p className="text-2xl font-semibold text-red-400">${totalExpenses}</p>
-                    </div>
-
-                    {/* Cashflow */}
-                    <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
-                        <p className="text-xs uppercase text-slate-400">Cashflow</p>
-                        <p className={`text-2xl font-semibold ${net >= 0 ? "text-green-400" : "text-red-400"}`}>
-                            ${net}
-                        </p>
-                    </div>
+        <section className="space-y-4 px-6 py-4">
+            {notification && (
+                <div className="rounded-md border border-amber-500 bg-amber-950 px-4 py-2 text-xs text-amber-100">
+                    {notification}
+                </div>
+            )}
+            {/* 🔹 NEW: Dashboard Summary */}
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+                {/* Net Worth */}
+                <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
+                    <p className="text-xs uppercase text-slate-400">Net Worth</p>
+                    <p className="text-2xl font-semibold text-amber-400">
+                        ${netWorth}
+                    </p>
                 </div>
 
-                <div className="grid gap-6 md:grid-cols-[2fr,3fr]">
-                    {/* Left: Add / Edit transaction form */}
-                    <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-                        <div className="mb-1 flex items-center justify-between">
-                            <h2 className="text-sm font-semibold">
-                                {editingId ? 'Edit transaction' : 'Add transaction'}
-                            </h2>
+                {/* Income */}
+                <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
+                    <p className="text-xs uppercase text-slate-400">Income</p>
+                    <p className="text-2xl font-semibold text-amber-400">
+                        ${totalIncome}
+                    </p>
+                </div>
+
+                {/* Expenses */}
+                <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
+                    <p className="text-xs uppercase text-slate-400">Expenses</p>
+                    <p className="text-2xl font-semibold text-red-400">
+                        ${totalExpenses}
+                    </p>
+                </div>
+
+                {/* Cashflow */}
+                <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
+                    <p className="text-xs uppercase text-slate-400">Cashflow</p>
+                    <p
+                        className={`text-2xl font-semibold ${
+                            net >= 0 ? 'text-amber-400' : 'text-red-400'
+                        }`}
+                    >
+                        ${net}
+                    </p>
+                </div>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-[2fr,3fr]">
+                {/* Left: Add / Edit transaction form */}
+                <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+                    <div className="mb-1 flex items-center justify-between">
+                        <h2 className="text-sm font-semibold">
+                            {editingId ? 'Edit transaction' : 'Add transaction'}
+                        </h2>
+                        {editingId && (
+                            <span className="text-[10px] text-slate-400">
+                                Editing existing transaction
+                            </span>
+                        )}
+                    </div>
+                    <form
+                        className="space-y-3 text-xs"
+                        onSubmit={handleAddOrUpdateTransaction}
+                    >
+                        <div className="space-y-1">
+                            <label className="block text-slate-300">Date</label>
+                            <input
+                                type="date"
+                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                value={date}
+                                onChange={e => setDate(e.target.value)}
+                            />
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="block text-slate-300">Account</label>
+                            <select
+                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                value={accountId}
+                                onChange={e => setAccountId(e.target.value)}
+                            >
+                                <option value="">Select</option>
+                                {accounts.map(a => (
+                                    <option key={a.id} value={a.id}>
+                                        {a.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="block text-slate-300">Category</label>
+                            <select
+                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                value={categoryId}
+                                onChange={e => setCategoryId(e.target.value)}
+                            >
+                                <option value="">Select</option>
+                                {categories.map(c => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.type === 'income' ? '⬆️' : '⬇️'} {c.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="block text-slate-300">Amount</label>
+                            <input
+                                type="number"
+                                step="0.01"
+                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                value={amount}
+                                onChange={e => setAmount(e.target.value)}
+                            />
+                            <p className="text-[10px] text-slate-500">
+                                Use positive for income, negative for expenses (e.g. -45.23
+                                for groceries).
+                            </p>
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="block text-slate-300">Person</label>
+                            <select
+                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                value={person}
+                                onChange={e => setPerson(e.target.value)}
+                            >
+                                <option value="Malik">Malik</option>
+                                <option value="Mikia">Mikia</option>
+                                <option value="Both">Both</option>
+                            </select>
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="block text-slate-300">
+                                Note (optional)
+                            </label>
+                            <input
+                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                value={note}
+                                onChange={e => setNote(e.target.value)}
+                                placeholder="ex. Giant groceries, date night, etc."
+                            />
+                        </div>
+
+                        <div className="mt-2 flex gap-2">
+                            <button
+                                type="submit"
+                                className="w-full rounded-md bg-amber-400 py-2 text-xs font-semibold text-black hover:bg-amber-300"
+                            >
+                                {editingId ? 'Update transaction' : 'Save transaction'}
+                            </button>
                             {editingId && (
-                                <span className="text-[10px] text-slate-400">
-                                    Editing existing transaction
-                                </span>
+                                <button
+                                    type="button"
+                                    onClick={handleCancelEdit}
+                                    className="w-full rounded-md border border-slate-600 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
+                                >
+                                    Cancel edit
+                                </button>
                             )}
                         </div>
-                        <form
-                            className="space-y-3 text-xs"
-                            onSubmit={handleAddOrUpdateTransaction}
-                        >
-                            <div className="space-y-1">
-                                <label className="block text-slate-300">Date</label>
-                                <input
-                                    type="date"
-                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
-                                    value={date}
-                                    onChange={e => setDate(e.target.value)}
-                                />
-                            </div>
+                    </form>
+                </div>
 
-                            <div className="space-y-1">
-                                <label className="block text-slate-300">Account</label>
-                                <select
-                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
-                                    value={accountId}
-                                    onChange={e => setAccountId(e.target.value)}
-                                >
-                                    <option value="">Select</option>
-                                    {accounts.map(a => (
-                                        <option key={a.id} value={a.id}>
-                                            {a.name}
-                                        </option>
-                                    ))}
-                                </select>
+                {/* Right: Summary + budgets + recent transactions */}
+                <div className="space-y-4">
+                    {/* Month summary + switcher */}
+                    <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
+                        <div className="mb-2 flex items-center justify-between">
+                            <button
+                                type="button"
+                                onClick={goToPrevMonth}
+                                className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:bg-slate-800"
+                            >
+                                ◀
+                            </button>
+                            <div className="text-center">
+                                <h2 className="text-sm font-semibold">{monthLabel}</h2>
+                                <p className="text-[10px] text-slate-400">{monthStr}</p>
                             </div>
+                            <button
+                                type="button"
+                                onClick={goToNextMonth}
+                                className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:bg-slate-800"
+                            >
+                                ▶
+                            </button>
+                        </div>
 
-                            <div className="space-y-1">
-                                <label className="block text-slate-300">Category</label>
-                                <select
-                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
-                                    value={categoryId}
-                                    onChange={e => setCategoryId(e.target.value)}
-                                >
-                                    <option value="">Select</option>
-                                    {categories.map(c => (
-                                        <option key={c.id} value={c.id}>
-                                            {c.type === 'income' ? '⬆️' : '⬇️'} {c.name}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div className="space-y-1">
-                                <label className="block text-slate-300">Amount</label>
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
-                                    value={amount}
-                                    onChange={e => setAmount(e.target.value)}
-                                />
-                                <p className="text-[10px] text-slate-500">
-                                    Use positive for income, negative for expenses (e.g. -45.23
-                                    for groceries).
-                                </p>
-                            </div>
-
-                            <div className="space-y-1">
-                                <label className="block text-slate-300">Person</label>
-                                <select
-                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
-                                    value={person}
-                                    onChange={e => setPerson(e.target.value)}
-                                >
-                                    <option value="Malik">Malik</option>
-                                    <option value="Mikia">Mikia</option>
-                                    <option value="Both">Both</option>
-                                </select>
-                            </div>
-
-                            <div className="space-y-1">
-                                <label className="block text-slate-300">
-                                    Note (optional)
-                                </label>
-                                <input
-                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
-                                    value={note}
-                                    onChange={e => setNote(e.target.value)}
-                                    placeholder="ex. Giant groceries, date night, etc."
-                                />
-                            </div>
-
-                            <div className="mt-2 flex gap-2">
-                                <button
-                                    type="submit"
-                                    className="w-full rounded-md bg-emerald-500 py-2 text-xs font-semibold text-black hover:bg-emerald-400"
-                                >
-                                    {editingId ? 'Update transaction' : 'Save transaction'}
-                                </button>
-                                {editingId && (
-                                    <button
-                                        type="button"
-                                        onClick={handleCancelEdit}
-                                        className="w-full rounded-md border border-slate-600 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
-                                    >
-                                        Cancel edit
-                                    </button>
-                                )}
-                            </div>
-                        </form>
-                    </div>
-
-                    {/* Right: Summary + budgets + recent transactions */}
-                    <div className="space-y-4">
-                        {/* Month summary + switcher */}
-                        <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
-                            <div className="mb-2 flex items-center justify-between">
-                                <button
-                                    type="button"
-                                    onClick={goToPrevMonth}
-                                    className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:bg-slate-800"
-                                >
-                                    ◀
-                                </button>
-                                <div className="text-center">
-                                    <h2 className="text-sm font-semibold">{monthLabel}</h2>
-                                    <p className="text-[10px] text-slate-400">{monthStr}</p>
+                        <div className="grid grid-cols-3 gap-3">
+                            <div>
+                                <div className="text-slate-400">Money in</div>
+                                <div className="mt-1 text-sm font-semibold text-amber-400">
+                                    ${totalIn.toFixed(2)}
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={goToNextMonth}
-                                    className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:bg-slate-800"
-                                >
-                                    ▶
-                                </button>
                             </div>
-
-                            <div className="grid grid-cols-3 gap-3">
-                                <div>
-                                    <div className="text-slate-400">Money in</div>
-                                    <div className="mt-1 text-sm font-semibold text-emerald-400">
-                                        ${totalIn.toFixed(2)}
-                                    </div>
+                            <div>
+                                <div className="text-slate-400">Money out</div>
+                                <div className="mt-1 text-sm font-semibold text-red-400">
+                                    ${Math.abs(totalOut).toFixed(2)}
                                 </div>
-                                <div>
-                                    <div className="text-slate-400">Money out</div>
-                                    <div className="mt-1 text-sm font-semibold text-red-400">
-                                        ${Math.abs(totalOut).toFixed(2)}
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="text-slate-400">Net</div>
-                                    <div
-                                        className={`mt-1 text-sm font-semibold ${
-                                            net >= 0 ? 'text-emerald-400' : 'text-red-400'
-                                        }`}
-                                    >
-                                        ${net.toFixed(2)}
-                                    </div>
+                            </div>
+                            <div>
+                                <div className="text-slate-400">Net</div>
+                                <div
+                                    className={`mt-1 text-sm font-semibold ${
+                                        net >= 0 ? 'text-amber-400' : 'text-red-400'
+                                    }`}
+                                >
+                                    ${net.toFixed(2)}
                                 </div>
                             </div>
                         </div>
+                    </div>
 
-
-                        {/* Recent transactions */}
-                        <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
-                            <h2 className="mb-2 text-sm font-semibold">
-                                Recent transactions
-                            </h2>
-                            {loading ? (
-                                <p className="text-slate-400">Loading...</p>
-                            ) : transactions.length === 0 ? (
-                                <p className="text-slate-400">
-                                    No transactions yet. Add your first one on the left.
-                                </p>
-                            ) : (
-                                <div className="max-h-72 space-y-2 overflow-y-auto">
-                                    {transactions.slice(0, 5).map(tx => (
-                                        <div
-                                            key={tx.id}
-                                            className="flex items-center justify-between rounded-md border border-slate-800 bg-slate-950 px-3 py-2"
-                                        >
-                                            <div>
-                                                <div className="font-medium">
-                                                    {tx.category || 'Uncategorized'} •{' '}
-                                                    {tx.account || 'No account'}
-                                                </div>
-                                                <div className="text-[11px] text-slate-400">
-                                                    {tx.date} • {tx.person}
-                                                    {tx.note ? ` • ${tx.note}` : ''}
-                                                </div>
+                    {/* Recent transactions */}
+                    <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
+                        <h2 className="mb-2 text-sm font-semibold">
+                            Recent transactions
+                        </h2>
+                        {loading ? (
+                            <p className="text-slate-400">Loading...</p>
+                        ) : transactions.length === 0 ? (
+                            <p className="text-slate-400">
+                                No transactions yet. Add your first one on the left.
+                            </p>
+                        ) : (
+                            <div className="max-h-72 space-y-2 overflow-y-auto">
+                                {transactions.slice(0, 5).map(tx => (
+                                    <div
+                                        key={tx.id}
+                                        className="flex items-center justify-between rounded-md border border-slate-800 bg-slate-950 px-3 py-2"
+                                    >
+                                        <div>
+                                            <div className="font-medium">
+                                                {tx.category || 'Uncategorized'} •{' '}
+                                                {tx.account || 'No account'}
                                             </div>
-                                            <div className="flex flex-col items-end gap-1">
-                                                <div
-                                                    className={`text-xs font-semibold ${
-                                                        tx.amount >= 0
-                                                            ? 'text-emerald-400'
-                                                            : 'text-red-400'
-                                                    }`}
-                                                >
-                                                    {tx.amount >= 0 ? '+' : '-'}$
-                                                    {Math.abs(tx.amount).toFixed(2)}
-                                                </div>
-                                                <div className="flex gap-2 text-[10px] text-slate-400">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() =>
-                                                            handleEditTransaction(tx)
-                                                        }
-                                                        className="hover:text-emerald-300"
-                                                    >
-                                                        Edit
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() =>
-                                                            handleDuplicateTransaction(tx)
-                                                        }
-                                                        className="hover:text-sky-300"
-                                                    >
-                                                        Duplicate
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() =>
-                                                            handleDeleteTransaction(tx.id)
-                                                        }
-                                                        className="hover:text-red-400"
-                                                    >
-                                                        Delete
-                                                    </button>
-                                                </div>
+                                            <div className="text-[11px] text-slate-400">
+                                                {tx.date} • {tx.person}
+                                                {tx.note ? ` • ${tx.note}` : ''}
                                             </div>
                                         </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
+                                        <div className="flex flex-col items-end gap-1">
+                                            <div
+                                                className={`text-xs font-semibold ${
+                                                    tx.amount >= 0
+                                                        ? 'text-amber-400'
+                                                        : 'text-red-400'
+                                                }`}
+                                            >
+                                                {tx.amount >= 0 ? '+' : '-'}$
+                                                {Math.abs(tx.amount).toFixed(2)}
+                                            </div>
+                                            <div className="flex gap-2 text-[10px] text-slate-400">
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        handleEditTransaction(tx)
+                                                    }
+                                                    className="hover:text-amber-300"
+                                                >
+                                                    Edit
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        handleDuplicateTransaction(tx)
+                                                    }
+                                                    className="hover:text-amber-200"
+                                                >
+                                                    Duplicate
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        handleDeleteTransaction(tx.id)
+                                                    }
+                                                    className="hover:text-red-400"
+                                                >
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 </div>
-            </section>
+            </div>
+        </section>
     );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, ChangeEvent } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 type Transaction = {
@@ -36,6 +36,9 @@ export default function TransactionsPage() {
     const [loading, setLoading] = useState(true);
     const [notification, setNotification] = useState<string | null>(null);
 
+    // ✅ NEW: import state
+    const [importing, setImporting] = useState(false);
+
     // month state
     const [monthDate, setMonthDate] = useState<Date>(() => {
         const now = new Date();
@@ -68,11 +71,26 @@ export default function TransactionsPage() {
         setMonthDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
     };
 
+    // 🔧 Helper: get related name from accounts/categories relation
+    const getRelName = (
+        rel:
+            | { id: string | null; name: string | null }
+            | { id: string | null; name: string | null }[]
+            | null
+    ) => {
+        if (!rel) return null;
+        if (Array.isArray(rel)) {
+            return rel.length > 0 ? rel[0].name ?? null : null;
+        }
+        return rel.name ?? null;
+    };
+
     // load transactions for selected month
     useEffect(() => {
         const load = async () => {
             setLoading(true);
-            setNotification(null);
+            // don't wipe import messages unless it's specifically a load error
+            // setNotification(null);
 
             const startOfMonth = new Date(
                 monthDate.getFullYear(),
@@ -119,19 +137,6 @@ export default function TransactionsPage() {
 
             const rows = (txData ?? []) as TxRow[];
 
-            const getRelName = (
-                rel:
-                    | { id: string | null; name: string | null }
-                    | { id: string | null; name: string | null }[]
-                    | null
-            ) => {
-                if (!rel) return null;
-                if (Array.isArray(rel)) {
-                    return rel.length > 0 ? rel[0].name ?? null : null;
-                }
-                return rel.name ?? null;
-            };
-
             const mapped: Transaction[] = rows.map(tx => ({
                 id: tx.id,
                 date: tx.date,
@@ -153,7 +158,6 @@ export default function TransactionsPage() {
         });
     }, [monthDate]);
 
-
     const totalIn = useMemo(
         () =>
             transactions
@@ -171,6 +175,177 @@ export default function TransactionsPage() {
     );
 
     const net = totalIn - totalOut;
+
+    // =========================================================
+    // 🆕 CSV IMPORT LOGIC
+    // =========================================================
+
+    const normalizeDate = (raw: string): string => {
+        const trimmed = raw.trim();
+        if (!trimmed) return trimmed;
+
+        // e.g. 03/15/2024
+        if (trimmed.includes('/')) {
+            const [m, d, y] = trimmed.split('/');
+            if (y && m && d) {
+                return `${y.padStart(4, '0')}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+            }
+        }
+
+        // assume already YYYY-MM-DD or close enough
+        return trimmed;
+    };
+
+    const normalizeAmount = (raw: string): number | null => {
+        let val = raw.trim();
+        if (!val) return null;
+
+        let negative = false;
+
+        // Handle parentheses for negatives: (123.45)
+        if (val.startsWith('(') && val.endsWith(')')) {
+            negative = true;
+            val = val.slice(1, -1);
+        }
+
+        // Remove $ and commas
+        val = val.replace(/[\$,]/g, '');
+
+        const parsed = parseFloat(val);
+        if (Number.isNaN(parsed)) return null;
+
+        return negative ? -parsed : parsed;
+    };
+
+    const handleFileUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        setImporting(true);
+        setNotification(null);
+
+        try {
+            const text = await file.text();
+
+            const lines = text
+                .split(/\r?\n/)
+                .map(l => l.trim())
+                .filter(l => l.length > 0);
+
+            if (lines.length < 2) {
+                setNotification('CSV appears to be empty or missing data rows.');
+                return;
+            }
+
+            const headerLine = lines[0];
+            const headers = headerLine
+                .split(',')
+                .map(h => h.trim().toLowerCase());
+
+            const dateIdx = headers.findIndex(h => h === 'date' || h === 'posting date');
+            const descIdx = headers.findIndex(
+                h =>
+                    h === 'description' ||
+                    h === 'details' ||
+                    h === 'memo' ||
+                    h === 'payee'
+            );
+            const amountIdx = headers.findIndex(
+                h =>
+                    h === 'amount' ||
+                    h === 'transaction amount' ||
+                    h === 'debit' ||
+                    h === 'credit'
+            );
+
+            if (dateIdx === -1 || descIdx === -1 || amountIdx === -1) {
+                setNotification(
+                    'Could not detect date/description/amount columns. Make sure your CSV has headers: date, description, amount.'
+                );
+                return;
+            }
+
+            const rowsToInsert: {
+                date: string;
+                amount: number;
+                person: string;
+                note: string | null;
+                account_id: string | null;
+                category_id: string | null;
+            }[] = [];
+
+            let skipped = 0;
+
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i];
+
+                // naive split – fine for first version
+                const cols = line.split(',');
+                if (cols.length < headers.length) {
+                    skipped++;
+                    continue;
+                }
+
+                const rawDate = cols[dateIdx];
+                const rawDesc = cols[descIdx];
+                const rawAmount = cols[amountIdx];
+
+                const date = normalizeDate(rawDate);
+                const amount = normalizeAmount(rawAmount);
+
+                if (!date || amount === null) {
+                    skipped++;
+                    continue;
+                }
+
+                rowsToInsert.push({
+                    date,
+                    amount,
+                    person: rawDesc?.slice(0, 255) ?? '',
+                    note: null,
+                    account_id: null, // optional: wire to a selected account later
+                    category_id: null, // optional: auto-categorize later
+                });
+            }
+
+            if (rowsToInsert.length === 0) {
+                setNotification(
+                    'No valid rows found to import. Check your CSV format and try again.'
+                );
+                return;
+            }
+
+            const { error } = await supabase
+                .from('transactions')
+                .insert(rowsToInsert);
+
+            if (error) {
+                console.error('Import error:', error);
+                setNotification('Error importing transactions. Check console/logs.');
+                return;
+            }
+
+            setNotification(
+                `Imported ${rowsToInsert.length} transactions${
+                    skipped ? ` (skipped ${skipped} lines that looked invalid)` : ''
+                }.`
+            );
+
+            // 🔄 Re-trigger the month load to show new data
+            setMonthDate(prev => new Date(prev)); // clone to force useEffect rerun
+        } catch (err) {
+            console.error('Import failed:', err);
+            setNotification('Error reading file. Make sure it is a CSV and try again.');
+        } finally {
+            setImporting(false);
+            // clear file input so same file can be selected again if needed
+            event.target.value = '';
+        }
+    };
+
+    // =========================================================
+    // RENDER
+    // =========================================================
 
     return (
         <section className="space-y-4 px-6 py-4">
@@ -207,6 +382,33 @@ export default function TransactionsPage() {
                 </div>
             )}
 
+            {/* 🆕 CSV import panel */}
+            <div className="rounded-lg border border-slate-800 bg-slate-900 p-3 text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <p className="text-[10px] uppercase text-slate-400">
+                            Import from bank statement
+                        </p>
+                        <p className="text-[11px] text-slate-300">
+                            Upload a CSV (date, description, amount). We&apos;ll create
+                            transactions automatically.
+                        </p>
+                    </div>
+                    <input
+                        type="file"
+                        accept=".csv"
+                        onChange={handleFileUpload}
+                        disabled={importing}
+                        className="text-[11px] file:mr-2 file:rounded-md file:border file:border-slate-700 file:bg-slate-800 file:px-2 file:py-1 file:text-[11px] file:text-slate-100 hover:file:bg-slate-700"
+                    />
+                </div>
+                <p className="text-[10px] text-slate-500">
+                    Tip: Export your bank statement as CSV with columns like:
+                    <span className="font-mono"> date, description, amount</span>. You
+                    can categorize and assign accounts later.
+                </p>
+            </div>
+
             {/* Month summary */}
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3 text-xs">
                 <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
@@ -241,7 +443,8 @@ export default function TransactionsPage() {
                     <p className="text-slate-400">Loading…</p>
                 ) : transactions.length === 0 ? (
                     <p className="text-slate-400">
-                        No transactions for {monthLabel}. Add one from the Home page.
+                        No transactions for {monthLabel}. Add one from the Home page or
+                        import a statement above.
                     </p>
                 ) : (
                     <div className="max-h-[540px] space-y-2 overflow-y-auto">
@@ -252,7 +455,8 @@ export default function TransactionsPage() {
                             >
                                 <div>
                                     <div className="font-medium">
-                                        {tx.category || 'Uncategorized'} • {tx.account || 'No account'}
+                                        {tx.category || 'Uncategorized'} •{' '}
+                                        {tx.account || 'No account'}
                                     </div>
                                     <div className="text-[11px] text-slate-400">
                                         {tx.date} • {tx.person}
@@ -262,7 +466,9 @@ export default function TransactionsPage() {
                                 <div className="flex flex-col items-end gap-1">
                                     <div
                                         className={`text-xs font-semibold ${
-                                            tx.amount >= 0 ? 'text-emerald-400' : 'text-red-400'
+                                            tx.amount >= 0
+                                                ? 'text-emerald-400'
+                                                : 'text-red-400'
                                         }`}
                                     >
                                         {tx.amount >= 0 ? '+' : '-'}$
