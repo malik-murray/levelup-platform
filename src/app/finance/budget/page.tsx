@@ -315,7 +315,7 @@ export default function BudgetPage() {
 
                     <button
                         type="submit"
-                        className="rounded-md bg-emerald-600 px-3 py-2 text-[11px] font-semibold text-black hover:bg-emerald-500"
+                        className="rounded-md bg-amber-400 px-3 py-2 text-[11px] font-semibold text-black hover:bg-amber-300"
                     >
                         Save budget
                     </button>

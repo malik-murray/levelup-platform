@@ -593,7 +593,7 @@ export default function AccountsPage() {
                         <button
                             type="submit"
                             disabled={actionLoadingId === 'new'}
-                            className="rounded-md border border-emerald-600 bg-emerald-900 px-3 py-1 text-[11px] font-medium text-emerald-100 hover:bg-emerald-800 disabled:opacity-50"
+                            className="rounded-md bg-amber-400 px-3 py-1 text-[11px] font-semibold text-black hover:bg-amber-300 disabled:opacity-50"
                         >
                             {actionLoadingId === 'new' ? 'Adding…' : 'Add account'}
                         </button>

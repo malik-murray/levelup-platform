@@ -171,7 +171,7 @@ export default function ReportsPage() {
                             onClick={() => setMonthsBack(m)}
                             className={`rounded-full border px-3 py-1 ${
                                 monthsBack === m
-                                    ? 'border-emerald-500 bg-emerald-600 text-black'
+                                    ? 'border-amber-500 bg-amber-400 text-black'
                                     : 'border-slate-700 bg-slate-950 text-slate-200 hover:bg-slate-800'
                             }`}
                         >

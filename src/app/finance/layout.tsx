@@ -27,7 +27,7 @@ export default function FinanceLayout({
             {/* Header + tabs */}
             <header className="border-b border-slate-800 bg-black">
                 <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-                    <div className="flex items-center gap-3">
+                    <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
                         <div className="relative h-8 w-8">
                             <Image
                                 src={logo}
@@ -44,7 +44,13 @@ export default function FinanceLayout({
                                 Shared money dashboard for you and your family.
                             </p>
                         </div>
-                    </div>
+                    </Link>
+                    <Link
+                        href="/dashboard"
+                        className="rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 hover:text-amber-300 transition-colors"
+                    >
+                        ← Dashboard
+                    </Link>
                 </div>
 
                 {/* Tabs */}

@@ -631,16 +631,20 @@ export default function FinancePage() {
                 {/* Net Worth */}
                 <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
                     <p className="text-xs uppercase text-slate-400">Net Worth</p>
-                    <p className="text-2xl font-semibold text-amber-400">
-                        ${netWorth}
+                    <p
+                        className={`text-2xl font-semibold ${
+                            netWorth >= 0 ? 'text-emerald-400' : 'text-red-400'
+                        }`}
+                    >
+                        ${netWorth.toFixed(2)}
                     </p>
                 </div>
 
                 {/* Income */}
                 <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
                     <p className="text-xs uppercase text-slate-400">Income</p>
-                    <p className="text-2xl font-semibold text-amber-400">
-                        ${totalIncome}
+                    <p className="text-2xl font-semibold text-emerald-400">
+                        ${totalIncome.toFixed(2)}
                     </p>
                 </div>
 
@@ -648,7 +652,7 @@ export default function FinancePage() {
                 <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
                     <p className="text-xs uppercase text-slate-400">Expenses</p>
                     <p className="text-2xl font-semibold text-red-400">
-                        ${totalExpenses}
+                        ${totalExpenses.toFixed(2)}
                     </p>
                 </div>
 
@@ -657,10 +661,10 @@ export default function FinancePage() {
                     <p className="text-xs uppercase text-slate-400">Cashflow</p>
                     <p
                         className={`text-2xl font-semibold ${
-                            net >= 0 ? 'text-amber-400' : 'text-red-400'
+                            net >= 0 ? 'text-emerald-400' : 'text-red-400'
                         }`}
                     >
-                        ${net}
+                        ${net.toFixed(2)}
                     </p>
                 </div>
             </div>
@@ -812,7 +816,7 @@ export default function FinancePage() {
                         <div className="grid grid-cols-3 gap-3">
                             <div>
                                 <div className="text-slate-400">Money in</div>
-                                <div className="mt-1 text-sm font-semibold text-amber-400">
+                                <div className="mt-1 text-sm font-semibold text-emerald-400">
                                     ${totalIn.toFixed(2)}
                                 </div>
                             </div>
@@ -826,7 +830,7 @@ export default function FinancePage() {
                                 <div className="text-slate-400">Net</div>
                                 <div
                                     className={`mt-1 text-sm font-semibold ${
-                                        net >= 0 ? 'text-amber-400' : 'text-red-400'
+                                        net >= 0 ? 'text-emerald-400' : 'text-red-400'
                                     }`}
                                 >
                                     ${net.toFixed(2)}
@@ -867,7 +871,7 @@ export default function FinancePage() {
                                             <div
                                                 className={`text-xs font-semibold ${
                                                     tx.amount >= 0
-                                                        ? 'text-amber-400'
+                                                        ? 'text-emerald-400'
                                                         : 'text-red-400'
                                                 }`}
                                             >
