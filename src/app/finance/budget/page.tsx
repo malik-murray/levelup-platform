@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, FormEvent } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase } from '@auth/supabaseClient';
 
 type Category = {
     id: string;

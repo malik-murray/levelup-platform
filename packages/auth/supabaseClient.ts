@@ -9,3 +9,4 @@ console.log('SUPABASE CLIENT INIT', {
 });
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+

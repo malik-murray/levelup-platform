@@ -41,3 +41,4 @@ export default function MonthSwitcher({ currentMonth, onMonthChange }: MonthSwit
         </div>
     );
 }
+

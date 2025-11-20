@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, FormEvent } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase } from '@auth/supabaseClient';
 
 console.log('FINANCE PAGE LOADED, URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
 

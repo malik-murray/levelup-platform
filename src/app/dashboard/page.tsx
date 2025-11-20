@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase } from "@auth/supabaseClient";
 
 export default function DashboardPage() {
     const [email, setEmail] = useState<string | null>(null);

@@ -17,7 +17,9 @@
     "baseUrl": ".",                     // 👈 from "src" → "."
 
     "paths": {
-      "@/*": ["./src/*"]               // 👈 stays pointing into src/
+      "@/*": ["./src/*"],               // 👈 stays pointing into src/
+      "@auth/*": ["./packages/auth/*"],
+      "@ui/*": ["./packages/ui/*"]
     },
 
     "plugins": [
