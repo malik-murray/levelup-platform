@@ -5,9 +5,13 @@ import { supabase } from '@auth/supabaseClient';
 
 console.log('FINANCE PAGE LOADED, URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
 
+type AccountType = 'checking' | 'savings' | 'credit' | 'cash' | 'investment' | 'other';
+
 type Account = {
     id: string;
     name: string;
+    type: AccountType | null;
+    starting_balance: number | null;
 };
 
 type Category = {
@@ -82,6 +86,9 @@ export default function FinancePage() {
 
     // simple in-app notification text
     const [notification, setNotification] = useState<string | null>(null);
+
+    // Add Transaction form visibility
+    const [showAddTransaction, setShowAddTransaction] = useState<boolean>(false);
 
     // month selector state: store the first day of the currently selected month
     const [monthDate, setMonthDate] = useState<Date>(() => {
@@ -204,7 +211,7 @@ export default function FinancePage() {
 
             const { data: accountsData, error: accountsError } = await supabase
                 .from('accounts')
-                .select('id, name')
+                .select('id, name, type, starting_balance')
                 .order('name');
 
             console.log('FINANCE DEBUG ACCOUNTS:', { accountsData, accountsError });
@@ -253,7 +260,7 @@ export default function FinancePage() {
             // 1) ACCOUNTS
             const { data: accountsData, error: accountsError } = await supabase
                 .from('accounts')
-                .select('id, name')
+                .select('id, name, type, starting_balance')
                 .order('name');
 
             console.log('ACCOUNTS RESULT:', { accountsData, accountsError });
@@ -304,7 +311,83 @@ export default function FinancePage() {
     const net = totalIn + totalOut;
     const totalIncome = totalIn;
     const totalExpenses = Math.abs(totalOut);
-    const netWorth = totalIncome - totalExpenses; // temp net worth = monthly net
+
+    // Calculate net worth from all account balances (same as accounts page)
+    const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
+
+    // Load all transactions for net worth calculation
+    useEffect(() => {
+        const loadAllTransactions = async () => {
+            const { data: txData, error: txError } = await supabase
+                .from('transactions')
+                .select('id, amount, account_id')
+                .order('date', { ascending: false });
+
+            if (txError) {
+                console.error('Error loading all transactions for net worth:', txError);
+                return;
+            }
+
+            const rows = (txData ?? []) as Array<{
+                id: string;
+                amount: number;
+                account_id: string | null;
+            }>;
+
+            // Map to Transaction format (we only need account_id and amount)
+            const mapped: Transaction[] = rows.map(tx => ({
+                id: tx.id,
+                date: '',
+                amount: Number(tx.amount),
+                person: '',
+                note: null,
+                account: null,
+                category: null,
+                accountId: tx.account_id,
+                categoryId: null,
+            }));
+
+            setAllTransactions(mapped);
+        };
+
+        loadAllTransactions();
+    }, []);
+
+    // Calculate net change per account (from all transactions)
+    const netChangeByAccountId = useMemo(() => {
+        const map = new Map<string, number>();
+        allTransactions.forEach(tx => {
+            if (!tx.accountId) return;
+            const prev = map.get(tx.accountId) ?? 0;
+            map.set(tx.accountId, prev + tx.amount);
+        });
+        return map;
+    }, [allTransactions]);
+
+    // Helper: compute signed current balance for an account (same as accounts page)
+    const getAccountBalance = (acc: Account) => {
+        const netChange = netChangeByAccountId.get(acc.id) ?? 0;
+        const starting = Number(acc.starting_balance ?? 0);
+        const rawBalance = starting + netChange;
+
+        // Credit accounts are liabilities: flip sign so spending shows negative
+        const signedBalance = acc.type === 'credit' ? -rawBalance : rawBalance;
+
+        return {
+            starting,
+            netChange,
+            rawBalance,
+            signedBalance,
+        };
+    };
+
+    // Net worth = sum of signed balances across accounts (same as accounts page)
+    const netWorth = useMemo(() => {
+        return accounts.reduce((sum, acc) => {
+            const { signedBalance } = getAccountBalance(acc);
+            return sum + signedBalance;
+        }, 0);
+    }, [accounts, netChangeByAccountId]);
 
     // helper: spending per category for this month (expenses only, as positive number)
     const spendingByCategoryName = useMemo(() => {
@@ -434,6 +517,9 @@ export default function FinancePage() {
 
         // Reset form state after save/update
         resetFormToDefault();
+        
+        // Collapse the form after successful save/update
+        setShowAddTransaction(false);
     };
 
     const handleSaveBudget = async (e: FormEvent) => {
@@ -540,6 +626,9 @@ export default function FinancePage() {
         } else {
             setCategoryId('');
         }
+
+        // Open the form when editing
+        setShowAddTransaction(true);
     };
 
     const handleCancelEdit = () => {
@@ -626,7 +715,7 @@ export default function FinancePage() {
                     {notification}
                 </div>
             )}
-            {/* 🔹 NEW: Dashboard Summary */}
+            {/* 🔹 Dashboard Summary - Net Worth, Income, Expenses, Cashflow */}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
                 {/* Net Worth */}
                 <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
@@ -669,251 +758,262 @@ export default function FinancePage() {
                 </div>
             </div>
 
-            <div className="grid gap-6 md:grid-cols-[2fr,3fr]">
-                {/* Left: Add / Edit transaction form */}
-                <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-                    <div className="mb-1 flex items-center justify-between">
-                        <h2 className="text-sm font-semibold">
-                            {editingId ? 'Edit transaction' : 'Add transaction'}
-                        </h2>
-                        {editingId && (
-                            <span className="text-[10px] text-slate-400">
-                                Editing existing transaction
-                            </span>
-                        )}
-                    </div>
-                    <form
-                        className="space-y-3 text-xs"
-                        onSubmit={handleAddOrUpdateTransaction}
+            {/* 🔹 Monthly Switcher with Money in, Money out, Net */}
+            <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
+                <div className="mb-2 flex items-center justify-between">
+                    <button
+                        type="button"
+                        onClick={goToPrevMonth}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:bg-slate-800"
                     >
-                        <div className="space-y-1">
-                            <label className="block text-slate-300">Date</label>
-                            <input
-                                type="date"
-                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
-                                value={date}
-                                onChange={e => setDate(e.target.value)}
-                            />
-                        </div>
-
-                        <div className="space-y-1">
-                            <label className="block text-slate-300">Account</label>
-                            <select
-                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
-                                value={accountId}
-                                onChange={e => setAccountId(e.target.value)}
-                            >
-                                <option value="">Select</option>
-                                {accounts.map(a => (
-                                    <option key={a.id} value={a.id}>
-                                        {a.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div className="space-y-1">
-                            <label className="block text-slate-300">Category</label>
-                            <select
-                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
-                                value={categoryId}
-                                onChange={e => setCategoryId(e.target.value)}
-                            >
-                                <option value="">Select</option>
-                                {categories.map(c => (
-                                    <option key={c.id} value={c.id}>
-                                        {c.type === 'income' ? '⬆️' : '⬇️'} {c.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div className="space-y-1">
-                            <label className="block text-slate-300">Amount</label>
-                            <input
-                                type="number"
-                                step="0.01"
-                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
-                                value={amount}
-                                onChange={e => setAmount(e.target.value)}
-                            />
-                            <p className="text-[10px] text-slate-500">
-                                Use positive for income, negative for expenses (e.g. -45.23
-                                for groceries).
-                            </p>
-                        </div>
-
-                        <div className="space-y-1">
-                            <label className="block text-slate-300">Person</label>
-                            <select
-                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
-                                value={person}
-                                onChange={e => setPerson(e.target.value)}
-                            >
-                                <option value="Malik">Malik</option>
-                                <option value="Mikia">Mikia</option>
-                                <option value="Both">Both</option>
-                            </select>
-                        </div>
-
-                        <div className="space-y-1">
-                            <label className="block text-slate-300">
-                                Note (optional)
-                            </label>
-                            <input
-                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
-                                value={note}
-                                onChange={e => setNote(e.target.value)}
-                                placeholder="ex. Giant groceries, date night, etc."
-                            />
-                        </div>
-
-                        <div className="mt-2 flex gap-2">
-                            <button
-                                type="submit"
-                                className="w-full rounded-md bg-amber-400 py-2 text-xs font-semibold text-black hover:bg-amber-300"
-                            >
-                                {editingId ? 'Update transaction' : 'Save transaction'}
-                            </button>
-                            {editingId && (
-                                <button
-                                    type="button"
-                                    onClick={handleCancelEdit}
-                                    className="w-full rounded-md border border-slate-600 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
-                                >
-                                    Cancel edit
-                                </button>
-                            )}
-                        </div>
-                    </form>
+                        ◀
+                    </button>
+                    <div className="text-center">
+                        <h2 className="text-sm font-semibold">{monthLabel}</h2>
+                        <p className="text-[10px] text-slate-400">{monthStr}</p>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={goToNextMonth}
+                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:bg-slate-800"
+                    >
+                        ▶
+                    </button>
                 </div>
 
-                {/* Right: Summary + budgets + recent transactions */}
-                <div className="space-y-4">
-                    {/* Month summary + switcher */}
-                    <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
-                        <div className="mb-2 flex items-center justify-between">
-                            <button
-                                type="button"
-                                onClick={goToPrevMonth}
-                                className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:bg-slate-800"
-                            >
-                                ◀
-                            </button>
-                            <div className="text-center">
-                                <h2 className="text-sm font-semibold">{monthLabel}</h2>
-                                <p className="text-[10px] text-slate-400">{monthStr}</p>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={goToNextMonth}
-                                className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:bg-slate-800"
-                            >
-                                ▶
-                            </button>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-3">
-                            <div>
-                                <div className="text-slate-400">Money in</div>
-                                <div className="mt-1 text-sm font-semibold text-emerald-400">
-                                    ${totalIn.toFixed(2)}
-                                </div>
-                            </div>
-                            <div>
-                                <div className="text-slate-400">Money out</div>
-                                <div className="mt-1 text-sm font-semibold text-red-400">
-                                    ${Math.abs(totalOut).toFixed(2)}
-                                </div>
-                            </div>
-                            <div>
-                                <div className="text-slate-400">Net</div>
-                                <div
-                                    className={`mt-1 text-sm font-semibold ${
-                                        net >= 0 ? 'text-emerald-400' : 'text-red-400'
-                                    }`}
-                                >
-                                    ${net.toFixed(2)}
-                                </div>
-                            </div>
+                <div className="grid grid-cols-3 gap-3">
+                    <div>
+                        <div className="text-slate-400">Money in</div>
+                        <div className="mt-1 text-sm font-semibold text-emerald-400">
+                            ${totalIn.toFixed(2)}
                         </div>
                     </div>
+                    <div>
+                        <div className="text-slate-400">Money out</div>
+                        <div className="mt-1 text-sm font-semibold text-red-400">
+                            ${Math.abs(totalOut).toFixed(2)}
+                        </div>
+                    </div>
+                    <div>
+                        <div className="text-slate-400">Net</div>
+                        <div
+                            className={`mt-1 text-sm font-semibold ${
+                                net >= 0 ? 'text-emerald-400' : 'text-red-400'
+                            }`}
+                        >
+                            ${net.toFixed(2)}
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-                    {/* Recent transactions */}
-                    <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
-                        <h2 className="mb-2 text-sm font-semibold">
-                            Recent transactions
-                        </h2>
-                        {loading ? (
-                            <p className="text-slate-400">Loading...</p>
-                        ) : transactions.length === 0 ? (
-                            <p className="text-slate-400">
-                                No transactions yet. Add your first one on the left.
-                            </p>
-                        ) : (
-                            <div className="max-h-72 space-y-2 overflow-y-auto">
-                                {transactions.slice(0, 5).map(tx => (
-                                    <div
-                                        key={tx.id}
-                                        className="flex items-center justify-between rounded-md border border-slate-800 bg-slate-950 px-3 py-2"
-                                    >
-                                        <div>
-                                            <div className="font-medium">
-                                                {tx.category || 'Uncategorized'} •{' '}
-                                                {tx.account || 'No account'}
-                                            </div>
-                                            <div className="text-[11px] text-slate-400">
-                                                {tx.date} • {tx.person}
-                                                {tx.note ? ` • ${tx.note}` : ''}
-                                            </div>
-                                        </div>
-                                        <div className="flex flex-col items-end gap-1">
-                                            <div
-                                                className={`text-xs font-semibold ${
-                                                    tx.amount >= 0
-                                                        ? 'text-emerald-400'
-                                                        : 'text-red-400'
-                                                }`}
-                                            >
-                                                {tx.amount >= 0 ? '+' : '-'}$
-                                                {Math.abs(tx.amount).toFixed(2)}
-                                            </div>
-                                            <div className="flex gap-2 text-[10px] text-slate-400">
-                                                <button
-                                                    type="button"
-                                                    onClick={() =>
-                                                        handleEditTransaction(tx)
-                                                    }
-                                                    className="hover:text-amber-300"
-                                                >
-                                                    Edit
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() =>
-                                                        handleDuplicateTransaction(tx)
-                                                    }
-                                                    className="hover:text-amber-200"
-                                                >
-                                                    Duplicate
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() =>
-                                                        handleDeleteTransaction(tx.id)
-                                                    }
-                                                    className="hover:text-red-400"
-                                                >
-                                                    Delete
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
+            {/* 🔹 Add Transaction - Collapsible */}
+            <div className="rounded-lg border border-slate-800 bg-slate-900">
+                <button
+                    type="button"
+                    onClick={() => {
+                        setShowAddTransaction(!showAddTransaction);
+                        // If opening and editing, reset form
+                        if (!showAddTransaction && editingId) {
+                            resetFormToDefault();
+                        }
+                    }}
+                    className="w-full flex items-center justify-between p-4 text-left hover:bg-slate-800 transition-colors"
+                >
+                    <h2 className="text-sm font-semibold">
+                        {editingId ? 'Edit transaction' : 'Add Transaction'}
+                    </h2>
+                    <span className="text-xs text-slate-400">
+                        {showAddTransaction ? '▼' : '▶'}
+                    </span>
+                </button>
+
+                {showAddTransaction && (
+                    <div className="border-t border-slate-800 p-4">
+                        {editingId && (
+                            <div className="mb-2 text-[10px] text-slate-400">
+                                Editing existing transaction
                             </div>
                         )}
+                        <form
+                            className="space-y-3 text-xs"
+                            onSubmit={handleAddOrUpdateTransaction}
+                        >
+                            <div className="space-y-1">
+                                <label className="block text-slate-300">Date</label>
+                                <input
+                                    type="date"
+                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                    value={date}
+                                    onChange={e => setDate(e.target.value)}
+                                />
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="block text-slate-300">Account</label>
+                                <select
+                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                    value={accountId}
+                                    onChange={e => setAccountId(e.target.value)}
+                                >
+                                    <option value="">Select</option>
+                                    {accounts.map(a => (
+                                        <option key={a.id} value={a.id}>
+                                            {a.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="block text-slate-300">Category</label>
+                                <select
+                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                    value={categoryId}
+                                    onChange={e => setCategoryId(e.target.value)}
+                                >
+                                    <option value="">Select</option>
+                                    {categories.map(c => (
+                                        <option key={c.id} value={c.id}>
+                                            {c.type === 'income' ? '⬆️' : '⬇️'} {c.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="block text-slate-300">Amount</label>
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                    value={amount}
+                                    onChange={e => setAmount(e.target.value)}
+                                />
+                                <p className="text-[10px] text-slate-500">
+                                    Use positive for income, negative for expenses (e.g. -45.23
+                                    for groceries).
+                                </p>
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="block text-slate-300">Person</label>
+                                <select
+                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                    value={person}
+                                    onChange={e => setPerson(e.target.value)}
+                                >
+                                    <option value="Malik">Malik</option>
+                                    <option value="Mikia">Mikia</option>
+                                    <option value="Both">Both</option>
+                                </select>
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="block text-slate-300">
+                                    Note (optional)
+                                </label>
+                                <input
+                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                    value={note}
+                                    onChange={e => setNote(e.target.value)}
+                                    placeholder="ex. Giant groceries, date night, etc."
+                                />
+                            </div>
+
+                            <div className="mt-2 flex gap-2">
+                                <button
+                                    type="submit"
+                                    className="w-full rounded-md bg-amber-400 py-2 text-xs font-semibold text-black hover:bg-amber-300"
+                                >
+                                    {editingId ? 'Update transaction' : 'Save transaction'}
+                                </button>
+                                {editingId && (
+                                    <button
+                                        type="button"
+                                        onClick={handleCancelEdit}
+                                        className="w-full rounded-md border border-slate-600 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
+                                    >
+                                        Cancel edit
+                                    </button>
+                                )}
+                            </div>
+                        </form>
                     </div>
-                </div>
+                )}
+            </div>
+
+            {/* 🔹 Recent Transactions */}
+            <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
+                <h2 className="mb-2 text-sm font-semibold">
+                    Recent transactions
+                </h2>
+                {loading ? (
+                    <p className="text-slate-400">Loading...</p>
+                ) : transactions.length === 0 ? (
+                    <p className="text-slate-400">
+                        No transactions yet. Add your first one above.
+                    </p>
+                ) : (
+                    <div className="max-h-72 space-y-2 overflow-y-auto">
+                        {transactions.slice(0, 5).map(tx => (
+                            <div
+                                key={tx.id}
+                                className="flex items-center justify-between rounded-md border border-slate-800 bg-slate-950 px-3 py-2"
+                            >
+                                <div>
+                                    <div className="font-medium">
+                                        {tx.category || 'Uncategorized'} •{' '}
+                                        {tx.account || 'No account'}
+                                    </div>
+                                    <div className="text-[11px] text-slate-400">
+                                        {tx.date} • {tx.person}
+                                        {tx.note ? ` • ${tx.note}` : ''}
+                                    </div>
+                                </div>
+                                <div className="flex flex-col items-end gap-1">
+                                    <div
+                                        className={`text-xs font-semibold ${
+                                            tx.amount >= 0
+                                                ? 'text-emerald-400'
+                                                : 'text-red-400'
+                                        }`}
+                                    >
+                                        {tx.amount >= 0 ? '+' : '-'}$
+                                        {Math.abs(tx.amount).toFixed(2)}
+                                    </div>
+                                    <div className="flex gap-2 text-[10px] text-slate-400">
+                                        <button
+                                            type="button"
+                                            onClick={() => handleEditTransaction(tx)}
+                                            className="hover:text-amber-300"
+                                        >
+                                            Edit
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                handleDuplicateTransaction(tx)
+                                            }
+                                            className="hover:text-amber-200"
+                                        >
+                                            Duplicate
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                handleDeleteTransaction(tx.id)
+                                            }
+                                            className="hover:text-red-400"
+                                        >
+                                            Delete
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
         </section>
     );

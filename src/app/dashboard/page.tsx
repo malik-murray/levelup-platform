@@ -2,10 +2,82 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { supabase } from "@auth/supabaseClient";
+import logo from "../logo.png";
+import { ThemeToggle } from "@/components/ThemeToggle";
+
+type App = {
+    name: string;
+    href: string;
+    description: string;
+    status: "open" | "coming";
+    icon?: string;
+};
+
+function AppCard({ app }: { app: App }) {
+    const isOpen = app.status === "open";
+    
+    const cardContent = (
+        <div
+            className={`
+                group relative rounded-2xl border bg-slate-950 p-6
+                transition-all duration-300 ease-out
+                ${isOpen 
+                    ? 'border-amber-500/30 hover:border-amber-500/60 hover:shadow-2xl hover:shadow-amber-500/10 hover:-translate-y-1 cursor-pointer' 
+                    : 'border-slate-800 hover:border-slate-700 cursor-not-allowed opacity-75'
+                }
+            `}
+        >
+            {/* Subtle gradient overlay on hover */}
+            <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-amber-500/0 via-amber-500/0 to-amber-500/0 group-hover:from-amber-500/5 group-hover:via-amber-500/0 group-hover:to-amber-500/0 transition-all duration-300 pointer-events-none" />
+            
+            <div className="relative z-10">
+                {/* App Icon/Initials */}
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500/20 to-amber-600/10 border border-amber-500/30">
+                    <span className="text-xl font-bold text-amber-400">
+                        {app.icon || app.name.charAt(0)}
+                    </span>
+                </div>
+
+                {/* App Name */}
+                <h3 className="mb-2 text-lg font-semibold text-white">
+                    {app.name}
+                </h3>
+
+                {/* Description */}
+                <p className="mb-4 text-sm text-slate-400 leading-relaxed">
+                    {app.description}
+                </p>
+
+                {/* Status Badge */}
+                {isOpen ? (
+                    <span className="inline-flex items-center rounded-full bg-amber-400 px-4 py-1.5 text-xs font-semibold text-black shadow-lg shadow-amber-500/25">
+                        Open
+                    </span>
+                ) : (
+                    <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-4 py-1.5 text-xs font-medium text-slate-400">
+                        Coming soon
+                    </span>
+                )}
+            </div>
+        </div>
+    );
+
+    if (isOpen) {
+        return (
+            <Link href={app.href} className="block">
+                {cardContent}
+            </Link>
+        );
+    }
+
+    return cardContent;
+}
 
 export default function DashboardPage() {
     const [email, setEmail] = useState<string | null>(null);
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         supabase.auth.getUser().then(({ data }) => {
@@ -14,112 +86,150 @@ export default function DashboardPage() {
             } else {
                 setEmail(data.user.email ?? null);
             }
+            setLoading(false);
         });
     }, []);
 
-    const apps = [
+    const apps: App[] = [
         {
             name: "Habit Tracker",
             href: "/habit",
             description: "Track daily habits, XP, streaks, and life scores.",
-            status: "coming" as const,
+            status: "coming",
+            icon: "📈",
         },
         {
             name: "Finance Tracker",
             href: "/finance",
             description: "Visualize your cashflow, savings, and long-term goals.",
-            status: "open" as const,
+            status: "open",
+            icon: "💰",
         },
         {
             name: "Resume Generator",
             href: "/resume",
             description: "Generate job-specific resumes and cover letters in seconds.",
-            status: "coming" as const,
+            status: "coming",
+            icon: "📄",
         },
         {
             name: "Emotional Tracker",
             href: "/emotions",
             description: "Log emotions, triggers, and coping strategies.",
-            status: "coming" as const,
+            status: "coming",
+            icon: "💭",
         },
         {
             name: "Stock & Crypto Analyzer",
             href: "/markets",
             description: "Monitor portfolios, track watchlists, and analyze moves.",
-            status: "coming" as const,
+            status: "coming",
+            icon: "📊",
         },
         {
             name: "Newsfeed Summarizer",
             href: "/newsfeed",
             description: "Turn information overload into short daily briefs.",
-            status: "coming" as const,
+            status: "coming",
+            icon: "📰",
         },
         {
             name: "Reflection to Lesson",
             href: "/reflection",
             description: "Convert journal entries into lessons and action steps.",
-            status: "coming" as const,
+            status: "coming",
+            icon: "✨",
         },
     ];
 
-    return (
-        <main className="min-h-screen bg-black text-white">
-            <header className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
-                <div>
-                    <h1 className="text-xl font-semibold">LevelUpSolutions Dashboard</h1>
-                    <p className="text-xs text-slate-400">
-                        Welcome to your ecosystem. This is the central hub for all your apps.
-                    </p>
+    if (loading) {
+        return (
+            <main className="flex min-h-screen items-center justify-center bg-black text-white">
+                <div className="text-center">
+                    <div className="mb-4 h-8 w-8 animate-spin rounded-full border-2 border-amber-400 border-t-transparent mx-auto" />
+                    <p className="text-sm text-slate-400">Loading...</p>
                 </div>
-                {email && (
-                    <div className="flex items-center gap-3 text-xs">
-                        <span className="text-slate-400">Logged in as</span>
-                        <span className="rounded-full bg-slate-900 px-3 py-1 font-medium">
-              {email}
-            </span>
-                        <button
-                            onClick={async () => {
-                                await supabase.auth.signOut();
-                                window.location.href = "/login";
-                            }}
-                            className="rounded-md border border-slate-700 px-3 py-1 text-xs hover:bg-slate-800"
-                        >
-                            Log out
-                        </button>
+            </main>
+        );
+    }
+
+    return (
+        <main className="min-h-screen bg-black text-white dark:bg-black dark:text-white light:bg-white light:text-slate-900 transition-colors">
+            {/* Hero Section */}
+            <header className="relative overflow-hidden border-b border-slate-800 bg-gradient-to-b from-black via-slate-950 to-black dark:border-slate-800 dark:from-black dark:via-slate-950 dark:to-black light:border-slate-200 light:from-white light:via-slate-50 light:to-white transition-colors">
+                {/* Background decoration */}
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(245,196,81,0.08),transparent_50%)] pointer-events-none" />
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_80%,rgba(245,196,81,0.05),transparent_50%)] pointer-events-none" />
+                
+                <div className="relative mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8 lg:py-20">
+                    <div className="flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
+                        {/* Brand Section */}
+                        <div className="flex items-center gap-4">
+                            <div className="relative h-12 w-12 sm:h-14 sm:w-14 flex-shrink-0">
+                                <Image
+                                    src={logo}
+                                    alt="LevelUpSolutions logo"
+                                    className="h-full w-full object-contain"
+                                    fill
+                                    priority
+                                />
+                            </div>
+                            <div>
+                                <h1 className="text-2xl font-bold text-white sm:text-3xl lg:text-4xl">
+                                    LevelUpSolutions
+                                </h1>
+                                <p className="mt-1 text-sm text-slate-400 sm:text-base">
+                                    Your personal operating system for habits, money, mindset, and more.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* User Actions */}
+                        {email && (
+                            <div className="flex flex-col items-end gap-3 sm:flex-row sm:items-center">
+                                <div className="flex items-center gap-2 rounded-full border border-slate-800 bg-slate-900/50 px-4 py-2 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50 light:border-slate-300 light:bg-white/50">
+                                    <span className="text-xs text-slate-400 dark:text-slate-400 light:text-slate-600">Logged in as</span>
+                                    <span className="text-xs font-medium text-white dark:text-white light:text-slate-900">
+                                        {email}
+                                    </span>
+                                </div>
+                                <ThemeToggle />
+                                <button
+                                    onClick={async () => {
+                                        await supabase.auth.signOut();
+                                        window.location.href = "/login";
+                                    }}
+                                    className="rounded-full border border-slate-700 bg-slate-900/50 px-4 py-2 text-xs font-medium text-slate-200 backdrop-blur-sm transition-all hover:border-amber-500/50 hover:bg-slate-800 hover:text-amber-300 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200 dark:hover:bg-slate-800 light:border-slate-300 light:bg-white/50 light:text-slate-700 light:hover:bg-slate-100"
+                                >
+                                    Log out
+                                </button>
+                            </div>
+                        )}
                     </div>
-                )}
+                </div>
             </header>
 
-            <section className="px-6 py-6 space-y-4">
-                <p className="text-xs text-slate-400">
-                    Choose an app to open. We’ll build each one out step by step, but all of
-                    them live here.
-                </p>
+            {/* App Grid Section */}
+            <section className="mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
+                <div className="mb-8 text-center sm:mb-12">
+                    <h2 className="text-2xl font-bold text-white sm:text-3xl">
+                        Your Apps
+                    </h2>
+                    <p className="mt-2 text-sm text-slate-400 sm:text-base">
+                        Choose an app to get started. We'll build each one out step by step.
+                    </p>
+                </div>
 
-                <div className="grid gap-4 md:grid-cols-3">
+                {/* App Grid */}
+                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                     {apps.map((app) => (
-                        <div
-                            key={app.name}
-                            className="rounded-xl border border-[#f4b73f]/25 bg-[#050505] p-4 shadow-lg shadow-black/60"
-                        >
-                            <h2 className="font-semibold mb-1 text-white">{app.name}</h2>
-                            <p className="text-xs text-neutral-400 mb-3">
-                                {app.description}
-                            </p>
-
-                            {app.status === "open" ? (
-                                <Link href={app.href} className="btn-gold">
-                                    Open
-                                </Link>
-                            ) : (
-                                <span className="inline-block rounded-full border border-neutral-700 px-3 py-1 text-[11px] text-neutral-400">
-                  Coming soon
-                </span>
-                            )}
-                        </div>
+                        <AppCard key={app.name} app={app} />
                     ))}
                 </div>
             </section>
+
+            {/* Footer spacing */}
+            <div className="h-16" />
         </main>
     );
 }

@@ -6,9 +6,22 @@
     --lu-text: #ffffff;
 }
 
+/* Dark theme (default) */
+.dark {
+    --lu-bg: #000000;
+    --lu-text: #ffffff;
+}
+
+/* Light theme */
+.light {
+    --lu-bg: #ffffff;
+    --lu-text: #1e293b;
+}
+
 body {
     background-color: var(--lu-bg);
     color: var(--lu-text);
+    transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* Optional: reusable gold button */
