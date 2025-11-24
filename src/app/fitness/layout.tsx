@@ -6,19 +6,18 @@ import { usePathname } from 'next/navigation';
 import Image from 'next/image';
 import logo from '../logo.png';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import { MoneyQuotesCarousel } from '@/components/MoneyQuotesCarousel';
 
-const financeTabs = [
-    { href: '/finance', label: 'Home' },
-    { href: '/finance/accounts', label: 'Accounts' },
-    { href: '/finance/transactions', label: 'Transactions' },
-    { href: '/finance/budget', label: 'Budget' },
-    { href: '/finance/reports', label: 'Reports' },
+const fitnessTabs = [
+    { href: '/fitness', label: 'Dashboard' },
+    { href: '/fitness/workouts', label: 'Workouts' },
+    { href: '/fitness/meals', label: 'Meals' },
+    { href: '/fitness/metrics', label: 'Metrics' },
+    { href: '/fitness/settings/integrations', label: 'Integrations' },
 ];
 
-export default function FinanceLayout({
-                                          children,
-                                      }: {
+export default function FitnessLayout({
+    children,
+}: {
     children: React.ReactNode;
 }) {
     const pathname = usePathname();
@@ -32,18 +31,16 @@ export default function FinanceLayout({
                         <div className="relative h-8 w-8">
                             <Image
                                 src={logo}
-                                alt="LevelUp Financial logo"
+                                alt="LevelUp Fitness logo"
                                 className="h-full w-full object-contain"
                                 fill
                             />
                         </div>
                         <div>
                             <h1 className="text-xl font-semibold text-amber-500 dark:text-amber-400">
-                                LevelUp Financial
+                                PeakMode
                             </h1>
-                            <div className="mt-0.5">
-                                <MoneyQuotesCarousel />
-                            </div>
+                            <p className="text-xs text-slate-400 mt-0.5">Fitness & Nutrition Tracker</p>
                         </div>
                     </Link>
                     <div className="flex items-center gap-2">
@@ -59,8 +56,8 @@ export default function FinanceLayout({
 
                 {/* Tabs */}
                 <nav className="mx-auto flex max-w-6xl gap-2 px-6 pb-3">
-                    {financeTabs.map(tab => {
-                        const isActive = pathname === tab.href;
+                    {fitnessTabs.map(tab => {
+                        const isActive = pathname === tab.href || (tab.href !== '/fitness' && pathname?.startsWith(tab.href));
 
                         return (
                             <Link
@@ -84,3 +81,4 @@ export default function FinanceLayout({
         </main>
     );
 }
+

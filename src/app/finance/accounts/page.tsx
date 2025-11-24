@@ -174,8 +174,14 @@ export default function AccountsPage() {
         return type.charAt(0).toUpperCase() + type.slice(1);
     };
 
-    const formatCurrency = (value: number) =>
-        `${value < 0 ? '-' : ''}$${Math.abs(value).toFixed(2)}`;
+    const formatCurrency = (value: number) => {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        }).format(value);
+    };
 
     // 🔹 Create new account
     const handleCreateAccount = async (e: FormEvent) => {

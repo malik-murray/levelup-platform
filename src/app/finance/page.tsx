@@ -492,25 +492,42 @@ export default function FinancePage() {
                     updatedSpendingByCategory.get(selectedCategoryName) || 0;
                 const remaining = budgetRecord.amount - spent;
 
-                const spentStr = spent.toFixed(2);
-                const remainingStr = remaining.toFixed(2);
+                const spentStr = new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: 'USD',
+                    minimumFractionDigits: 2,
+                }).format(spent);
+                const remainingStr = new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: 'USD',
+                    minimumFractionDigits: 2,
+                }).format(remaining);
+                const amountStr = new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: 'USD',
+                    minimumFractionDigits: 2,
+                }).format(Math.abs(numAmount));
+                const budgetStr = new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: 'USD',
+                    minimumFractionDigits: 2,
+                }).format(budgetRecord.amount);
 
                 setNotification(
                     `You just ${editingId ? 'updated' : 'logged'} ${
                         numAmount < 0 ? '-' : '+'
-                    }$${Math.abs(numAmount).toFixed(
-                        2
-                    )} in ${selectedCategoryName}. This month: spent $${spentStr}, remaining $${remainingStr} of your $${budgetRecord.amount.toFixed(
-                        2
-                    )} budget.`
+                    }${amountStr} in ${selectedCategoryName}. This month: spent ${spentStr}, remaining ${remainingStr} of your ${budgetStr} budget.`
                 );
             } else {
+                const amountStrNoBudget = new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: 'USD',
+                    minimumFractionDigits: 2,
+                }).format(Math.abs(numAmount));
                 setNotification(
                     `You just ${editingId ? 'updated' : 'logged'} ${
                         numAmount < 0 ? '-' : '+'
-                    }$${Math.abs(numAmount).toFixed(
-                        2
-                    )} in ${selectedCategoryName}. No budget set for this category.`
+                    }${amountStrNoBudget} in ${selectedCategoryName}. No budget set for this category.`
                 );
             }
         }
@@ -590,11 +607,13 @@ export default function FinancePage() {
             const catName =
                 categories.find(c => c.id === budgetCategoryId)?.name ||
                 'This category';
-            setNotification(
-                `Budget set for ${catName} in ${monthLabel}: $${numAmount.toFixed(
-                    2
-                )}.`
-            );
+                setNotification(
+                    `Budget set for ${catName} in ${monthLabel}: ${new Intl.NumberFormat('en-US', {
+                        style: 'currency',
+                        currency: 'USD',
+                        minimumFractionDigits: 2,
+                    }).format(numAmount)}.`
+                );
         }
     };
 
@@ -725,7 +744,11 @@ export default function FinancePage() {
                             netWorth >= 0 ? 'text-emerald-400' : 'text-red-400'
                         }`}
                     >
-                        ${netWorth.toFixed(2)}
+                        {new Intl.NumberFormat('en-US', {
+                            style: 'currency',
+                            currency: 'USD',
+                            minimumFractionDigits: 2,
+                        }).format(netWorth)}
                     </p>
                 </div>
 
@@ -733,7 +756,11 @@ export default function FinancePage() {
                 <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
                     <p className="text-xs uppercase text-slate-400">Income</p>
                     <p className="text-2xl font-semibold text-emerald-400">
-                        ${totalIncome.toFixed(2)}
+                        {new Intl.NumberFormat('en-US', {
+                            style: 'currency',
+                            currency: 'USD',
+                            minimumFractionDigits: 2,
+                        }).format(totalIncome)}
                     </p>
                 </div>
 
@@ -741,7 +768,11 @@ export default function FinancePage() {
                 <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
                     <p className="text-xs uppercase text-slate-400">Expenses</p>
                     <p className="text-2xl font-semibold text-red-400">
-                        ${totalExpenses.toFixed(2)}
+                        {new Intl.NumberFormat('en-US', {
+                            style: 'currency',
+                            currency: 'USD',
+                            minimumFractionDigits: 2,
+                        }).format(totalExpenses)}
                     </p>
                 </div>
 
@@ -753,7 +784,11 @@ export default function FinancePage() {
                             net >= 0 ? 'text-emerald-400' : 'text-red-400'
                         }`}
                     >
-                        ${net.toFixed(2)}
+                        {new Intl.NumberFormat('en-US', {
+                            style: 'currency',
+                            currency: 'USD',
+                            minimumFractionDigits: 2,
+                        }).format(net)}
                     </p>
                 </div>
             </div>
@@ -785,13 +820,21 @@ export default function FinancePage() {
                     <div>
                         <div className="text-slate-400">Money in</div>
                         <div className="mt-1 text-sm font-semibold text-emerald-400">
-                            ${totalIn.toFixed(2)}
+                            {new Intl.NumberFormat('en-US', {
+                                style: 'currency',
+                                currency: 'USD',
+                                minimumFractionDigits: 2,
+                            }).format(totalIn)}
                         </div>
                     </div>
                     <div>
                         <div className="text-slate-400">Money out</div>
                         <div className="mt-1 text-sm font-semibold text-red-400">
-                            ${Math.abs(totalOut).toFixed(2)}
+                            {new Intl.NumberFormat('en-US', {
+                                style: 'currency',
+                                currency: 'USD',
+                                minimumFractionDigits: 2,
+                            }).format(Math.abs(totalOut))}
                         </div>
                     </div>
                     <div>
@@ -801,7 +844,11 @@ export default function FinancePage() {
                                 net >= 0 ? 'text-emerald-400' : 'text-red-400'
                             }`}
                         >
-                            ${net.toFixed(2)}
+                            {new Intl.NumberFormat('en-US', {
+                                style: 'currency',
+                                currency: 'USD',
+                                minimumFractionDigits: 2,
+                            }).format(net)}
                         </div>
                     </div>
                 </div>
@@ -979,8 +1026,12 @@ export default function FinancePage() {
                                                 : 'text-red-400'
                                         }`}
                                     >
-                                        {tx.amount >= 0 ? '+' : '-'}$
-                                        {Math.abs(tx.amount).toFixed(2)}
+                                        {tx.amount >= 0 ? '+' : '-'}
+                                        {new Intl.NumberFormat('en-US', {
+                                            style: 'currency',
+                                            currency: 'USD',
+                                            minimumFractionDigits: 2,
+                                        }).format(Math.abs(tx.amount))}
                                     </div>
                                     <div className="flex gap-2 text-[10px] text-slate-400">
                                         <button

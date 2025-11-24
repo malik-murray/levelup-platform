@@ -95,7 +95,7 @@ export default function DashboardPage() {
             name: "Habit Tracker",
             href: "/habit",
             description: "Track daily habits, XP, streaks, and life scores.",
-            status: "coming",
+            status: "open",
             icon: "📈",
         },
         {
@@ -106,38 +106,45 @@ export default function DashboardPage() {
             icon: "💰",
         },
         {
+            name: "Fitness Tracker",
+            href: "/fitness",
+            description: "Track workouts, meals, and metrics. PeakMode.",
+            status: "open",
+            icon: "💪",
+        },
+        {
             name: "Resume Generator",
             href: "/resume",
-            description: "Generate job-specific resumes and cover letters in seconds.",
-            status: "coming",
+            description: "Upload your resume + job description → Get tailored resume & cover letter.",
+            status: "open",
             icon: "📄",
         },
         {
             name: "Emotional Tracker",
             href: "/emotions",
             description: "Log emotions, triggers, and coping strategies.",
-            status: "coming",
+            status: "open",
             icon: "💭",
         },
         {
             name: "Stock & Crypto Analyzer",
             href: "/markets",
             description: "Monitor portfolios, track watchlists, and analyze moves.",
-            status: "coming",
+            status: "open",
             icon: "📊",
         },
         {
             name: "Newsfeed Summarizer",
             href: "/newsfeed",
             description: "Turn information overload into short daily briefs.",
-            status: "coming",
+            status: "open",
             icon: "📰",
         },
         {
             name: "Reflection to Lesson",
             href: "/reflection",
             description: "Convert journal entries into lessons and action steps.",
-            status: "coming",
+            status: "open",
             icon: "✨",
         },
     ];
@@ -154,14 +161,67 @@ export default function DashboardPage() {
     }
 
     return (
-        <main className="min-h-screen bg-black text-white dark:bg-black dark:text-white light:bg-white light:text-slate-900 transition-colors">
+        <main className="min-h-screen bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
             {/* Hero Section */}
-            <header className="relative overflow-hidden border-b border-slate-800 bg-gradient-to-b from-black via-slate-950 to-black dark:border-slate-800 dark:from-black dark:via-slate-950 dark:to-black light:border-slate-200 light:from-white light:via-slate-50 light:to-white transition-colors">
-                {/* Background decoration */}
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(245,196,81,0.08),transparent_50%)] pointer-events-none" />
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_80%,rgba(245,196,81,0.05),transparent_50%)] pointer-events-none" />
+            <header className="relative overflow-hidden border-b border-slate-800 bg-gradient-to-b from-black via-slate-950 to-black transition-colors">
+                {/* Outerspace Background */}
+                <div className="absolute inset-0 bg-gradient-to-b from-black via-slate-950 to-black" />
                 
-                <div className="relative mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8 lg:py-20">
+                {/* Stars Layer 1 - Large Stars */}
+                <div className="absolute inset-0 opacity-60">
+                    <div className="absolute top-[20%] left-[15%] w-1 h-1 bg-amber-400 rounded-full animate-pulse" />
+                    <div className="absolute top-[35%] left-[45%] w-1.5 h-1.5 bg-amber-300 rounded-full animate-pulse" style={{ animationDelay: '1s' }} />
+                    <div className="absolute top-[50%] left-[70%] w-1 h-1 bg-amber-400 rounded-full animate-pulse" style={{ animationDelay: '2s' }} />
+                    <div className="absolute top-[65%] left-[25%] w-1 h-1 bg-amber-300 rounded-full animate-pulse" style={{ animationDelay: '0.5s' }} />
+                    <div className="absolute top-[80%] left-[60%] w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse" style={{ animationDelay: '1.5s' }} />
+                </div>
+                
+                {/* Stars Layer 2 - Small Stars */}
+                <div className="absolute inset-0 opacity-40">
+                    <div className="absolute top-[10%] left-[30%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[15%] left-[60%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[25%] left-[80%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[30%] left-[10%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[40%] left-[55%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[45%] left-[85%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[55%] left-[20%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[60%] left-[50%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[70%] left-[75%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[75%] left-[40%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[85%] left-[15%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[90%] left-[65%] w-0.5 h-0.5 bg-white rounded-full" />
+                </div>
+                
+                {/* Nebula 1 - Amber/Gold */}
+                <div className="absolute inset-0 opacity-30">
+                    <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_20%_30%,rgba(245,158,11,0.4),transparent_60%)] pointer-events-none" />
+                </div>
+                
+                {/* Nebula 2 - Amber/Gold */}
+                <div className="absolute inset-0 opacity-20">
+                    <div className="absolute top-0 right-0 w-full h-full bg-[radial-gradient(circle_at_80%_70%,rgba(245,196,81,0.35),transparent_65%)] pointer-events-none" />
+                </div>
+                
+                {/* Additional Stars - Scattered */}
+                <div className="absolute inset-0 opacity-30" style={{
+                    backgroundImage: `radial-gradient(2px 2px at 20% 30%, white, transparent),
+                                     radial-gradient(2px 2px at 60% 70%, white, transparent),
+                                     radial-gradient(1px 1px at 50% 50%, white, transparent),
+                                     radial-gradient(1px 1px at 80% 10%, white, transparent),
+                                     radial-gradient(2px 2px at 90% 60%, white, transparent),
+                                     radial-gradient(1px 1px at 30% 80%, white, transparent),
+                                     radial-gradient(2px 2px at 70% 40%, white, transparent),
+                                     radial-gradient(1px 1px at 10% 50%, white, transparent),
+                                     radial-gradient(1px 1px at 40% 20%, white, transparent),
+                                     radial-gradient(2px 2px at 85% 90%, white, transparent)`,
+                    backgroundSize: '100% 100%',
+                    backgroundRepeat: 'no-repeat',
+                }} />
+                
+                {/* Subtle cosmic glow */}
+                <div className="absolute inset-0 bg-gradient-to-b from-transparent via-amber-950/5 to-transparent pointer-events-none" />
+                
+                <div className="relative mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8 lg:py-20 z-10">
                     <div className="flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
                         {/* Brand Section */}
                         <div className="flex items-center gap-4">
@@ -175,10 +235,10 @@ export default function DashboardPage() {
                                 />
                             </div>
                             <div>
-                                <h1 className="text-2xl font-bold text-white sm:text-3xl lg:text-4xl">
+                                <h1 className="text-2xl font-bold text-white dark:text-white sm:text-3xl lg:text-4xl drop-shadow-lg">
                                     LevelUpSolutions
                                 </h1>
-                                <p className="mt-1 text-sm text-slate-400 sm:text-base">
+                                <p className="mt-1 text-sm text-slate-200 dark:text-slate-300 sm:text-base drop-shadow-md">
                                     Your personal operating system for habits, money, mindset, and more.
                                 </p>
                             </div>
@@ -187,9 +247,9 @@ export default function DashboardPage() {
                         {/* User Actions */}
                         {email && (
                             <div className="flex flex-col items-end gap-3 sm:flex-row sm:items-center">
-                                <div className="flex items-center gap-2 rounded-full border border-slate-800 bg-slate-900/50 px-4 py-2 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50 light:border-slate-300 light:bg-white/50">
-                                    <span className="text-xs text-slate-400 dark:text-slate-400 light:text-slate-600">Logged in as</span>
-                                    <span className="text-xs font-medium text-white dark:text-white light:text-slate-900">
+                                <div className="flex items-center gap-2 rounded-full border border-slate-300 bg-white/50 px-4 py-2 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50">
+                                    <span className="text-xs text-slate-600 dark:text-slate-400">Logged in as</span>
+                                    <span className="text-xs font-medium text-slate-900 dark:text-white">
                                         {email}
                                     </span>
                                 </div>
@@ -199,7 +259,7 @@ export default function DashboardPage() {
                                         await supabase.auth.signOut();
                                         window.location.href = "/login";
                                     }}
-                                    className="rounded-full border border-slate-700 bg-slate-900/50 px-4 py-2 text-xs font-medium text-slate-200 backdrop-blur-sm transition-all hover:border-amber-500/50 hover:bg-slate-800 hover:text-amber-300 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200 dark:hover:bg-slate-800 light:border-slate-300 light:bg-white/50 light:text-slate-700 light:hover:bg-slate-100"
+                                    className="rounded-full border border-slate-300 bg-white/50 px-4 py-2 text-xs font-medium text-slate-700 backdrop-blur-sm transition-all hover:border-amber-500/50 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-amber-300"
                                 >
                                     Log out
                                 </button>

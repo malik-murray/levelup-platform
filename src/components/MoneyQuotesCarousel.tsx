@@ -191,10 +191,10 @@ export function MoneyQuotesCarousel() {
                         "
                     </span>
                     <div className="flex-1">
-                        <p className="text-xs sm:text-sm text-slate-300 leading-relaxed dark:text-slate-300 light:text-slate-700">
+                        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed dark:text-slate-300">
                             {currentQuote.text}
                         </p>
-                        <p className="mt-2 text-[10px] sm:text-xs text-slate-500 dark:text-slate-500 light:text-slate-500 italic">
+                        <p className="mt-2 text-[10px] sm:text-xs text-slate-500 italic">
                             — {currentQuote.author}
                         </p>
                     </div>
@@ -209,7 +209,7 @@ export function MoneyQuotesCarousel() {
                 {/* Previous button */}
                 <button
                     onClick={goToPrevious}
-                    className="rounded-full border border-slate-700 bg-slate-900/50 p-1.5 text-slate-400 transition-all hover:border-amber-500/50 hover:bg-slate-800 hover:text-amber-400 dark:border-slate-700 dark:bg-slate-900/50 light:border-slate-300 light:bg-white/50 light:hover:border-amber-500/50 light:hover:bg-slate-100"
+                    className="rounded-full border border-slate-300 bg-white/50 p-1.5 text-slate-600 transition-all hover:border-amber-500/50 hover:bg-slate-100 hover:text-amber-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-amber-400"
                     aria-label="Previous quote"
                 >
                     <svg
@@ -236,7 +236,7 @@ export function MoneyQuotesCarousel() {
                             className={`h-1.5 rounded-full transition-all ${
                                 index === activeIndex
                                     ? 'w-6 bg-amber-400'
-                                    : 'w-1.5 bg-slate-600 dark:bg-slate-600 light:bg-slate-300 hover:bg-slate-500'
+                                    : 'w-1.5 bg-slate-300 hover:bg-slate-500 dark:bg-slate-600'
                             }`}
                             aria-label={`Go to quote ${index + 1}`}
                         />
@@ -246,7 +246,7 @@ export function MoneyQuotesCarousel() {
                 {/* Next button */}
                 <button
                     onClick={goToNext}
-                    className="rounded-full border border-slate-700 bg-slate-900/50 p-1.5 text-slate-400 transition-all hover:border-amber-500/50 hover:bg-slate-800 hover:text-amber-400 dark:border-slate-700 dark:bg-slate-900/50 light:border-slate-300 light:bg-white/50 light:hover:border-amber-500/50 light:hover:bg-slate-100"
+                    className="rounded-full border border-slate-300 bg-white/50 p-1.5 text-slate-600 transition-all hover:border-amber-500/50 hover:bg-slate-100 hover:text-amber-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-amber-400"
                     aria-label="Next quote"
                 >
                     <svg

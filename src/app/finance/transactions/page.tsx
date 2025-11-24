@@ -81,6 +81,7 @@ export default function TransactionsPage() {
     const [transferToAccount, setTransferToAccount] = useState<string>('');
     const [creatingTransfer, setCreatingTransfer] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
+    const [originalTransactionType, setOriginalTransactionType] = useState<'transaction' | 'transfer' | null>(null);
     const [date, setDate] = useState<string>(() =>
         new Date().toISOString().slice(0, 10)
     );
@@ -281,6 +282,7 @@ export default function TransactionsPage() {
         setPerson('Malik');
         setNote('');
         setEditingId(null);
+        setOriginalTransactionType(null);
         setShowTransactionForm(false);
         setTransactionType('transaction');
         setTransferFromAccount('');
@@ -289,17 +291,46 @@ export default function TransactionsPage() {
 
     const handleEditTransaction = (tx: Transaction) => {
         if (tx.is_transfer) {
-            setNotification('Transfers cannot be edited. Delete and recreate if needed.');
-            return;
+            // For transfers, find both transactions in the group
+            const transferGroup = transactions.filter(
+                t => t.transfer_group_id === tx.transfer_group_id && t.is_transfer
+            );
+            const fromTx = transferGroup.find(t => t.amount < 0);
+            const toTx = transferGroup.find(t => t.amount > 0);
+            
+            if (fromTx && toTx) {
+                setEditingId(tx.id); // Store the ID of the transaction being edited
+                setOriginalTransactionType('transfer'); // Track original type
+                setTransactionType('transfer');
+                setDate(tx.date.slice(0, 10));
+                setAmount(Math.abs(fromTx.amount).toString()); // Use absolute value for amount input
+                setNote(tx.note ?? '');
+                setTransferFromAccount(fromTx.accountId ?? '');
+                setTransferToAccount(toTx.accountId ?? '');
+                // Pre-fill regular transaction fields in case user switches to transaction type
+                setAccountId(fromTx.accountId ?? '');
+                setCategoryId(fromTx.categoryId ?? '');
+                setPerson(fromTx.person ?? 'Malik');
+                setShowTransactionForm(true);
+            } else {
+                setNotification('Could not find both sides of transfer. Please delete and recreate.');
+            }
+        } else {
+            // Regular transaction
+            setEditingId(tx.id);
+            setOriginalTransactionType('transaction'); // Track original type
+            setTransactionType('transaction');
+            setDate(tx.date.slice(0, 10));
+            setAmount(tx.amount.toString());
+            setPerson(tx.person);
+            setNote(tx.note ?? '');
+            setAccountId(tx.accountId ?? '');
+            setCategoryId(tx.categoryId ?? '');
+            // Pre-fill transfer fields in case user switches to transfer type
+            setTransferFromAccount(tx.accountId ?? '');
+            setTransferToAccount('');
+            setShowTransactionForm(true);
         }
-        setEditingId(tx.id);
-        setDate(tx.date.slice(0, 10));
-        setAmount(tx.amount.toString());
-        setPerson(tx.person);
-        setNote(tx.note ?? '');
-        setAccountId(tx.accountId ?? '');
-        setCategoryId(tx.categoryId ?? '');
-        setShowTransactionForm(true);
     };
 
     const handleCancelEdit = () => {
@@ -318,25 +349,77 @@ export default function TransactionsPage() {
         setNotification(null);
 
         if (editingId) {
-            // UPDATE existing transaction
-            const { error } = await supabase
-                .from('transactions')
-                .update({
+            // Check if transaction type has changed
+            const typeChanged = originalTransactionType !== 'transaction';
+            
+            if (typeChanged) {
+                // Converting from transfer to transaction - delete old transfer, create new transaction
+                const editingTx = transactions.find(t => t.id === editingId);
+                if (!editingTx) {
+                    setNotification('Transaction not found.');
+                    return;
+                }
+
+                // Delete the transfer group if it exists
+                if (editingTx.transfer_group_id) {
+                    const transferGroup = transactions.filter(
+                        t => t.transfer_group_id === editingTx.transfer_group_id && t.is_transfer
+                    );
+                    
+                    if (transferGroup.length > 0) {
+                        const { error: deleteError } = await supabase
+                            .from('transactions')
+                            .delete()
+                            .in('id', transferGroup.map(t => t.id));
+
+                        if (deleteError) {
+                            console.error('Error deleting old transfer:', deleteError);
+                            setNotification('Error converting transfer. Check console/logs.');
+                            return;
+                        }
+                    }
+                }
+
+                // Create new regular transaction
+                const { error: insertError } = await supabase.from('transactions').insert({
                     date,
                     account_id: accountId,
                     category_id: categoryId,
                     amount: numAmount,
                     person,
                     note: note || null,
-                })
-                .eq('id', editingId);
+                    is_transfer: false,
+                    transfer_group_id: null,
+                });
 
-            if (error) {
-                console.error(error);
-                setNotification('Error updating transaction. Check console/logs.');
-                return;
+                if (insertError) {
+                    console.error('Error creating transaction:', insertError);
+                    setNotification('Error converting transfer. Check console/logs.');
+                    return;
+                }
+
+                setNotification('Transfer converted to transaction.');
+            } else {
+                // UPDATE existing transaction (same type)
+                const { error } = await supabase
+                    .from('transactions')
+                    .update({
+                        date,
+                        account_id: accountId,
+                        category_id: categoryId,
+                        amount: numAmount,
+                        person,
+                        note: note || null,
+                    })
+                    .eq('id', editingId);
+
+                if (error) {
+                    console.error(error);
+                    setNotification('Error updating transaction. Check console/logs.');
+                    return;
+                }
+                setNotification('Transaction updated.');
             }
-            setNotification('Transaction updated.');
         } else {
             // INSERT new transaction
             const { error } = await supabase.from('transactions').insert({
@@ -346,6 +429,8 @@ export default function TransactionsPage() {
                 amount: numAmount,
                 person,
                 note: note || null,
+                is_transfer: false,
+                transfer_group_id: null,
             });
 
             if (error) {
@@ -364,11 +449,52 @@ export default function TransactionsPage() {
     const handleDeleteTransaction = async (id: string) => {
         setNotification(null);
 
+        const tx = transactions.find(t => t.id === id);
+        if (!tx) {
+            setNotification('Transaction not found.');
+            return;
+        }
+
         if (typeof window !== 'undefined') {
-            const ok = window.confirm('Delete this transaction?');
+            const message = tx.is_transfer
+                ? 'Delete this transfer? This will delete both transactions in the transfer.'
+                : 'Delete this transaction?';
+            const ok = window.confirm(message);
             if (!ok) return;
         }
 
+        // If it's a transfer, delete both transactions in the group
+        if (tx.is_transfer && tx.transfer_group_id) {
+            const transferGroup = transactions.filter(
+                t => t.transfer_group_id === tx.transfer_group_id && t.is_transfer
+            );
+            
+            if (transferGroup.length > 0) {
+                const { error } = await supabase
+                    .from('transactions')
+                    .delete()
+                    .in('id', transferGroup.map(t => t.id));
+
+                if (error) {
+                    console.error(error);
+                    setNotification('Error deleting transfer. Check console/logs.');
+                    return;
+                }
+
+                setNotification('Transfer deleted.');
+                // Remove all IDs from selection
+                setSelectedTransactionIds(prev => {
+                    const next = new Set(prev);
+                    transferGroup.forEach(t => next.delete(t.id));
+                    return next;
+                });
+                // Reload transactions
+                setMonthDate(prev => new Date(prev));
+                return;
+            }
+        }
+
+        // Regular transaction deletion
         const { error } = await supabase
             .from('transactions')
             .delete()
@@ -407,11 +533,11 @@ export default function TransactionsPage() {
     };
 
     const handleToggleSelectAll = () => {
-        const nonTransferTransactions = transactions.filter(tx => !tx.is_transfer);
-        if (selectedTransactionIds.size === nonTransferTransactions.length) {
+        // Include all transactions (regular and transfers)
+        if (selectedTransactionIds.size === transactions.length) {
             setSelectedTransactionIds(new Set());
         } else {
-            setSelectedTransactionIds(new Set(nonTransferTransactions.map(tx => tx.id)));
+            setSelectedTransactionIds(new Set(transactions.map(tx => tx.id)));
         }
     };
 
@@ -481,8 +607,36 @@ export default function TransactionsPage() {
             return;
         }
 
+        // Collect all transaction IDs to delete, including transfer groups
+        const idsToDelete = new Set<string>(Array.from(selectedTransactionIds));
+        
+        // For any selected transfers, add their paired transaction to the delete set
+        const selectedTransactions = transactions.filter(tx => selectedTransactionIds.has(tx.id));
+        const transferGroupIds = new Set<string>();
+        
+        selectedTransactions.forEach(tx => {
+            if (tx.is_transfer && tx.transfer_group_id) {
+                transferGroupIds.add(tx.transfer_group_id);
+            }
+        });
+
+        // For each transfer group, find all transactions in the group and add them to delete set
+        transferGroupIds.forEach(groupId => {
+            const groupTransactions = transactions.filter(
+                t => t.transfer_group_id === groupId && t.is_transfer
+            );
+            groupTransactions.forEach(t => idsToDelete.add(t.id));
+        });
+
+        const totalToDelete = idsToDelete.size;
+        const transferCount = Array.from(transferGroupIds).length;
+
         if (typeof window !== 'undefined') {
-            const ok = window.confirm(`Delete ${selectedTransactionIds.size} selected transaction${selectedTransactionIds.size !== 1 ? 's' : ''}?`);
+            let confirmMessage = `Delete ${totalToDelete} selected transaction${totalToDelete !== 1 ? 's' : ''}?`;
+            if (transferCount > 0) {
+                confirmMessage += ` This includes ${transferCount} transfer${transferCount !== 1 ? 's' : ''} (${totalToDelete} total transaction${totalToDelete !== 1 ? 's' : ''}).`;
+            }
+            const ok = window.confirm(confirmMessage);
             if (!ok) return;
         }
 
@@ -490,11 +644,11 @@ export default function TransactionsPage() {
         setNotification(null);
 
         try {
-            const ids = Array.from(selectedTransactionIds);
+            const idsArray = Array.from(idsToDelete);
             const { error } = await supabase
                 .from('transactions')
                 .delete()
-                .in('id', ids);
+                .in('id', idsArray);
 
             if (error) {
                 console.error('Bulk delete error:', error);
@@ -503,7 +657,7 @@ export default function TransactionsPage() {
                 return;
             }
 
-            setNotification(`Successfully deleted ${ids.length} transaction${ids.length !== 1 ? 's' : ''}.`);
+            setNotification(`Successfully deleted ${totalToDelete} transaction${totalToDelete !== 1 ? 's' : ''}.`);
             setSelectedTransactionIds(new Set());
             setShowBulkEdit(false);
             setMonthDate(prev => new Date(prev));
@@ -542,62 +696,191 @@ export default function TransactionsPage() {
         setNotification(null);
 
         try {
-            // Generate a new UUID for the transfer group
-            const transferGroupId = crypto.randomUUID();
-
             // Get account names for the person field
             const fromAccount = accounts.find(a => a.id === transferFromAccount);
             const toAccount = accounts.find(a => a.id === transferToAccount);
             const transferLabel = `Transfer: ${fromAccount?.name ?? 'Unknown'} → ${toAccount?.name ?? 'Unknown'}`;
 
-            // Create two linked transactions
-            const { error } = await supabase.from('transactions').insert([
-                {
-                    date,
-                    amount: -numAmount, // Negative: money leaving source account
-                    person: transferLabel,
-                    note: note || null,
-                    account_id: transferFromAccount,
-                    category_id: null,
-                    is_transfer: true,
-                    transfer_group_id: transferGroupId,
-                },
-                {
-                    date,
-                    amount: numAmount, // Positive: money entering destination account
-                    person: transferLabel,
-                    note: note || null,
-                    account_id: transferToAccount,
-                    category_id: null,
-                    is_transfer: true,
-                    transfer_group_id: transferGroupId,
-                },
-            ]);
+            if (editingId) {
+                const editingTx = transactions.find(t => t.id === editingId);
+                if (!editingTx) {
+                    setNotification('Transaction not found.');
+                    return;
+                }
 
-            if (error) {
-                console.error('Transfer creation error:', error);
-                setNotification('Error creating transfer. Check console/logs.');
-                return;
+                // Check if we're converting from a regular transaction to a transfer
+                const typeChanged = originalTransactionType !== 'transfer';
+                
+                if (typeChanged) {
+                    // Converting from transaction to transfer - delete old transaction, create new transfer
+                    const { error: deleteError } = await supabase
+                        .from('transactions')
+                        .delete()
+                        .eq('id', editingId);
+
+                    if (deleteError) {
+                        console.error('Error deleting old transaction:', deleteError);
+                        setNotification('Error converting transaction. Check console/logs.');
+                        return;
+                    }
+
+                    // Create new transfer transactions
+                    const transferGroupId = crypto.randomUUID();
+                    const { error: insertError } = await supabase.from('transactions').insert([
+                        {
+                            date,
+                            amount: -numAmount, // Negative: money leaving source account
+                            person: transferLabel,
+                            note: note || null,
+                            account_id: transferFromAccount,
+                            category_id: null,
+                            is_transfer: true,
+                            transfer_group_id: transferGroupId,
+                        },
+                        {
+                            date,
+                            amount: numAmount, // Positive: money entering destination account
+                            person: transferLabel,
+                            note: note || null,
+                            account_id: transferToAccount,
+                            category_id: null,
+                            is_transfer: true,
+                            transfer_group_id: transferGroupId,
+                        },
+                    ]);
+
+                    if (insertError) {
+                        console.error('Error creating transfer:', insertError);
+                        setNotification('Error converting transaction. Check console/logs.');
+                        return;
+                    }
+
+                    setNotification(
+                        `Transaction converted to transfer: ${fromAccount?.name} → ${toAccount?.name} (${new Intl.NumberFormat('en-US', {
+                            style: 'currency',
+                            currency: 'USD',
+                            minimumFractionDigits: 2,
+                        }).format(numAmount)})`
+                    );
+                } else {
+                    // UPDATE existing transfer - find both transactions in the group
+                    if (!editingTx.transfer_group_id) {
+                        setNotification('Could not find transfer to update.');
+                        return;
+                    }
+
+                    // Find both transactions in the transfer group
+                    const transferGroup = transactions.filter(
+                        t => t.transfer_group_id === editingTx.transfer_group_id && t.is_transfer
+                    );
+                    
+                    if (transferGroup.length !== 2) {
+                        setNotification('Transfer group is incomplete. Please delete and recreate.');
+                        return;
+                    }
+
+                    // Delete old transactions and create new ones (simpler than updating individual fields)
+                    const { error: deleteError } = await supabase
+                        .from('transactions')
+                        .delete()
+                        .in('id', transferGroup.map(t => t.id));
+
+                    if (deleteError) {
+                        console.error('Error deleting old transfer:', deleteError);
+                        setNotification('Error updating transfer. Check console/logs.');
+                        return;
+                    }
+
+                    // Create updated transfer transactions with same group ID
+                    const { error: insertError } = await supabase.from('transactions').insert([
+                        {
+                            date,
+                            amount: -numAmount, // Negative: money leaving source account
+                            person: transferLabel,
+                            note: note || null,
+                            account_id: transferFromAccount,
+                            category_id: null,
+                            is_transfer: true,
+                            transfer_group_id: editingTx.transfer_group_id, // Keep same group ID
+                        },
+                        {
+                            date,
+                            amount: numAmount, // Positive: money entering destination account
+                            person: transferLabel,
+                            note: note || null,
+                            account_id: transferToAccount,
+                            category_id: null,
+                            is_transfer: true,
+                            transfer_group_id: editingTx.transfer_group_id, // Keep same group ID
+                        },
+                    ]);
+
+                    if (insertError) {
+                        console.error('Transfer update error:', insertError);
+                        setNotification('Error updating transfer. Check console/logs.');
+                        return;
+                    }
+
+                    setNotification(
+                        `Transfer updated: ${fromAccount?.name} → ${toAccount?.name} (${new Intl.NumberFormat('en-US', {
+                            style: 'currency',
+                            currency: 'USD',
+                            minimumFractionDigits: 2,
+                        }).format(numAmount)})`
+                    );
+                }
+            } else {
+                // CREATE new transfer
+                // Generate a new UUID for the transfer group
+                const transferGroupId = crypto.randomUUID();
+
+                // Create two linked transactions
+                const { error } = await supabase.from('transactions').insert([
+                    {
+                        date,
+                        amount: -numAmount, // Negative: money leaving source account
+                        person: transferLabel,
+                        note: note || null,
+                        account_id: transferFromAccount,
+                        category_id: null,
+                        is_transfer: true,
+                        transfer_group_id: transferGroupId,
+                    },
+                    {
+                        date,
+                        amount: numAmount, // Positive: money entering destination account
+                        person: transferLabel,
+                        note: note || null,
+                        account_id: transferToAccount,
+                        category_id: null,
+                        is_transfer: true,
+                        transfer_group_id: transferGroupId,
+                    },
+                ]);
+
+                if (error) {
+                    console.error('Transfer creation error:', error);
+                    setNotification('Error creating transfer. Check console/logs.');
+                    return;
+                }
+
+                setNotification(
+                    `Transfer created: ${fromAccount?.name} → ${toAccount?.name} (${new Intl.NumberFormat('en-US', {
+                        style: 'currency',
+                        currency: 'USD',
+                        minimumFractionDigits: 2,
+                    }).format(numAmount)})`
+                );
             }
 
-            setNotification(
-                `Transfer created: ${fromAccount?.name} → ${toAccount?.name} ($${numAmount.toFixed(2)})`
-            );
-
             // Reset form
-            setTransferFromAccount('');
-            setTransferToAccount('');
-            setAmount('0');
-            setNote('');
-            setDate(new Date().toISOString().slice(0, 10));
-            setTransactionType('transaction');
-            setShowTransactionForm(false);
+            resetFormToDefault();
 
             // Reload transactions
             setMonthDate(prev => new Date(prev)); // clone to force useEffect rerun
         } catch (err) {
-            console.error('Transfer creation failed:', err);
-            setNotification('Error creating transfer. Check console/logs.');
+            console.error('Transfer operation failed:', err);
+            setNotification('Error processing transfer. Check console/logs.');
         } finally {
             setCreatingTransfer(false);
         }
@@ -867,47 +1150,145 @@ export default function TransactionsPage() {
                 }
 
                 const headerLine = lines[0];
-                const headers = headerLine
-                    .split(',')
-                    .map(h => h.trim().toLowerCase());
+                // Split headers, handling quoted values properly
+                const headers: string[] = [];
+                let currentHeader = '';
+                let inQuotes = false;
+                
+                for (let i = 0; i < headerLine.length; i++) {
+                    const char = headerLine[i];
+                    if (char === '"') {
+                        inQuotes = !inQuotes;
+                    } else if (char === ',' && !inQuotes) {
+                        headers.push(currentHeader.trim().toLowerCase());
+                        currentHeader = '';
+                    } else {
+                        currentHeader += char;
+                    }
+                }
+                if (currentHeader) {
+                    headers.push(currentHeader.trim().toLowerCase());
+                }
 
-                const dateIdx = headers.findIndex(h => h === 'date' || h === 'posting date');
-                const descIdx = headers.findIndex(
-                    h =>
-                        h === 'description' ||
-                        h === 'details' ||
-                        h === 'memo' ||
-                        h === 'payee'
-                );
-                const amountIdx = headers.findIndex(
-                    h =>
-                        h === 'amount' ||
-                        h === 'transaction amount' ||
-                        h === 'debit' ||
-                        h === 'credit'
-                );
+                // Helper function to check if header contains any of the keywords
+                const findColumnIndex = (keywords: string[]): number => {
+                    // Try exact matches first, then partial matches
+                    for (const keyword of keywords) {
+                        const exactMatch = headers.findIndex(h => {
+                            const cleaned = h.replace(/[()]/g, '').replace(/\s+/g, ' ').trim();
+                            return cleaned === keyword;
+                        });
+                        if (exactMatch !== -1) return exactMatch;
+                    }
+                    
+                    // Try partial matches
+                    return headers.findIndex(h => {
+                        // Remove extra characters like "(USD)", parentheses, etc.
+                        const cleaned = h.replace(/[()]/g, '').replace(/\s+/g, ' ').trim();
+                        return keywords.some(keyword => {
+                            const lowerKeyword = keyword.toLowerCase();
+                            const lowerCleaned = cleaned.toLowerCase();
+                            return lowerCleaned === lowerKeyword || 
+                                   lowerCleaned.includes(lowerKeyword) ||
+                                   lowerCleaned.startsWith(lowerKeyword) ||
+                                   lowerCleaned.endsWith(lowerKeyword);
+                        });
+                    });
+                };
+
+                // Find date column - flexible matching
+                const dateIdx = findColumnIndex([
+                    'date',
+                    'transaction date',
+                    'clearing date',
+                    'posting date',
+                    'post date',
+                    'transactiondate',
+                    'clearingdate',
+                    'postingdate'
+                ]);
+
+                // Find description column - flexible matching
+                const descIdx = findColumnIndex([
+                    'description',
+                    'descriptions',
+                    'details',
+                    'detail',
+                    'memo',
+                    'memos',
+                    'payee',
+                    'payees',
+                    'merchant',
+                    'merchants',
+                    'vendor',
+                    'vendors',
+                    'narrative',
+                    'notes'
+                ]);
+
+                // Find amount column - flexible matching
+                const amountIdx = findColumnIndex([
+                    'amount',
+                    'amount (usd)',
+                    'amount(usd)',
+                    'transaction amount',
+                    'amount usd',
+                    'debit',
+                    'credits',
+                    'credit',
+                    'total',
+                    'value',
+                    'price'
+                ]);
 
                 if (dateIdx === -1 || descIdx === -1 || amountIdx === -1) {
+                    // Log headers for debugging
+                    console.log('CSV Headers detected:', headers);
+                    console.log('Date index:', dateIdx, 'Description index:', descIdx, 'Amount index:', amountIdx);
                     setNotification(
-                        'Could not detect date/description/amount columns. Make sure your CSV has headers: date, description, amount.'
+                        `Could not detect date/description/amount columns. Found headers: ${headers.join(', ')}. Expected columns like: date, description, amount.`
                     );
                     return;
                 }
+
+                // Helper function to parse CSV line handling quoted values
+                const parseCSVLine = (line: string): string[] => {
+                    const cols: string[] = [];
+                    let currentCol = '';
+                    let inQuotes = false;
+                    
+                    for (let i = 0; i < line.length; i++) {
+                        const char = line[i];
+                        if (char === '"') {
+                            inQuotes = !inQuotes;
+                        } else if (char === ',' && !inQuotes) {
+                            cols.push(currentCol.trim());
+                            currentCol = '';
+                        } else {
+                            currentCol += char;
+                        }
+                    }
+                    if (currentCol) {
+                        cols.push(currentCol.trim());
+                    }
+                    return cols;
+                };
 
                 const parsed: PendingTransaction[] = [];
 
                 for (let i = 1; i < lines.length; i++) {
                     const line = lines[i];
+                    if (!line.trim()) continue; // Skip empty lines
 
-                    // naive split – fine for first version
-                    const cols = line.split(',');
-                    if (cols.length < headers.length) {
+                    // Parse CSV line properly handling quoted values
+                    const cols = parseCSVLine(line);
+                    if (cols.length < Math.max(dateIdx, descIdx, amountIdx) + 1) {
                         continue;
                     }
 
-                    const rawDate = cols[dateIdx];
-                    const rawDesc = cols[descIdx];
-                    const rawAmount = cols[amountIdx];
+                    const rawDate = cols[dateIdx] || '';
+                    const rawDesc = cols[descIdx] || '';
+                    const rawAmount = cols[amountIdx] || '';
 
                     const date = normalizeDate(rawDate);
                     const amount = normalizeAmount(rawAmount);
@@ -1009,33 +1390,31 @@ export default function TransactionsPage() {
                         </button>
                     </div>
                     
-                    {/* Transaction type selector (only show when not editing) */}
-                    {!editingId && (
-                        <div className="mb-3 flex gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setTransactionType('transaction')}
-                                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                                    transactionType === 'transaction'
-                                        ? 'bg-amber-400 text-black'
-                                        : 'border border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-800'
-                                }`}
-                            >
-                                Transaction
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setTransactionType('transfer')}
-                                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                                    transactionType === 'transfer'
-                                        ? 'bg-amber-400 text-black'
-                                        : 'border border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-800'
-                                }`}
-                            >
-                                Transfer
-                            </button>
-                        </div>
-                    )}
+                    {/* Transaction type selector - always show, including when editing */}
+                    <div className="mb-3 flex gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setTransactionType('transaction')}
+                            className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                                transactionType === 'transaction'
+                                    ? 'bg-amber-400 text-black'
+                                    : 'border border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-800'
+                            }`}
+                        >
+                            Transaction
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setTransactionType('transfer')}
+                            className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                                transactionType === 'transfer'
+                                    ? 'bg-amber-400 text-black'
+                                    : 'border border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-800'
+                            }`}
+                        >
+                            Transfer
+                        </button>
+                    </div>
 
                     <form onSubmit={transactionType === 'transfer' ? handleCreateTransfer : handleSaveTransaction} className="space-y-3 mt-3">
                         <div className="space-y-1">
@@ -1454,13 +1833,21 @@ export default function TransactionsPage() {
                 <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
                     <p className="text-[10px] uppercase text-slate-400">Income</p>
                     <p className="text-xl font-semibold text-emerald-400">
-                        ${totalIn.toFixed(2)}
+                        {new Intl.NumberFormat('en-US', {
+                            style: 'currency',
+                            currency: 'USD',
+                            minimumFractionDigits: 2,
+                        }).format(totalIn)}
                     </p>
                 </div>
                 <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
                     <p className="text-[10px] uppercase text-slate-400">Expenses</p>
                     <p className="text-xl font-semibold text-red-400">
-                        ${totalOut.toFixed(2)}
+                        {new Intl.NumberFormat('en-US', {
+                            style: 'currency',
+                            currency: 'USD',
+                            minimumFractionDigits: 2,
+                        }).format(totalOut)}
                     </p>
                 </div>
                 <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
@@ -1470,7 +1857,11 @@ export default function TransactionsPage() {
                             net >= 0 ? 'text-emerald-400' : 'text-red-400'
                         }`}
                     >
-                        ${net.toFixed(2)}
+                        {new Intl.NumberFormat('en-US', {
+                            style: 'currency',
+                            currency: 'USD',
+                            minimumFractionDigits: 2,
+                        }).format(net)}
                     </p>
                 </div>
             </div>
@@ -1583,18 +1974,18 @@ export default function TransactionsPage() {
                         {/* Transaction List */}
                         <div className="max-h-[540px] space-y-2 overflow-y-auto">
                             {/* Select All Checkbox */}
-                            {transactions.filter(tx => !tx.is_transfer).length > 0 && (
+                            {transactions.length > 0 && (
                                 <div className="flex items-center gap-2 px-3 py-1 text-[10px] text-slate-400">
                                     <input
                                         type="checkbox"
                                         checked={
-                                            transactions.filter(tx => !tx.is_transfer).length > 0 &&
-                                            selectedTransactionIds.size === transactions.filter(tx => !tx.is_transfer).length
+                                            transactions.length > 0 &&
+                                            selectedTransactionIds.size === transactions.length
                                         }
                                         onChange={handleToggleSelectAll}
                                         className="rounded border-slate-600"
                                     />
-                                    <label>Select all non-transfer transactions</label>
+                                    <label>Select all transactions</label>
                                 </div>
                             )}
 
@@ -1609,14 +2000,12 @@ export default function TransactionsPage() {
                                                 : 'border-slate-800 bg-slate-950'
                                     }`}
                                 >
-                                    {!tx.is_transfer && (
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedTransactionIds.has(tx.id)}
-                                            onChange={() => handleToggleSelectTransaction(tx.id)}
-                                            className="rounded border-slate-600"
-                                        />
-                                    )}
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedTransactionIds.has(tx.id)}
+                                        onChange={() => handleToggleSelectTransaction(tx.id)}
+                                        className="rounded border-slate-600"
+                                    />
                                     <div className="flex-1">
                                         <div className="font-medium">
                                             {tx.is_transfer && (
@@ -1639,26 +2028,27 @@ export default function TransactionsPage() {
                                             }`}
                                         >
                                             {tx.amount >= 0 ? '+' : '-'}$
-                                            {Math.abs(tx.amount).toFixed(2)}
+                                            {new Intl.NumberFormat('en-US', {
+                                                minimumFractionDigits: 2,
+                                                maximumFractionDigits: 2,
+                                            }).format(Math.abs(tx.amount))}
                                         </div>
-                                        {!tx.is_transfer && (
-                                            <div className="flex gap-2 text-[10px] text-slate-400">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleEditTransaction(tx)}
-                                                    className="hover:text-amber-300"
-                                                >
-                                                    Edit
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleDeleteTransaction(tx.id)}
-                                                    className="hover:text-red-400"
-                                                >
-                                                    Delete
-                                                </button>
-                                            </div>
-                                        )}
+                                        <div className="flex gap-2 text-[10px] text-slate-400">
+                                            <button
+                                                type="button"
+                                                onClick={() => handleEditTransaction(tx)}
+                                                className="hover:text-amber-300"
+                                            >
+                                                Edit
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleDeleteTransaction(tx.id)}
+                                                className="hover:text-red-400"
+                                            >
+                                                Delete
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             ))}

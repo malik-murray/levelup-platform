@@ -192,13 +192,21 @@ export default function ReportsPage() {
                 <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
                     <p className="text-[10px] uppercase text-slate-400">Total income</p>
                     <p className="mt-1 text-xl font-semibold text-emerald-400">
-                        ${totalIncome.toFixed(2)}
+                        {new Intl.NumberFormat('en-US', {
+                            style: 'currency',
+                            currency: 'USD',
+                            minimumFractionDigits: 2,
+                        }).format(totalIncome)}
                     </p>
                 </div>
                 <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
                     <p className="text-[10px] uppercase text-slate-400">Total expenses</p>
                     <p className="mt-1 text-xl font-semibold text-red-400">
-                        ${totalExpenses.toFixed(2)}
+                        {new Intl.NumberFormat('en-US', {
+                            style: 'currency',
+                            currency: 'USD',
+                            minimumFractionDigits: 2,
+                        }).format(totalExpenses)}
                     </p>
                 </div>
                 <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
@@ -208,7 +216,11 @@ export default function ReportsPage() {
                             totalNet >= 0 ? 'text-emerald-400' : 'text-red-400'
                         }`}
                     >
-                        ${totalNet.toFixed(2)}
+                        {new Intl.NumberFormat('en-US', {
+                            style: 'currency',
+                            currency: 'USD',
+                            minimumFractionDigits: 2,
+                        }).format(totalNet)}
                     </p>
                 </div>
             </div>
@@ -242,17 +254,29 @@ export default function ReportsPage() {
                                 >
                                     <td className="py-1 pr-2 text-slate-100">{m.label}</td>
                                     <td className="py-1 pr-2 text-emerald-400">
-                                        ${m.income.toFixed(2)}
+                                        {new Intl.NumberFormat('en-US', {
+                                            style: 'currency',
+                                            currency: 'USD',
+                                            minimumFractionDigits: 2,
+                                        }).format(m.income)}
                                     </td>
                                     <td className="py-1 pr-2 text-red-400">
-                                        ${m.expenses.toFixed(2)}
+                                        {new Intl.NumberFormat('en-US', {
+                                            style: 'currency',
+                                            currency: 'USD',
+                                            minimumFractionDigits: 2,
+                                        }).format(m.expenses)}
                                     </td>
                                     <td
                                         className={`py-1 pr-2 ${
                                             m.net >= 0 ? 'text-emerald-400' : 'text-red-400'
                                         }`}
                                     >
-                                        ${m.net.toFixed(2)}
+                                        {new Intl.NumberFormat('en-US', {
+                                            style: 'currency',
+                                            currency: 'USD',
+                                            minimumFractionDigits: 2,
+                                        }).format(m.net)}
                                     </td>
                                 </tr>
                             ))}

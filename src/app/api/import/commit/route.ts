@@ -40,14 +40,46 @@ export async function POST(request: NextRequest) {
         const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
         // Transform to database format
-        const rowsToInsert = body.transactions.map(tx => ({
-            date: tx.date,
-            amount: tx.amount,
-            person: tx.description.slice(0, 255),
-            note: null,
-            account_id: body.accountId,
-            category_id: tx.categoryId || null,
-        }));
+        // IMPORTANT: Bank statements typically show expenses as positive numbers.
+        // Our convention: expenses are negative, income is positive.
+        // For imported transactions, treat as expenses (negative) by default unless clearly marked as income.
+        const rowsToInsert = body.transactions.map(tx => {
+            let amount = tx.amount;
+            
+            // Check if this looks like income based on description keywords (case-insensitive)
+            const description = tx.description.toLowerCase();
+            const isIncome = 
+                description.includes('deposit') ||
+                description.includes('ach credit') ||
+                description.includes('direct deposit') ||
+                description.includes('interest paid') ||
+                description.includes('salary') ||
+                description.includes('payroll') ||
+                description.includes('refund') ||
+                description.includes('transfer from') ||
+                description.includes('dividend');
+            
+            // Default behavior: treat all positive amounts as expenses (make negative)
+            // Only keep positive if it's clearly marked as income
+            if (amount > 0 && !isIncome) {
+                // This is likely an expense - make it negative
+                amount = -Math.abs(amount);
+            }
+            // If amount is already negative (from PDF parser), keep it negative (it's an expense)
+            // If it's clearly income and negative, make it positive
+            if (isIncome && amount < 0) {
+                amount = Math.abs(amount);
+            }
+            
+            return {
+                date: tx.date,
+                amount,
+                person: tx.description.slice(0, 255),
+                note: null,
+                account_id: body.accountId,
+                category_id: tx.categoryId || null,
+            };
+        });
 
         // Insert into database
         const { error, data } = await supabase
