@@ -37,3 +37,52 @@ body {
 .btn-gold:hover {
     background-color: #ffcc5a; /* slightly brighter gold */
 }
+
+/* Mobile-friendly improvements */
+/* Ensure touch targets are at least 44x44px for interactive elements */
+@media (max-width: 768px) {
+    button:not(.no-touch-target),
+    a:not(.no-touch-target),
+    input[type="button"]:not(.no-touch-target),
+    input[type="submit"]:not(.no-touch-target),
+    input[type="checkbox"],
+    input[type="radio"] {
+        min-height: 44px;
+        min-width: 44px;
+    }
+
+    /* Improve text input touch targets on mobile */
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    input[type="number"],
+    input[type="date"],
+    input[type="time"],
+    select,
+    textarea {
+        min-height: 44px;
+        font-size: 16px; /* Prevents zoom on iOS */
+    }
+}
+
+/* Smooth scrolling for mobile */
+html {
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+}
+
+/* Prevent text size adjustment on orientation change */
+body {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+/* Hide scrollbar for horizontal scrolling tabs */
+.scrollbar-hide {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+    display: none;  /* Chrome, Safari and Opera */
+}

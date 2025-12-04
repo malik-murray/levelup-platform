@@ -21,10 +21,10 @@ function AppCard({ app }: { app: App }) {
     const cardContent = (
         <div
             className={`
-                group relative rounded-2xl border bg-slate-950 p-6
+                group relative rounded-xl sm:rounded-2xl border bg-slate-950 p-4 sm:p-6
                 transition-all duration-300 ease-out
                 ${isOpen 
-                    ? 'border-amber-500/30 hover:border-amber-500/60 hover:shadow-2xl hover:shadow-amber-500/10 hover:-translate-y-1 cursor-pointer' 
+                    ? 'border-amber-500/30 hover:border-amber-500/60 hover:shadow-2xl hover:shadow-amber-500/10 hover:-translate-y-1 cursor-pointer active:scale-[0.98]' 
                     : 'border-slate-800 hover:border-slate-700 cursor-not-allowed opacity-75'
                 }
             `}
@@ -34,29 +34,29 @@ function AppCard({ app }: { app: App }) {
             
             <div className="relative z-10">
                 {/* App Icon/Initials */}
-                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500/20 to-amber-600/10 border border-amber-500/30">
-                    <span className="text-xl font-bold text-amber-400">
+                <div className="mb-3 sm:mb-4 flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-lg sm:rounded-xl bg-gradient-to-br from-amber-500/20 to-amber-600/10 border border-amber-500/30">
+                    <span className="text-lg sm:text-xl font-bold text-amber-400">
                         {app.icon || app.name.charAt(0)}
                     </span>
                 </div>
 
                 {/* App Name */}
-                <h3 className="mb-2 text-lg font-semibold text-white">
+                <h3 className="mb-1.5 sm:mb-2 text-base sm:text-lg font-semibold text-white">
                     {app.name}
                 </h3>
 
                 {/* Description */}
-                <p className="mb-4 text-sm text-slate-400 leading-relaxed">
+                <p className="mb-3 sm:mb-4 text-xs sm:text-sm text-slate-400 leading-relaxed">
                     {app.description}
                 </p>
 
                 {/* Status Badge */}
                 {isOpen ? (
-                    <span className="inline-flex items-center rounded-full bg-amber-400 px-4 py-1.5 text-xs font-semibold text-black shadow-lg shadow-amber-500/25">
+                    <span className="inline-flex items-center rounded-full bg-amber-400 px-3 py-1.5 sm:px-4 text-xs font-semibold text-black shadow-lg shadow-amber-500/25">
                         Open
                     </span>
                 ) : (
-                    <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-4 py-1.5 text-xs font-medium text-slate-400">
+                    <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 sm:px-4 text-xs font-medium text-slate-400">
                         Coming soon
                     </span>
                 )}
@@ -221,11 +221,11 @@ export default function DashboardPage() {
                 {/* Subtle cosmic glow */}
                 <div className="absolute inset-0 bg-gradient-to-b from-transparent via-amber-950/5 to-transparent pointer-events-none" />
                 
-                <div className="relative mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8 lg:py-20 z-10">
-                    <div className="flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
+                <div className="relative mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-12 lg:px-8 lg:py-16 z-10">
+                    <div className="flex flex-col items-start justify-between gap-4 sm:gap-6 sm:flex-row sm:items-center">
                         {/* Brand Section */}
-                        <div className="flex items-center gap-4">
-                            <div className="relative h-12 w-12 sm:h-14 sm:w-14 flex-shrink-0">
+                        <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
+                            <div className="relative h-10 w-10 sm:h-12 sm:w-12 lg:h-14 lg:w-14 flex-shrink-0">
                                 <Image
                                     src={logo}
                                     alt="LevelUpSolutions logo"
@@ -234,11 +234,11 @@ export default function DashboardPage() {
                                     priority
                                 />
                             </div>
-                            <div>
-                                <h1 className="text-2xl font-bold text-white dark:text-white sm:text-3xl lg:text-4xl drop-shadow-lg">
+                            <div className="min-w-0 flex-1">
+                                <h1 className="text-xl font-bold text-white dark:text-white sm:text-2xl lg:text-3xl xl:text-4xl drop-shadow-lg truncate">
                                     LevelUpSolutions
                                 </h1>
-                                <p className="mt-1 text-sm text-slate-200 dark:text-slate-300 sm:text-base drop-shadow-md">
+                                <p className="mt-1 text-xs text-slate-200 dark:text-slate-300 sm:text-sm lg:text-base drop-shadow-md line-clamp-2">
                                     Your personal operating system for habits, money, mindset, and more.
                                 </p>
                             </div>
@@ -246,23 +246,25 @@ export default function DashboardPage() {
 
                         {/* User Actions */}
                         {email && (
-                            <div className="flex flex-col items-end gap-3 sm:flex-row sm:items-center">
-                                <div className="flex items-center gap-2 rounded-full border border-slate-300 bg-white/50 px-4 py-2 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50">
-                                    <span className="text-xs text-slate-600 dark:text-slate-400">Logged in as</span>
-                                    <span className="text-xs font-medium text-slate-900 dark:text-white">
+                            <div className="flex flex-col w-full sm:w-auto items-stretch sm:items-end gap-2 sm:gap-3 sm:flex-row sm:items-center">
+                                <div className="flex items-center gap-2 rounded-full border border-slate-300 bg-white/50 px-3 py-2 sm:px-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50">
+                                    <span className="hidden sm:inline text-xs text-slate-600 dark:text-slate-400">Logged in as</span>
+                                    <span className="text-xs font-medium text-slate-900 dark:text-white truncate">
                                         {email}
                                     </span>
                                 </div>
-                                <ThemeToggle />
-                                <button
-                                    onClick={async () => {
-                                        await supabase.auth.signOut();
-                                        window.location.href = "/login";
-                                    }}
-                                    className="rounded-full border border-slate-300 bg-white/50 px-4 py-2 text-xs font-medium text-slate-700 backdrop-blur-sm transition-all hover:border-amber-500/50 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-amber-300"
-                                >
-                                    Log out
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    <ThemeToggle />
+                                    <button
+                                        onClick={async () => {
+                                            await supabase.auth.signOut();
+                                            window.location.href = "/login";
+                                        }}
+                                        className="rounded-full border border-slate-300 bg-white/50 px-4 py-2 text-xs font-medium text-slate-700 backdrop-blur-sm transition-all hover:border-amber-500/50 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-amber-300 flex-shrink-0"
+                                    >
+                                        Log out
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -270,18 +272,18 @@ export default function DashboardPage() {
             </header>
 
             {/* App Grid Section */}
-            <section className="mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
-                <div className="mb-8 text-center sm:mb-12">
-                    <h2 className="text-2xl font-bold text-white sm:text-3xl">
+            <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-12 lg:px-8">
+                <div className="mb-6 text-center sm:mb-8 lg:mb-12">
+                    <h2 className="text-xl font-bold text-white sm:text-2xl lg:text-3xl">
                         Your Apps
                     </h2>
-                    <p className="mt-2 text-sm text-slate-400 sm:text-base">
+                    <p className="mt-2 text-xs text-slate-400 sm:text-sm lg:text-base">
                         Choose an app to get started. We'll build each one out step by step.
                     </p>
                 </div>
 
                 {/* App Grid */}
-                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid grid-cols-1 gap-4 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3">
                     {apps.map((app) => (
                         <AppCard key={app.name} app={app} />
                     ))}

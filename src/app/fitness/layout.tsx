@@ -26,9 +26,9 @@ export default function FitnessLayout({
         <main className="min-h-screen bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
             {/* Header + tabs */}
             <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-black transition-colors">
-                <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-                    <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-                        <div className="relative h-8 w-8">
+                <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+                    <Link href="/dashboard" className="flex items-center gap-2 sm:gap-3 hover:opacity-80 transition-opacity">
+                        <div className="relative h-8 w-8 flex-shrink-0">
                             <Image
                                 src={logo}
                                 alt="LevelUp Fitness logo"
@@ -36,8 +36,8 @@ export default function FitnessLayout({
                                 fill
                             />
                         </div>
-                        <div>
-                            <h1 className="text-xl font-semibold text-amber-500 dark:text-amber-400">
+                        <div className="min-w-0">
+                            <h1 className="text-lg font-semibold text-amber-500 sm:text-xl dark:text-amber-400">
                                 PeakMode
                             </h1>
                             <p className="text-xs text-slate-400 mt-0.5">Fitness & Nutrition Tracker</p>
@@ -47,38 +47,43 @@ export default function FitnessLayout({
                         <ThemeToggle />
                         <Link
                             href="/dashboard"
-                            className="rounded-md border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200 transition-colors dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-amber-300"
+                            className="rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-200 transition-colors dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-amber-300"
                         >
-                            ← Dashboard
+                            <span className="hidden sm:inline">← Dashboard</span>
+                            <span className="sm:hidden">←</span>
                         </Link>
                     </div>
                 </div>
 
-                {/* Tabs */}
-                <nav className="mx-auto flex max-w-6xl gap-2 px-6 pb-3">
-                    {fitnessTabs.map(tab => {
-                        const isActive = pathname === tab.href || (tab.href !== '/fitness' && pathname?.startsWith(tab.href));
+                {/* Tabs - scrollable on mobile */}
+                <nav className="mx-auto max-w-6xl overflow-x-auto px-4 pb-3 sm:px-6 scrollbar-hide">
+                    <div className="flex gap-2 min-w-max sm:min-w-0">
+                        {fitnessTabs.map(tab => {
+                            const isActive = pathname === tab.href || (tab.href !== '/fitness' && pathname?.startsWith(tab.href));
 
-                        return (
-                            <Link
-                                key={tab.href}
-                                href={tab.href}
-                                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                                    isActive
-                                        ? 'bg-amber-500 text-black dark:bg-amber-400 dark:text-black'
-                                        : 'text-slate-600 hover:bg-slate-100 hover:text-amber-600 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-amber-300'
-                                }`}
-                            >
-                                {tab.label}
-                            </Link>
-                        );
-                    })}
+                            return (
+                                <Link
+                                    key={tab.href}
+                                    href={tab.href}
+                                    className={`rounded-full px-4 py-2 text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
+                                        isActive
+                                            ? 'bg-amber-500 text-black dark:bg-amber-400 dark:text-black'
+                                            : 'text-slate-600 hover:bg-slate-100 hover:text-amber-600 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-amber-300'
+                                    }`}
+                                >
+                                    {tab.label}
+                                </Link>
+                            );
+                        })}
+                    </div>
                 </nav>
             </header>
 
             {/* Page content */}
-            <div className="mx-auto max-w-6xl pb-8 pt-4">{children}</div>
+            <div className="mx-auto max-w-6xl px-4 pb-8 pt-4 sm:px-6">{children}</div>
         </main>
     );
 }
+
+
 

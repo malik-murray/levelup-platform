@@ -165,3 +165,5 @@ CREATE POLICY "Users can update their own integrations"
     ON fitness_integrations FOR UPDATE
     USING (auth.uid() = user_id);
 
+
+

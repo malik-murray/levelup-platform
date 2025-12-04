@@ -74,7 +74,8 @@ export async function POST(request: NextRequest) {
             return {
                 date: tx.date,
                 amount,
-                person: tx.description.slice(0, 255),
+                name: tx.description.slice(0, 255), // Set name from description
+                person: 'Malik', // Default person
                 note: null,
                 account_id: body.accountId,
                 category_id: tx.categoryId || null,

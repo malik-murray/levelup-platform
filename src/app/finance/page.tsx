@@ -728,19 +728,19 @@ export default function FinancePage() {
     };
 
     return (
-        <section className="space-y-4 px-6 py-4">
+        <section className="space-y-4 px-4 py-4 sm:px-6">
             {notification && (
                 <div className="rounded-md border border-amber-500 bg-amber-950 px-4 py-2 text-xs text-amber-100">
                     {notification}
                 </div>
             )}
             {/* 🔹 Dashboard Summary - Net Worth, Income, Expenses, Cashflow */}
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {/* Net Worth */}
                 <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
                     <p className="text-xs uppercase text-slate-400">Net Worth</p>
                     <p
-                        className={`text-2xl font-semibold ${
+                        className={`text-xl sm:text-2xl font-semibold ${
                             netWorth >= 0 ? 'text-emerald-400' : 'text-red-400'
                         }`}
                     >
@@ -799,27 +799,29 @@ export default function FinancePage() {
                     <button
                         type="button"
                         onClick={goToPrevMonth}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:bg-slate-800"
+                        className="rounded-md border border-slate-700 bg-slate-950 px-4 py-2 text-sm hover:bg-slate-800 active:bg-slate-900 transition-colors"
+                        aria-label="Previous month"
                     >
                         ◀
                     </button>
                     <div className="text-center">
-                        <h2 className="text-sm font-semibold">{monthLabel}</h2>
-                        <p className="text-[10px] text-slate-400">{monthStr}</p>
+                        <h2 className="text-sm sm:text-base font-semibold">{monthLabel}</h2>
+                        <p className="text-[10px] sm:text-xs text-slate-400">{monthStr}</p>
                     </div>
                     <button
                         type="button"
                         onClick={goToNextMonth}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:bg-slate-800"
+                        className="rounded-md border border-slate-700 bg-slate-950 px-4 py-2 text-sm hover:bg-slate-800 active:bg-slate-900 transition-colors"
+                        aria-label="Next month"
                     >
                         ▶
                     </button>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-3 gap-2 sm:gap-3">
                     <div>
-                        <div className="text-slate-400">Money in</div>
-                        <div className="mt-1 text-sm font-semibold text-emerald-400">
+                        <div className="text-xs sm:text-sm text-slate-400">Money in</div>
+                        <div className="mt-1 text-xs sm:text-sm font-semibold text-emerald-400">
                             {new Intl.NumberFormat('en-US', {
                                 style: 'currency',
                                 currency: 'USD',
@@ -828,8 +830,8 @@ export default function FinancePage() {
                         </div>
                     </div>
                     <div>
-                        <div className="text-slate-400">Money out</div>
-                        <div className="mt-1 text-sm font-semibold text-red-400">
+                        <div className="text-xs sm:text-sm text-slate-400">Money out</div>
+                        <div className="mt-1 text-xs sm:text-sm font-semibold text-red-400">
                             {new Intl.NumberFormat('en-US', {
                                 style: 'currency',
                                 currency: 'USD',
@@ -838,9 +840,9 @@ export default function FinancePage() {
                         </div>
                     </div>
                     <div>
-                        <div className="text-slate-400">Net</div>
+                        <div className="text-xs sm:text-sm text-slate-400">Net</div>
                         <div
-                            className={`mt-1 text-sm font-semibold ${
+                            className={`mt-1 text-xs sm:text-sm font-semibold ${
                                 net >= 0 ? 'text-emerald-400' : 'text-red-400'
                             }`}
                         >

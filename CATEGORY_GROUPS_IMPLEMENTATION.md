@@ -95,3 +95,5 @@ category_budgets {
 - Activity calculation uses absolute values for expenses (negative amounts) and positive values for income
 
 
+
+

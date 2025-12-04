@@ -25,46 +25,48 @@ export default function LoginPage() {
     };
 
     return (
-        <main className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
-            <div className="w-full max-w-md rounded-xl border border-slate-800 bg-slate-900 p-8 shadow-xl">
-                <h1 className="mb-6 text-2xl font-semibold text-center">
+        <main className="flex min-h-screen items-center justify-center bg-slate-950 text-white px-4 py-8">
+            <div className="w-full max-w-md rounded-xl border border-slate-800 bg-slate-900 p-6 sm:p-8 shadow-xl">
+                <h1 className="mb-6 text-xl sm:text-2xl font-semibold text-center">
                     {mode === 'login' ? 'Log in' : 'Create an account'}
                 </h1>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <input
-                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-emerald-500"
                         type="email"
                         placeholder="Email"
                         value={email}
                         onChange={e => setEmail(e.target.value)}
                         required
+                        autoComplete="email"
                     />
                     <input
-                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-emerald-500"
                         type="password"
                         placeholder="Password"
                         value={password}
                         onChange={e => setPassword(e.target.value)}
                         required
+                        autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                     />
 
                     <button
                         type="submit"
-                        className="w-full rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-black hover:bg-emerald-400"
+                        className="w-full rounded-md bg-emerald-500 px-4 py-3 text-base font-semibold text-black hover:bg-emerald-400 active:bg-emerald-600 transition-colors"
                     >
                         {mode === 'login' ? 'Log in' : 'Sign up'}
                     </button>
                 </form>
 
                 {message && (
-                    <p className="mt-4 text-center text-sm text-red-400">
+                    <p className="mt-4 text-center text-sm text-red-400 px-2">
                         {message}
                     </p>
                 )}
 
                 <button
-                    className="mt-6 w-full text-xs text-slate-300 underline"
+                    className="mt-6 w-full text-sm sm:text-xs text-slate-300 underline py-2 active:opacity-70"
                     onClick={() =>
                         setMode(prev => (prev === 'login' ? 'signup' : 'login'))
                     }

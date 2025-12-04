@@ -18,6 +18,7 @@ type Transaction = {
     id: string;
     date: string;
     amount: number;
+    name: string | null;
     person: string;
     note: string | null;
     account: string | null;
@@ -32,6 +33,7 @@ type TxRow = {
     id: string;
     date: string;
     amount: number;
+    name: string | null;
     person: string;
     note: string | null;
     account_id: string | null;
@@ -68,6 +70,13 @@ export default function TransactionsPage() {
         selected: boolean;
         isTransfer?: boolean;
         transferToAccountId?: string | null;
+        // AI suggestion state
+        suggestedCategoryId?: string | null;
+        suggestedCategoryName?: string | null;
+        suggestionConfidence?: number;
+        suggestionReasoning?: string;
+        isSuggesting?: boolean;
+        suggestionError?: string | null;
     };
     const [pendingImportTransactions, setPendingImportTransactions] = useState<PendingTransaction[]>([]);
     const [importAccountId, setImportAccountId] = useState<string>('');
@@ -194,12 +203,14 @@ export default function TransactionsPage() {
             const startStr = startOfMonth.toISOString().slice(0, 10);
             const endStr = endOfMonth.toISOString().slice(0, 10);
 
-            const { data: txData, error: txError } = await supabase
+            // Try to fetch with name field first (if migration has been run)
+            let { data: txData, error: txError } = await supabase
                 .from('transactions')
                 .select(`
           id,
           date,
           amount,
+          name,
           person,
           note,
           account_id,
@@ -213,11 +224,43 @@ export default function TransactionsPage() {
                 .lt('date', endStr)
                 .order('date', { ascending: false });
 
+            // If error and it might be due to missing 'name' column, retry without it
+            if (txError && (txError.message?.includes('column') || txError.code === 'PGRST116')) {
+                console.log('Retrying query without name column (migration may not be run yet)');
+                const retryResult = await supabase
+                    .from('transactions')
+                    .select(`
+          id,
+          date,
+          amount,
+          person,
+          note,
+          account_id,
+          category_id,
+          is_transfer,
+          transfer_group_id,
+          accounts ( id, name ),
+          categories ( id, name )
+        `)
+                    .gte('date', startStr)
+                    .lt('date', endStr)
+                    .order('date', { ascending: false });
+                
+                // Add name: null to each row if it doesn't exist (migration not run yet)
+                if (retryResult.data) {
+                    txData = retryResult.data.map((row: any) => ({
+                        ...row,
+                        name: null,
+                    }));
+                }
+                txError = retryResult.error;
+            }
+
             // 🔍 Debug log so we SEE what's happening
             console.log('TX RAW RESULT (transactions page):', { txData, txError });
 
             if (txError) {
-                console.error(txError);
+                console.error('Error loading transactions:', txError);
                 setNotification('Error loading transactions. Check console/logs.');
                 setTransactions([]);
                 setLoading(false);
@@ -230,6 +273,7 @@ export default function TransactionsPage() {
                 id: tx.id,
                 date: tx.date,
                 amount: Number(tx.amount),
+                name: tx.name ?? null, // Handle case where name column doesn't exist yet
                 person: tx.person,
                 note: tx.note,
                 account: getRelName(tx.accounts),
@@ -304,7 +348,7 @@ export default function TransactionsPage() {
                 setTransactionType('transfer');
                 setDate(tx.date.slice(0, 10));
                 setAmount(Math.abs(fromTx.amount).toString()); // Use absolute value for amount input
-                setNote(tx.note ?? '');
+                setNote(tx.name || tx.note || '');
                 setTransferFromAccount(fromTx.accountId ?? '');
                 setTransferToAccount(toTx.accountId ?? '');
                 // Pre-fill regular transaction fields in case user switches to transaction type
@@ -323,7 +367,7 @@ export default function TransactionsPage() {
             setDate(tx.date.slice(0, 10));
             setAmount(tx.amount.toString());
             setPerson(tx.person);
-            setNote(tx.note ?? '');
+            setNote(tx.name || tx.note || '');
             setAccountId(tx.accountId ?? '');
             setCategoryId(tx.categoryId ?? '');
             // Pre-fill transfer fields in case user switches to transfer type
@@ -386,8 +430,9 @@ export default function TransactionsPage() {
                     account_id: accountId,
                     category_id: categoryId,
                     amount: numAmount,
+                    name: note || null, // Use note as name for manual transactions
                     person,
-                    note: note || null,
+                    note: null, // Clear note since we're using name
                     is_transfer: false,
                     transfer_group_id: null,
                 });
@@ -408,8 +453,9 @@ export default function TransactionsPage() {
                         account_id: accountId,
                         category_id: categoryId,
                         amount: numAmount,
+                        name: note || null, // Use note as name for manual transactions
                         person,
-                        note: note || null,
+                        note: null, // Clear note since we're using name
                     })
                     .eq('id', editingId);
 
@@ -427,8 +473,9 @@ export default function TransactionsPage() {
                 account_id: accountId,
                 category_id: categoryId,
                 amount: numAmount,
+                name: note || null, // Use note as name for manual transactions
                 person,
-                note: note || null,
+                note: null, // Clear note since we're using name
                 is_transfer: false,
                 transfer_group_id: null,
             });
@@ -921,7 +968,7 @@ export default function TransactionsPage() {
                         accountId: importAccountId,
                         transactions: regularTransactions.map(tx => ({
                             date: tx.date,
-                            description: tx.description,
+                            description: tx.description, // This will become the 'name' field
                             amount: tx.amount,
                             categoryId: tx.categoryId || null,
                         })),
@@ -1037,6 +1084,132 @@ export default function TransactionsPage() {
                 }
                 return tx;
             })
+        );
+    };
+
+    // AI Category Suggestion
+    const handleSuggestCategories = async () => {
+        if (pendingImportTransactions.length === 0) {
+            setNotification('No transactions to suggest categories for.');
+            return;
+        }
+
+        setNotification('Getting AI category suggestions...');
+        
+        // Update all transactions to show they're being processed
+        setPendingImportTransactions(prev =>
+            prev.map(tx => ({
+                ...tx,
+                isSuggesting: true,
+                suggestionError: null,
+            }))
+        );
+
+        // Process suggestions in batches to avoid overwhelming the API
+        const batchSize = 5;
+        const selectedTransactions = pendingImportTransactions.filter(tx => tx.selected);
+        
+        for (let i = 0; i < selectedTransactions.length; i += batchSize) {
+            const batch = selectedTransactions.slice(i, i + batchSize);
+            
+            await Promise.all(
+                batch.map(async (tx, batchIndex) => {
+                    const globalIndex = pendingImportTransactions.findIndex(
+                        t => t.rawLine === tx.rawLine && t.date === tx.date && t.description === tx.description
+                    );
+                    
+                    if (globalIndex === -1) return;
+
+                    try {
+                        const response = await fetch('/api/transactions/suggest-category', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                transactionName: tx.description,
+                                amount: tx.amount,
+                                date: tx.date,
+                            }),
+                        });
+
+                        const suggestion = await response.json();
+
+                        if (response.ok && suggestion.categoryId) {
+                            setPendingImportTransactions(prev =>
+                                prev.map((t, idx) =>
+                                    idx === globalIndex
+                                        ? {
+                                              ...t,
+                                              suggestedCategoryId: suggestion.categoryId,
+                                              suggestedCategoryName: suggestion.categoryName,
+                                              suggestionConfidence: suggestion.confidence,
+                                              suggestionReasoning: suggestion.reasoning,
+                                              isSuggesting: false,
+                                          }
+                                        : t
+                                )
+                            );
+                        } else {
+                            setPendingImportTransactions(prev =>
+                                prev.map((t, idx) =>
+                                    idx === globalIndex
+                                        ? {
+                                              ...t,
+                                              isSuggesting: false,
+                                              suggestionError: suggestion.error || 'No suggestion available',
+                                          }
+                                        : t
+                                )
+                            );
+                        }
+                    } catch (error) {
+                        console.error('Suggestion error:', error);
+                        setPendingImportTransactions(prev =>
+                            prev.map((t, idx) =>
+                                idx === globalIndex
+                                    ? {
+                                          ...t,
+                                          isSuggesting: false,
+                                          suggestionError: 'Failed to get suggestion',
+                                      }
+                                    : t
+                            )
+                        );
+                    }
+                })
+            );
+        }
+
+        setNotification('Category suggestions complete! Review and accept/reject as needed.');
+    };
+
+    const handleAcceptSuggestion = (index: number) => {
+        setPendingImportTransactions(prev =>
+            prev.map((tx, i) =>
+                i === index && tx.suggestedCategoryId
+                    ? {
+                          ...tx,
+                          categoryId: tx.suggestedCategoryId,
+                          suggestedCategoryId: undefined,
+                          suggestedCategoryName: undefined,
+                      }
+                    : tx
+            )
+        );
+    };
+
+    const handleRejectSuggestion = (index: number) => {
+        setPendingImportTransactions(prev =>
+            prev.map((tx, i) =>
+                i === index
+                    ? {
+                          ...tx,
+                          suggestedCategoryId: undefined,
+                          suggestedCategoryName: undefined,
+                          suggestionConfidence: undefined,
+                          suggestionReasoning: undefined,
+                      }
+                    : tx
+            )
         );
     };
 
@@ -1340,28 +1513,30 @@ export default function TransactionsPage() {
     // =========================================================
 
     return (
-        <section className="space-y-4 px-6 py-4">
-            <div className="flex items-center justify-between">
+        <section className="space-y-4 px-4 py-4 sm:px-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h2 className="text-lg font-semibold">Transactions</h2>
+                    <h2 className="text-base sm:text-lg font-semibold">Transactions</h2>
                     <p className="text-xs text-slate-400">
                         View all activity for the selected month.
                     </p>
                 </div>
 
-                <div className="flex items-center gap-2 text-xs text-slate-300">
+                <div className="flex items-center gap-3 text-xs sm:text-sm text-slate-300">
                     <button
                         type="button"
                         onClick={goToPrevMonth}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 hover:bg-slate-800"
+                        className="rounded-md border border-slate-700 bg-slate-950 px-4 py-2 hover:bg-slate-800 active:bg-slate-900 transition-colors"
+                        aria-label="Previous month"
                     >
                         ◀
                     </button>
-                    <span>{monthLabel}</span>
+                    <span className="min-w-[120px] text-center font-medium">{monthLabel}</span>
                     <button
                         type="button"
                         onClick={goToNextMonth}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 hover:bg-slate-800"
+                        className="rounded-md border border-slate-700 bg-slate-950 px-4 py-2 hover:bg-slate-800 active:bg-slate-900 transition-colors"
+                        aria-label="Next month"
                     >
                         ▶
                     </button>
@@ -1376,29 +1551,30 @@ export default function TransactionsPage() {
 
             {/* 🆕 Transaction form */}
             {showTransactionForm && (
-                <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
-                    <div className="mb-1 flex items-center justify-between">
-                        <h3 className="text-sm font-semibold">
+                <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 sm:p-6 text-xs sm:text-sm">
+                    <div className="mb-3 flex items-center justify-between">
+                        <h3 className="text-sm sm:text-base font-semibold">
                             {editingId ? 'Edit transaction' : 'Add transaction'}
                         </h3>
                         <button
                             type="button"
                             onClick={handleCancelEdit}
-                            className="text-slate-400 hover:text-slate-200"
+                            className="text-slate-400 hover:text-slate-200 p-2 -mr-2 active:opacity-70"
+                            aria-label="Close"
                         >
                             ✕
                         </button>
                     </div>
                     
                     {/* Transaction type selector - always show, including when editing */}
-                    <div className="mb-3 flex gap-2">
+                    <div className="mb-4 flex gap-2">
                         <button
                             type="button"
                             onClick={() => setTransactionType('transaction')}
-                            className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                            className={`flex-1 rounded-md px-4 py-3 text-sm font-medium transition-colors active:scale-[0.98] ${
                                 transactionType === 'transaction'
                                     ? 'bg-amber-400 text-black'
-                                    : 'border border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-800'
+                                    : 'border border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-800 active:bg-slate-900'
                             }`}
                         >
                             Transaction
@@ -1406,22 +1582,22 @@ export default function TransactionsPage() {
                         <button
                             type="button"
                             onClick={() => setTransactionType('transfer')}
-                            className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                            className={`flex-1 rounded-md px-4 py-3 text-sm font-medium transition-colors active:scale-[0.98] ${
                                 transactionType === 'transfer'
                                     ? 'bg-amber-400 text-black'
-                                    : 'border border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-800'
+                                    : 'border border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-800 active:bg-slate-900'
                             }`}
                         >
                             Transfer
                         </button>
                     </div>
 
-                    <form onSubmit={transactionType === 'transfer' ? handleCreateTransfer : handleSaveTransaction} className="space-y-3 mt-3">
-                        <div className="space-y-1">
-                            <label className="block text-slate-300">Date</label>
+                    <form onSubmit={transactionType === 'transfer' ? handleCreateTransfer : handleSaveTransaction} className="space-y-4 mt-3">
+                        <div className="space-y-2">
+                            <label className="block text-sm text-slate-300">Date</label>
                             <input
                                 type="date"
-                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
                                 value={date}
                                 onChange={e => setDate(e.target.value)}
                                 required
@@ -1433,7 +1609,7 @@ export default function TransactionsPage() {
                                     <div className="space-y-1">
                                         <label className="block text-slate-300">From Account</label>
                                         <select
-                                            className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                            className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
                                             value={transferFromAccount}
                                             onChange={e => setTransferFromAccount(e.target.value)}
                                             required
@@ -1449,7 +1625,7 @@ export default function TransactionsPage() {
                                     <div className="space-y-1">
                                         <label className="block text-slate-300">To Account</label>
                                         <select
-                                            className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                            className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
                                             value={transferToAccount}
                                             onChange={e => setTransferToAccount(e.target.value)}
                                             required
@@ -1469,7 +1645,7 @@ export default function TransactionsPage() {
                                 <div className="space-y-1">
                                     <label className="block text-slate-300">Account</label>
                                     <select
-                                        className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                        className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
                                         value={accountId}
                                         onChange={e => setAccountId(e.target.value)}
                                         required
@@ -1485,7 +1661,7 @@ export default function TransactionsPage() {
                                 <div className="space-y-1">
                                     <label className="block text-slate-300">Category</label>
                                     <select
-                                        className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                        className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
                                         value={categoryId}
                                         onChange={e => setCategoryId(e.target.value)}
                                         required
@@ -1506,7 +1682,7 @@ export default function TransactionsPage() {
                                 type="number"
                                 step="0.01"
                                 min={transactionType === 'transfer' ? '0.01' : undefined}
-                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
                                 value={amount}
                                 onChange={e => setAmount(e.target.value)}
                                 required
@@ -1526,7 +1702,7 @@ export default function TransactionsPage() {
                             <div className="space-y-1">
                                 <label className="block text-slate-300">Person</label>
                                 <select
-                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
                                     value={person}
                                     onChange={e => setPerson(e.target.value)}
                                     required
@@ -1539,10 +1715,10 @@ export default function TransactionsPage() {
                         )}
                         <div className="space-y-1">
                             <label className="block text-slate-300">
-                                Note (optional)
+                                Transaction Name *
                             </label>
                             <input
-                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
                                 value={note}
                                 onChange={e => setNote(e.target.value)}
                                 placeholder="ex. Giant groceries, date night, etc."
@@ -1694,6 +1870,14 @@ export default function TransactionsPage() {
                                 ))}
                             </select>
                         </div>
+                        <button
+                            type="button"
+                            onClick={handleSuggestCategories}
+                            disabled={pendingImportTransactions.length === 0 || pendingImportTransactions.some(tx => tx.isSuggesting)}
+                            className="rounded-md bg-blue-600 px-3 py-1 text-[10px] font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
+                        >
+                            🤖 AI Suggest Categories
+                        </button>
                     </div>
 
                     {/* Preview table */}
@@ -1759,18 +1943,44 @@ export default function TransactionsPage() {
                                             />
                                         </td>
                                         <td className="p-2">
-                                            <select
-                                                value={tx.categoryId || ''}
-                                                onChange={e => handleUpdatePendingTransaction(index, 'categoryId', e.target.value || null)}
-                                                className="w-full rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[10px]"
-                                            >
-                                                <option value="">None</option>
-                                                {categories.map(cat => (
-                                                    <option key={cat.id} value={cat.id}>
-                                                        {cat.type === 'income' ? '⬆️' : '⬇️'} {cat.name}
-                                                    </option>
-                                                ))}
-                                            </select>
+                                            {tx.isSuggesting ? (
+                                                <div className="text-[9px] text-slate-500">Loading...</div>
+                                            ) : tx.suggestedCategoryId && !tx.categoryId ? (
+                                                <div className="space-y-1">
+                                                    <div className="text-[9px] text-blue-400">
+                                                        💡 {tx.suggestedCategoryName} ({Math.round((tx.suggestionConfidence || 0) * 100)}%)
+                                                    </div>
+                                                    <div className="flex gap-1">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleAcceptSuggestion(index)}
+                                                            className="flex-1 rounded bg-emerald-600 px-1 py-0.5 text-[8px] text-white hover:bg-emerald-500"
+                                                        >
+                                                            ✓
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleRejectSuggestion(index)}
+                                                            className="flex-1 rounded bg-red-600 px-1 py-0.5 text-[8px] text-white hover:bg-red-500"
+                                                        >
+                                                            ✗
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <select
+                                                    value={tx.categoryId || ''}
+                                                    onChange={e => handleUpdatePendingTransaction(index, 'categoryId', e.target.value || null)}
+                                                    className="w-full rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[10px]"
+                                                >
+                                                    <option value="">None</option>
+                                                    {categories.map(cat => (
+                                                        <option key={cat.id} value={cat.id}>
+                                                            {cat.type === 'income' ? '⬆️' : '⬇️'} {cat.name}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            )}
                                         </td>
                                         <td className="p-2">
                                             <input
@@ -2015,7 +2225,7 @@ export default function TransactionsPage() {
                                             {tx.account || 'No account'}
                                         </div>
                                         <div className="text-[11px] text-slate-400">
-                                            {tx.date} • {tx.person}
+                                            {tx.date} • {tx.name || tx.person}
                                             {tx.note ? ` • ${tx.note}` : ''}
                                         </div>
                                     </div>

@@ -24,3 +24,5 @@ export function formatCurrencyAmount(amount: number): string {
     }).format(Math.abs(amount));
 }
 
+
+
