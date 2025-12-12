@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { Configuration, PlaidApi, PlaidEnvironments } from 'plaid';
+import { Configuration, PlaidApi, PlaidEnvironments, type CountryCode } from 'plaid';
 
 // Initialize Plaid client
 const configuration = new Configuration({
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
             try {
                 const institutionResponse = await plaidClient.institutionsGetById({
                     institution_id: institutionId,
-                    country_codes: ['US'],
+                    country_codes: ['US' as CountryCode],
                 });
                 institutionName = institutionResponse.data.institution.name;
             } catch (err) {
