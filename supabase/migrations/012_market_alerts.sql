@@ -39,3 +39,7 @@ CREATE POLICY "Users can manage their own alerts"
     ON market_alerts FOR ALL
     USING (auth.uid() = user_id);
 
+
+
+
+

@@ -145,8 +145,14 @@ export default function EmotionsPage() {
 
             {/* Content */}
             <div className="mx-auto max-w-4xl px-6 py-6 space-y-6">
-                {/* Log Emotion Button */}
-                <div className="flex justify-end">
+                {/* Action Buttons */}
+                <div className="flex justify-between items-center">
+                    <Link
+                        href="/emotions/test"
+                        className="rounded-md border border-amber-500/30 bg-amber-950/20 px-4 py-2 text-sm font-semibold text-amber-400 hover:bg-amber-950/30 transition-colors"
+                    >
+                        📊 Take Emotional Assessment
+                    </Link>
                     <button
                         onClick={() => setShowForm(!showForm)}
                         className="rounded-md bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300 transition-colors"

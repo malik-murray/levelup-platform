@@ -70,3 +70,7 @@ export function getAvailableModes(): AnalysisMode[] {
     return Object.keys(MODE_CONFIGS) as AnalysisMode[];
 }
 
+
+
+
+

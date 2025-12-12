@@ -12,3 +12,7 @@ export abstract class BaseMarketDataProvider implements MarketDataProvider {
     abstract getFundamentals(ticker: string): Promise<FundamentalData | null>;
 }
 
+
+
+
+

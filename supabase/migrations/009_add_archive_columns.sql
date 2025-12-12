@@ -18,3 +18,7 @@ CREATE INDEX IF NOT EXISTS idx_habit_goals_is_archived ON habit_goals(is_archive
 CREATE INDEX IF NOT EXISTS idx_habit_milestones_is_archived ON habit_milestones(is_archived);
 
 
+
+
+
+
