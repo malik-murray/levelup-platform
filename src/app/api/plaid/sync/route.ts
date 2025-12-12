@@ -225,8 +225,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
             success: true,
             accounts_synced: accountsSynced.length,
-            transactions_synced,
-            transactions_skipped,
+            transactions_synced: transactionsSynced,
+            transactions_skipped: transactionsSkipped,
             message: `Synced ${accountsSynced.length} accounts and ${transactionsSynced} transactions`,
         });
     } catch (error) {
