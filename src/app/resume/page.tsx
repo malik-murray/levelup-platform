@@ -581,8 +581,9 @@ export default function GenerateResumePage() {
         }
 
         // Update profile state
-        const updatedProfile = {
+        const updatedProfile: UserProfileDefaults = {
           ...profile,
+          user_id: userId, // Ensure user_id is always set
           full_name: extracted.full_name || profile?.full_name,
           email: extracted.email || profile?.email,
           phone: extracted.phone || profile?.phone,
@@ -604,7 +605,6 @@ export default function GenerateResumePage() {
         const { error: saveError } = await supabase
           .from('user_profile_defaults')
           .upsert({
-            user_id: userId,
             ...updatedProfile,
             updated_at: new Date().toISOString(),
           }, {
@@ -722,7 +722,7 @@ export default function GenerateResumePage() {
                         type="text"
                         value={profile.full_name || ''}
                         onChange={(e) => {
-                          const updated = { ...profile, full_name: e.target.value };
+                          const updated: UserProfileDefaults = { ...profile!, full_name: e.target.value };
                           setProfile(updated);
                         }}
                         className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-amber-500 focus:outline-none"
@@ -734,7 +734,7 @@ export default function GenerateResumePage() {
                         type="email"
                         value={profile.email || ''}
                         onChange={(e) => {
-                          const updated = { ...profile, email: e.target.value };
+                          const updated: UserProfileDefaults = { ...profile!, email: e.target.value };
                           setProfile(updated);
                         }}
                         className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-amber-500 focus:outline-none"
@@ -748,7 +748,7 @@ export default function GenerateResumePage() {
                         type="tel"
                         value={profile.phone || ''}
                         onChange={(e) => {
-                          const updated = { ...profile, phone: e.target.value };
+                          const updated: UserProfileDefaults = { ...profile!, phone: e.target.value };
                           setProfile(updated);
                         }}
                         className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-amber-500 focus:outline-none"
@@ -760,7 +760,7 @@ export default function GenerateResumePage() {
                         type="text"
                         value={profile.location || ''}
                         onChange={(e) => {
-                          const updated = { ...profile, location: e.target.value };
+                          const updated: UserProfileDefaults = { ...profile!, location: e.target.value };
                           setProfile(updated);
                         }}
                         placeholder="City, State"
@@ -773,7 +773,7 @@ export default function GenerateResumePage() {
                     <textarea
                       value={profile.summary || ''}
                       onChange={(e) => {
-                        const updated = { ...profile, summary: e.target.value };
+                        const updated: UserProfileDefaults = { ...profile!, summary: e.target.value };
                         setProfile(updated);
                       }}
                       rows={4}
@@ -787,7 +787,7 @@ export default function GenerateResumePage() {
                       value={Array.isArray(profile.skills) ? profile.skills.join(', ') : ''}
                       onChange={(e) => {
                         const skills = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
-                        const updated = { ...profile, skills };
+                        const updated: UserProfileDefaults = { ...profile!, skills };
                         setProfile(updated);
                       }}
                       placeholder="JavaScript, React, Node.js, Python..."
@@ -950,7 +950,6 @@ export default function GenerateResumePage() {
                         const { error: saveError } = await supabase
                           .from('user_profile_defaults')
                           .upsert({
-                            user_id: userId,
                             ...profile,
                             updated_at: new Date().toISOString(),
                           }, {

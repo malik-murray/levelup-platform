@@ -75,8 +75,10 @@ export default function SettingsPage() {
         setSettings(settingsResult.data);
       } else {
         setSettings({
+          user_id: user.id,
           default_tone: 'professional',
           default_job_type: 'private_sector',
+          default_header_footer_options: {},
           default_visibility_preferences: {},
         });
       }
