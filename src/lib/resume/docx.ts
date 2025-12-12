@@ -416,6 +416,128 @@ export async function generateResumeDocx(
 }
 
 /**
+ * Generate DOCX from formatted plain text
+ * Used when regenerating DOCX from edited formatted text
+ */
+export async function generateDocxFromText(text: string): Promise<Buffer> {
+  const lines = text.split('\n');
+  const paragraphs: Paragraph[] = [];
+  let skipNext = false;
+  let isFirstLine = true;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+
+    const line = lines[i];
+    const trimmed = line.trim();
+    
+    if (!trimmed) {
+      // Empty line - add spacing
+      paragraphs.push(
+        new Paragraph({
+          text: '',
+          spacing: { after: 100 },
+        })
+      );
+      continue;
+    }
+
+    // Check if it's a separator line
+    if (trimmed.match(/^[═─]+$/)) {
+      // If it's the first separator after what looks like a header (personal info), center it
+      if (isFirstLine || (i > 0 && lines[i - 1].includes('|'))) {
+        paragraphs.push(
+          new Paragraph({
+            text: '─'.repeat(80),
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 200 },
+          })
+        );
+      }
+      continue;
+    }
+
+    // Check if it's the personal info header (contains | separators and contact info)
+    if (isFirstLine && trimmed.includes('|') && (trimmed.includes('@') || trimmed.match(/\d{3}/))) {
+      paragraphs.push(
+        new Paragraph({
+          text: trimmed,
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 100 },
+        })
+      );
+      isFirstLine = false;
+      continue;
+    }
+
+    isFirstLine = false;
+
+    // Check if it's a header (all caps and reasonable length)
+    if (trimmed === trimmed.toUpperCase() && trimmed.length > 3 && trimmed.length < 60 && !trimmed.includes('•') && !trimmed.includes('|')) {
+      // Check if next line is a separator
+      const nextLine = i + 1 < lines.length ? lines[i + 1].trim() : '';
+      if (nextLine.match(/^[═─]+$/)) {
+        paragraphs.push(
+          new Paragraph({
+            text: trimmed,
+            heading: HeadingLevel.HEADING_2,
+            spacing: { before: 200, after: 100 },
+          })
+        );
+        skipNext = true; // Skip the separator line
+        continue;
+      } else if (trimmed.length < 50) {
+        // Likely a header
+        paragraphs.push(
+          new Paragraph({
+            text: trimmed,
+            heading: HeadingLevel.HEADING_2,
+            spacing: { before: 200, after: 100 },
+          })
+        );
+        continue;
+      }
+    }
+
+    // Check if it's a bullet point
+    if (trimmed.startsWith('•') || trimmed.startsWith('-')) {
+      const bulletText = trimmed.substring(1).trim();
+      paragraphs.push(
+        new Paragraph({
+          text: bulletText,
+          bullet: {
+            level: 0,
+          },
+          spacing: { after: 50 },
+        })
+      );
+      continue;
+    }
+
+    // Regular paragraph
+    paragraphs.push(
+      new Paragraph({
+        text: trimmed,
+        spacing: { after: 100 },
+      })
+    );
+  }
+
+  const doc = new Document({
+    sections: [
+      {
+        children: paragraphs,
+      },
+    ],
+  });
+
+  return await Packer.toBuffer(doc);
+}
+
+/**
  * Generate a DOCX file for a cover letter
  */
 export async function generateCoverLetterDocx(
@@ -502,3 +624,4 @@ export async function generateCoverLetterDocx(
 
   return await Packer.toBuffer(doc);
 }
+
