@@ -1,6 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+// Type definitions for emotional test data structures
+interface EmotionResponse {
+    question_id: string;
+    selected_option_id?: string;
+    selected_option_value?: number;
+}
+
+interface EmotionReflection {
+    question_id: string;
+    reflection_text: string;
+}
+
+interface EmotionQuestion {
+    id: string;
+    test_id: string;
+    question_type: 'multiple_choice' | 'scenario';
+    question_text: string;
+    scenario_description?: string | null;
+    options?: Array<{ id: string; text: string; value: number }> | null;
+    order_index: number;
+    created_at?: string;
+}
+
 /**
  * GET: Fetch test questions for a user
  * Creates a new test if one doesn't exist, or returns existing test with questions
@@ -155,7 +178,7 @@ export async function GET(request: NextRequest) {
                 },
             }
         );
-        const responses = responsesResponse.ok ? await responsesResponse.json() : [];
+        const responses: EmotionResponse[] = responsesResponse.ok ? await responsesResponse.json() : [];
 
         // Fetch existing reflections using REST API
         const reflectionsResponse = await fetch(
@@ -168,13 +191,17 @@ export async function GET(request: NextRequest) {
                 },
             }
         );
-        const reflections = reflectionsResponse.ok ? await reflectionsResponse.json() : [];
+        const reflections: EmotionReflection[] = reflectionsResponse.ok ? await reflectionsResponse.json() : [];
 
         // Map responses and reflections to questions
-        const responseMap = new Map(responses?.map(r => [r.question_id, r]) || []);
-        const reflectionMap = new Map(reflections?.map(r => [r.question_id, r]) || []);
+        const responseMap = new Map<string, EmotionResponse>(
+            responses.map((r: EmotionResponse) => [r.question_id, r])
+        );
+        const reflectionMap = new Map<string, EmotionReflection>(
+            reflections.map((r: EmotionReflection) => [r.question_id, r])
+        );
 
-        const questionsWithAnswers = questions?.map(q => ({
+        const questionsWithAnswers = (questions as EmotionQuestion[])?.map((q: EmotionQuestion) => ({
             ...q,
             response: responseMap.get(q.id),
             reflection: reflectionMap.get(q.id),
