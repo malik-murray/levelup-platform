@@ -165,3 +165,4 @@ CREATE POLICY "Users can update their own test results"
     USING (auth.uid() = user_id);
 
 
+

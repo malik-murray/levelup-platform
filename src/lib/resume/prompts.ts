@@ -543,3 +543,4 @@ function buildLengthInstructions(length?: string): string {
   }
   return 'LENGTH: Aim for 1-2 pages. Prioritize relevance and impact.';
 }
+

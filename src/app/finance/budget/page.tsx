@@ -333,6 +333,14 @@ export default function BudgetPage() {
         setNotification(null);
 
         try {
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                setNotification('You must be logged in to create categories.');
+                setCreatingCategory(false);
+                return;
+            }
+
             // Determine parent_id and kind
             const kind = newCategoryKind === 'group' ? 'group' : 'category';
             const parentId = kind === 'category' && newCategoryParentId 
@@ -346,6 +354,7 @@ export default function BudgetPage() {
                     type: newCategoryType,
                     kind,
                     parent_id: parentId,
+                    user_id: user.id,
                 });
 
             if (error) {
@@ -461,6 +470,13 @@ export default function BudgetPage() {
         setNotification(null);
         
         try {
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                setNotification('You must be logged in to create subcategories.');
+                return;
+            }
+
             const parent = allCategories.find(c => c.id === parentId);
             if (!parent) {
                 setNotification('Parent category not found.');
@@ -474,6 +490,7 @@ export default function BudgetPage() {
                     kind: 'category',
                     type: type,
                     parent_id: parentId,
+                    user_id: user.id,
                 });
             
             if (error) {
@@ -1006,7 +1023,7 @@ export default function BudgetPage() {
                         {/* Income vs Expenses Summary */}
                         <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
                             <h3 className="mb-3 text-sm font-semibold">Budget Overview</h3>
-                            <div className="grid grid-cols-2 gap-4 text-xs mb-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs mb-4">
                                 <div className="rounded-md border border-emerald-700/50 bg-emerald-950/30 p-3">
                                     <div className="text-emerald-400 text-[10px] font-semibold uppercase mb-1">⬆️ Income</div>
                                     <div className="text-lg font-semibold text-emerald-300 mb-1">
@@ -1054,7 +1071,7 @@ export default function BudgetPage() {
                         {/* Detailed Summary */}
                         <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
                             <h3 className="mb-3 text-sm font-semibold">Total Summary</h3>
-                            <div className="grid grid-cols-3 gap-4 text-xs">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
                                 <div>
                                     <div className="text-slate-400">Total Assigned</div>
                                     <div className="text-lg font-semibold text-slate-100">
@@ -1270,101 +1287,128 @@ export default function BudgetPage() {
                                     groupIndex < totalInSection - 1 ? 'mb-1' : ''
                                 }`}>
                                         <div 
-                                            className={`grid grid-cols-[1fr_100px_100px_100px] gap-2 items-center p-2 ${
+                                            className={`p-2 ${
                                                 hasCategories && !editMode ? 'cursor-pointer' : 'cursor-default'
                                             }`}
                                             onClick={() => hasCategories && !editMode && toggleGroup(group.id)}
                                         >
-                                            <div className="flex items-center gap-2 font-medium text-slate-100">
-                                                {editMode && (
-                                                    <div className="flex flex-col gap-0.5" onClick={(e) => e.stopPropagation()}>
+                                            {/* Mobile: Stack layout, Desktop: Grid layout */}
+                                            <div className="flex flex-col sm:grid sm:grid-cols-[1fr_100px_100px_100px] gap-2 items-center">
+                                                <div className="flex items-center gap-2 font-medium text-slate-100 w-full">
+                                                    {editMode && (
+                                                        <div className="flex flex-col gap-0.5" onClick={(e) => e.stopPropagation()}>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleMoveGroupUp(group.id)}
+                                                                disabled={globalIndex === 0}
+                                                                className="text-[8px] px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                                                                title="Move up"
+                                                            >
+                                                                ↑
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleMoveGroupDown(group.id)}
+                                                                disabled={globalIndex === allGroups.length - 1}
+                                                                className="text-[8px] px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                                                                title="Move down"
+                                                            >
+                                                                ↓
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                    {hasCategories && (
+                                                        <span className="text-xs w-4">
+                                                            {isCollapsed ? '▶' : '▼'}
+                                                        </span>
+                                                    )}
+                                                    {editMode && editingCategoryNames[group.id] !== undefined ? (
+                                                        <input
+                                                            type="text"
+                                                            className="flex-1 rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px]"
+                                                            value={editingCategoryNames[group.id]}
+                                                            onChange={e => setEditingCategoryNames(prev => ({
+                                                                ...prev,
+                                                                [group.id]: e.target.value
+                                                            }))}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    e.preventDefault();
+                                                                    handleUpdateCategoryName(group.id, editingCategoryNames[group.id]);
+                                                                } else if (e.key === 'Escape') {
+                                                                    handleCancelEditCategoryName(group.id);
+                                                                }
+                                                            }}
+                                                            onBlur={() => handleUpdateCategoryName(group.id, editingCategoryNames[group.id])}
+                                                            autoFocus
+                                                        />
+                                                    ) : (
+                                                        <span
+                                                            onClick={(e) => {
+                                                                if (editMode) {
+                                                                    e.stopPropagation();
+                                                                    handleStartEditCategoryName(group.id, group.name);
+                                                                }
+                                                            }}
+                                                            className={editMode ? 'cursor-pointer hover:text-amber-400' : ''}
+                                                        >
+                                                            {group.type === 'income' ? '⬆️' : group.type === 'transfer' ? '💱' : '⬇️'} {group.name}
+                                                        </span>
+                                                    )}
+                                                    {editMode && editingCategoryNames[group.id] === undefined && (
                                                         <button
                                                             type="button"
-                                                            onClick={() => handleMoveGroupUp(group.id)}
-                                                            disabled={globalIndex === 0}
-                                                            className="text-[8px] px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded disabled:opacity-30 disabled:cursor-not-allowed"
-                                                            title="Move up"
-                                                        >
-                                                            ↑
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleMoveGroupDown(group.id)}
-                                                            disabled={globalIndex === allGroups.length - 1}
-                                                            className="text-[8px] px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded disabled:opacity-30 disabled:cursor-not-allowed"
-                                                            title="Move down"
-                                                        >
-                                                            ↓
-                                                        </button>
-                                                    </div>
-                                                )}
-                                                {hasCategories && (
-                                                    <span className="text-xs w-4" onClick={(e) => e.stopPropagation()}>
-                                                        {isCollapsed ? '▶' : '▼'}
-                                                    </span>
-                                                )}
-                                                {editMode && editingCategoryNames[group.id] !== undefined ? (
-                                                    <input
-                                                        type="text"
-                                                        className="flex-1 rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px]"
-                                                        value={editingCategoryNames[group.id]}
-                                                        onChange={e => setEditingCategoryNames(prev => ({
-                                                            ...prev,
-                                                            [group.id]: e.target.value
-                                                        }))}
-                                                        onClick={(e) => e.stopPropagation()}
-                                                        onKeyDown={(e) => {
-                                                            if (e.key === 'Enter') {
-                                                                e.preventDefault();
-                                                                handleUpdateCategoryName(group.id, editingCategoryNames[group.id]);
-                                                            } else if (e.key === 'Escape') {
-                                                                handleCancelEditCategoryName(group.id);
-                                                            }
-                                                        }}
-                                                        onBlur={() => handleUpdateCategoryName(group.id, editingCategoryNames[group.id])}
-                                                        autoFocus
-                                                    />
-                                                ) : (
-                                                    <span
-                                                        onClick={(e) => {
-                                                            if (editMode) {
+                                                            onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                handleStartEditCategoryName(group.id, group.name);
-                                                            }
-                                                        }}
-                                                        className={editMode ? 'cursor-pointer hover:text-amber-400' : ''}
-                                                    >
-                                                        {group.type === 'income' ? '⬆️' : group.type === 'transfer' ? '💱' : '⬇️'} {group.name}
-                                                    </span>
-                                                )}
-                                                {editMode && editingCategoryNames[group.id] === undefined && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleDeleteCategory(group.id, group.name, true);
-                                                        }}
-                                                        className="ml-auto rounded bg-red-900 px-1.5 py-0.5 text-[9px] hover:bg-red-800 text-red-200"
-                                                        title="Delete category group"
-                                                    >
-                                                        🗑️
-                                                    </button>
-                                                )}
-                                            </div>
-                                            <div className="text-right text-slate-300 font-medium">
-                                                {formatCurrency(Math.abs(group.totalAssigned))}
-                                            </div>
-                                            <div className="text-right text-slate-300 font-medium">
-                                                {formatCurrency(group.totalActivity)}
-                                            </div>
-                                            <div className={`text-right font-medium ${
-                                                group.totalAvailable >= 0 
-                                                    ? 'text-emerald-400' 
-                                                    : group.type === 'income' 
-                                                        ? 'text-blue-400'  // Overpaid (good)
-                                                        : 'text-red-400'   // Overspent (bad)
-                                            }`}>
-                                                {formatCurrency(group.totalAvailable)}
+                                                                handleDeleteCategory(group.id, group.name, true);
+                                                            }}
+                                                            className="ml-auto rounded bg-red-900 px-1.5 py-0.5 text-[9px] hover:bg-red-800 text-red-200"
+                                                            title="Delete category group"
+                                                        >
+                                                            🗑️
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                {/* Mobile: Show amounts in a row below name */}
+                                                <div className="flex sm:hidden w-full justify-between text-xs mt-1">
+                                                    <div className="flex flex-col">
+                                                        <span className="text-slate-400 text-[10px]">Assigned</span>
+                                                        <span className="text-slate-300 font-medium">{formatCurrency(Math.abs(group.totalAssigned))}</span>
+                                                    </div>
+                                                    <div className="flex flex-col text-right">
+                                                        <span className="text-slate-400 text-[10px]">Activity</span>
+                                                        <span className="text-slate-300 font-medium">{formatCurrency(group.totalActivity)}</span>
+                                                    </div>
+                                                    <div className="flex flex-col text-right">
+                                                        <span className="text-slate-400 text-[10px]">Available</span>
+                                                        <span className={`font-medium ${
+                                                            group.totalAvailable >= 0 
+                                                                ? 'text-emerald-400' 
+                                                                : group.type === 'income' 
+                                                                    ? 'text-blue-400'
+                                                                    : 'text-red-400'
+                                                        }`}>
+                                                            {formatCurrency(group.totalAvailable)}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                {/* Desktop: Show amounts in grid columns */}
+                                                <div className="hidden sm:block text-right text-slate-300 font-medium">
+                                                    {formatCurrency(Math.abs(group.totalAssigned))}
+                                                </div>
+                                                <div className="hidden sm:block text-right text-slate-300 font-medium">
+                                                    {formatCurrency(group.totalActivity)}
+                                                </div>
+                                                <div className={`hidden sm:block text-right font-medium ${
+                                                    group.totalAvailable >= 0 
+                                                        ? 'text-emerald-400' 
+                                                        : group.type === 'income' 
+                                                            ? 'text-blue-400'
+                                                            : 'text-red-400'
+                                                }`}>
+                                                    {formatCurrency(group.totalAvailable)}
+                                                </div>
                                             </div>
                                         </div>
                                         
@@ -1405,140 +1449,230 @@ export default function BudgetPage() {
                                                             catIndex < group.categories.length - 1 ? 'mb-1' : ''
                                                         }`}
                                                     >
-                                                        <div className="grid grid-cols-[1fr_100px_100px_100px] gap-2 items-center p-2">
-                                                            <div className="text-slate-200 pl-4 flex items-center gap-2">
-                                                                {editMode && editingCategoryNames[category.id] !== undefined ? (
-                                                                    <input
-                                                                        type="text"
-                                                                        className="flex-1 rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px]"
-                                                                        value={editingCategoryNames[category.id]}
-                                                                        onChange={e => setEditingCategoryNames(prev => ({
-                                                                            ...prev,
-                                                                            [category.id]: e.target.value
-                                                                        }))}
-                                                                        onKeyDown={(e) => {
-                                                                            if (e.key === 'Enter') {
-                                                                                e.preventDefault();
-                                                                                handleUpdateCategoryName(category.id, editingCategoryNames[category.id]);
-                                                                            } else if (e.key === 'Escape') {
-                                                                                handleCancelEditCategoryName(category.id);
-                                                                            }
-                                                                        }}
-                                                                        onBlur={() => handleUpdateCategoryName(category.id, editingCategoryNames[category.id])}
-                                                                        autoFocus
-                                                                    />
-                                                                ) : (
-                                                                    <span
-                                                                        onClick={() => {
-                                                                            if (editMode) {
-                                                                                handleStartEditCategoryName(category.id, category.name);
-                                                                            }
-                                                                        }}
-                                                                        className={editMode ? 'cursor-pointer hover:text-amber-400' : ''}
-                                                                    >
-                                                                        {category.name}
-                                                                    </span>
-                                                                )}
-                                                                {editMode && editingCategoryNames[category.id] === undefined && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleDeleteCategory(category.id, category.name, false)}
-                                                                        className="rounded bg-red-900 px-1.5 py-0.5 text-[9px] hover:bg-red-800 text-red-200"
-                                                                        title="Delete category"
-                                                                    >
-                                                                        🗑️
-                                                                    </button>
-                                                                )}
-                                                            </div>
-                                                            <div className="text-right">
-                                                                {editMode || isEditing ? (
-                                                                    <input
-                                                                        type="number"
-                                                                        step="0.01"
-                                                                        className="w-full rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-right"
-                                                                        value={isEditing ? editingValue : (category.assigned ? Math.abs(category.assigned).toString() : '')}
-                                                                        placeholder="0.00"
-                                                                        onChange={e => {
-                                                                            if (!isEditing) {
-                                                                                handleStartEditBudget(category.id);
-                                                                                setEditingBudgets(prev => ({
-                                                                                    ...prev,
-                                                                                    [category.id]: e.target.value
-                                                                                }));
-                                                                            } else {
-                                                                                setEditingBudgets(prev => ({
-                                                                                    ...prev,
-                                                                                    [category.id]: e.target.value
-                                                                                }));
-                                                                            }
-                                                                        }}
-                                                                        autoFocus={isEditing}
-                                                                        onKeyDown={e => {
-                                                                            if (e.key === 'Enter') {
-                                                                                handleSaveBudget(category.id);
-                                                                            } else if (e.key === 'Escape') {
-                                                                                handleCancelEditBudget(category.id);
-                                                                            }
-                                                                        }}
-                                                                        onBlur={(e) => {
-                                                                            const inputValue = e.target.value;
-                                            
-                                                                            if (editMode) {
-                                                                                // In edit mode, auto-save on blur silently
-                                                                                if (isEditing) {
-                                                                                    // Was actively editing, save it silently
-                                                                                    const val = editingBudgets[category.id];
-                                                                                    if (val !== undefined) {
-                                                                                        handleSaveBudget(category.id, true); // Silent save
-                                                                                    }
-                                                                                } else {
-                                                                                    // Just entered edit mode, check if value changed
-                                                                                    const numValue = inputValue === '' ? 0 : parseFloat(inputValue);
-                                                                                    const currentDisplayValue = category.assigned ? Math.abs(category.assigned) : 0;
-                                                                                    if (!Number.isNaN(numValue) && numValue !== currentDisplayValue) {
+                                                        <div className="p-2">
+                                                            {/* Mobile: Stack layout, Desktop: Grid layout */}
+                                                            <div className="flex flex-col sm:grid sm:grid-cols-[1fr_100px_100px_100px] gap-2 items-center">
+                                                                <div className="text-slate-200 pl-4 flex items-center gap-2 w-full">
+                                                                    {editMode && editingCategoryNames[category.id] !== undefined ? (
+                                                                        <input
+                                                                            type="text"
+                                                                            className="flex-1 rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px]"
+                                                                            value={editingCategoryNames[category.id]}
+                                                                            onChange={e => setEditingCategoryNames(prev => ({
+                                                                                ...prev,
+                                                                                [category.id]: e.target.value
+                                                                            }))}
+                                                                            onKeyDown={(e) => {
+                                                                                if (e.key === 'Enter') {
+                                                                                    e.preventDefault();
+                                                                                    handleUpdateCategoryName(category.id, editingCategoryNames[category.id]);
+                                                                                } else if (e.key === 'Escape') {
+                                                                                    handleCancelEditCategoryName(category.id);
+                                                                                }
+                                                                            }}
+                                                                            onBlur={() => handleUpdateCategoryName(category.id, editingCategoryNames[category.id])}
+                                                                            autoFocus
+                                                                        />
+                                                                    ) : (
+                                                                        <span
+                                                                            onClick={() => {
+                                                                                if (editMode) {
+                                                                                    handleStartEditCategoryName(category.id, category.name);
+                                                                                }
+                                                                            }}
+                                                                            className={editMode ? 'cursor-pointer hover:text-amber-400' : ''}
+                                                                        >
+                                                                            {category.name}
+                                                                        </span>
+                                                                    )}
+                                                                    {editMode && editingCategoryNames[category.id] === undefined && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleDeleteCategory(category.id, category.name, false)}
+                                                                            className="rounded bg-red-900 px-1.5 py-0.5 text-[9px] hover:bg-red-800 text-red-200"
+                                                                            title="Delete category"
+                                                                        >
+                                                                            🗑️
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                                {/* Mobile: Show amounts in a row below name */}
+                                                                <div className="flex sm:hidden w-full justify-between text-xs mt-1 pl-4">
+                                                                    <div className="flex flex-col">
+                                                                        <span className="text-slate-400 text-[10px]">Assigned</span>
+                                                                        {editMode || isEditing ? (
+                                                                            <input
+                                                                                type="number"
+                                                                                step="0.01"
+                                                                                className="w-20 rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-right"
+                                                                                value={isEditing ? editingValue : (category.assigned ? Math.abs(category.assigned).toString() : '')}
+                                                                                placeholder="0.00"
+                                                                                onChange={e => {
+                                                                                    if (!isEditing) {
                                                                                         handleStartEditBudget(category.id);
                                                                                         setEditingBudgets(prev => ({
                                                                                             ...prev,
-                                                                                            [category.id]: inputValue
+                                                                                            [category.id]: e.target.value
                                                                                         }));
-                                                                                        // Save silently after state update
-                                                                                        setTimeout(() => {
-                                                                                            handleSaveBudget(category.id, true); // Silent save
-                                                                                        }, 100);
+                                                                                    } else {
+                                                                                        setEditingBudgets(prev => ({
+                                                                                            ...prev,
+                                                                                            [category.id]: e.target.value
+                                                                                        }));
                                                                                     }
-                                                                                }
-                                                                            } else if (isEditing) {
-                                                                                // Not in edit mode, but was editing - save silently
-                                                                                const val = editingBudgets[category.id];
-                                                                                if (val !== undefined && val !== '') {
-                                                                                    handleSaveBudget(category.id, true); // Silent save
+                                                                                }}
+                                                                                autoFocus={isEditing}
+                                                                                onKeyDown={e => {
+                                                                                    if (e.key === 'Enter') {
+                                                                                        handleSaveBudget(category.id);
+                                                                                    } else if (e.key === 'Escape') {
+                                                                                        handleCancelEditBudget(category.id);
+                                                                                    }
+                                                                                }}
+                                                                                onBlur={(e) => {
+                                                                                    const inputValue = e.target.value;
+                                                                                    if (editMode) {
+                                                                                        if (isEditing) {
+                                                                                            const val = editingBudgets[category.id];
+                                                                                            if (val !== undefined) {
+                                                                                                handleSaveBudget(category.id, true);
+                                                                                            }
+                                                                                        } else {
+                                                                                            const numValue = inputValue === '' ? 0 : parseFloat(inputValue);
+                                                                                            const currentDisplayValue = category.assigned ? Math.abs(category.assigned) : 0;
+                                                                                            if (!Number.isNaN(numValue) && numValue !== currentDisplayValue) {
+                                                                                                handleStartEditBudget(category.id);
+                                                                                                setEditingBudgets(prev => ({
+                                                                                                    ...prev,
+                                                                                                    [category.id]: inputValue
+                                                                                                }));
+                                                                                                setTimeout(() => {
+                                                                                                    handleSaveBudget(category.id, true);
+                                                                                                }, 100);
+                                                                                            }
+                                                                                        }
+                                                                                    } else if (isEditing) {
+                                                                                        const val = editingBudgets[category.id];
+                                                                                        if (val !== undefined && val !== '') {
+                                                                                            handleSaveBudget(category.id, true);
+                                                                                        } else {
+                                                                                            handleCancelEditBudget(category.id);
+                                                                                        }
+                                                                                    }
+                                                                                }}
+                                                                            />
+                                                                        ) : (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleStartEditBudget(category.id)}
+                                                                                className="text-slate-300 hover:text-amber-400 transition-colors text-left"
+                                                                            >
+                                                                                {formatCurrency(Math.abs(category.assigned))}
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="flex flex-col text-right">
+                                                                        <span className="text-slate-400 text-[10px]">Activity</span>
+                                                                        <span className="text-slate-300">{formatCurrency(category.activity)}</span>
+                                                                    </div>
+                                                                    <div className="flex flex-col text-right">
+                                                                        <span className="text-slate-400 text-[10px]">Available</span>
+                                                                        <span className={
+                                                                            category.available >= 0 
+                                                                                ? 'text-emerald-400' 
+                                                                                : group.type === 'income' 
+                                                                                    ? 'text-blue-400'
+                                                                                    : 'text-red-400'
+                                                                        }>
+                                                                            {formatCurrency(category.available)}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                                {/* Desktop: Show amounts in grid columns */}
+                                                                <div className="hidden sm:block text-right">
+                                                                    {editMode || isEditing ? (
+                                                                        <input
+                                                                            type="number"
+                                                                            step="0.01"
+                                                                            className="w-full rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px] text-right"
+                                                                            value={isEditing ? editingValue : (category.assigned ? Math.abs(category.assigned).toString() : '')}
+                                                                            placeholder="0.00"
+                                                                            onChange={e => {
+                                                                                if (!isEditing) {
+                                                                                    handleStartEditBudget(category.id);
+                                                                                    setEditingBudgets(prev => ({
+                                                                                        ...prev,
+                                                                                        [category.id]: e.target.value
+                                                                                    }));
                                                                                 } else {
+                                                                                    setEditingBudgets(prev => ({
+                                                                                        ...prev,
+                                                                                        [category.id]: e.target.value
+                                                                                    }));
+                                                                                }
+                                                                            }}
+                                                                            autoFocus={isEditing}
+                                                                            onKeyDown={e => {
+                                                                                if (e.key === 'Enter') {
+                                                                                    handleSaveBudget(category.id);
+                                                                                } else if (e.key === 'Escape') {
                                                                                     handleCancelEditBudget(category.id);
                                                                                 }
-                                                                            }
-                                                                        }}
-                                                                    />
-                                                                ) : (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleStartEditBudget(category.id)}
-                                                                        className="w-full text-right text-slate-300 hover:text-amber-400 transition-colors"
-                                                                    >
-                                                                        {formatCurrency(Math.abs(category.assigned))}
-                                                                    </button>
-                                                                )}
-                                                            </div>
-                                                            <div className="text-right text-slate-300">
-                                                                {formatCurrency(category.activity)}
-                                                            </div>
-                                                            <div className={`text-right ${
-                                                                category.available >= 0 
-                                                                    ? 'text-emerald-400' 
-                                                                    : group.type === 'income' 
-                                                                        ? 'text-blue-400'  // Overpaid (good)
-                                                                        : 'text-red-400'   // Overspent (bad)
-                                                            }`}>
-                                                                {formatCurrency(category.available)}
+                                                                            }}
+                                                                            onBlur={(e) => {
+                                                                                const inputValue = e.target.value;
+                                                                                if (editMode) {
+                                                                                    if (isEditing) {
+                                                                                        const val = editingBudgets[category.id];
+                                                                                        if (val !== undefined) {
+                                                                                            handleSaveBudget(category.id, true);
+                                                                                        }
+                                                                                    } else {
+                                                                                        const numValue = inputValue === '' ? 0 : parseFloat(inputValue);
+                                                                                        const currentDisplayValue = category.assigned ? Math.abs(category.assigned) : 0;
+                                                                                        if (!Number.isNaN(numValue) && numValue !== currentDisplayValue) {
+                                                                                            handleStartEditBudget(category.id);
+                                                                                            setEditingBudgets(prev => ({
+                                                                                                ...prev,
+                                                                                                [category.id]: inputValue
+                                                                                            }));
+                                                                                            setTimeout(() => {
+                                                                                                handleSaveBudget(category.id, true);
+                                                                                            }, 100);
+                                                                                        }
+                                                                                    }
+                                                                                } else if (isEditing) {
+                                                                                    const val = editingBudgets[category.id];
+                                                                                    if (val !== undefined && val !== '') {
+                                                                                        handleSaveBudget(category.id, true);
+                                                                                    } else {
+                                                                                        handleCancelEditBudget(category.id);
+                                                                                    }
+                                                                                }
+                                                                            }}
+                                                                        />
+                                                                    ) : (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleStartEditBudget(category.id)}
+                                                                            className="w-full text-right text-slate-300 hover:text-amber-400 transition-colors"
+                                                                        >
+                                                                            {formatCurrency(Math.abs(category.assigned))}
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                                <div className="hidden sm:block text-right text-slate-300">
+                                                                    {formatCurrency(category.activity)}
+                                                                </div>
+                                                                <div className={`hidden sm:block text-right ${
+                                                                    category.available >= 0 
+                                                                        ? 'text-emerald-400' 
+                                                                        : group.type === 'income' 
+                                                                            ? 'text-blue-400'
+                                                                            : 'text-red-400'
+                                                                }`}>
+                                                                    {formatCurrency(category.available)}
+                                                                </div>
                                                             </div>
                                                         </div>
                                                         
@@ -1620,7 +1754,7 @@ export default function BudgetPage() {
                     return (
                         <div className="space-y-4">
                             {/* Column Headers */}
-                            <div className="grid grid-cols-[1fr_100px_100px_100px] gap-2 border-b border-slate-700 pb-2 text-[10px] font-semibold text-slate-400 uppercase">
+                            <div className="hidden sm:grid grid-cols-[1fr_100px_100px_100px] gap-2 border-b border-slate-700 pb-2 text-[10px] font-semibold text-slate-400 uppercase">
                                 <div>Category</div>
                                 <div className="text-right">Assigned</div>
                                 <div className="text-right">Activity</div>

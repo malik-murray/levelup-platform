@@ -209,3 +209,4 @@ For issues or questions, refer to:
 - Supabase documentation for database issues
 - OpenAI API documentation for generation issues
 - Next.js documentation for frontend issues
+

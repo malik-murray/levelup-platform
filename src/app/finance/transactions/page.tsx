@@ -2584,8 +2584,8 @@ export default function TransactionsPage() {
                     </div>
 
                     {/* Preview table */}
-                    <div className="max-h-96 overflow-y-auto">
-                        <table className="w-full border-collapse text-[10px]">
+                    <div className="max-h-96 overflow-y-auto overflow-x-auto">
+                        <table className="w-full border-collapse text-[10px] min-w-[600px]">
                             <thead className="sticky top-0 bg-slate-950">
                                 <tr className="border-b border-slate-800">
                                     <th className="p-2 text-left">
@@ -2864,7 +2864,7 @@ export default function TransactionsPage() {
 
                                 {showBulkEdit && (
                                     <div className="mt-3 space-y-2 rounded-md bg-slate-950 p-3">
-                                        <div className="grid grid-cols-3 gap-2">
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                             <div>
                                                 <label className="block text-[10px] text-slate-400 mb-1">Category</label>
                                                 <select

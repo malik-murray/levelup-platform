@@ -967,7 +967,7 @@ export default function AccountsPage() {
                     
                     {showAddTransaction && (
                         <form onSubmit={(e) => handleAddTransaction(e, false)} className="space-y-2 text-xs">
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <div>
                                     <label className="block text-[10px] text-slate-400 mb-1">Date</label>
                                     <input
@@ -999,7 +999,7 @@ export default function AccountsPage() {
                                 </div>
                             </div>
                             
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <div>
                                     <label className="block text-[10px] text-slate-400 mb-1">Type</label>
                                     <select
@@ -1084,7 +1084,7 @@ export default function AccountsPage() {
                                 </div>
                             </div>
                             
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <div>
                                     <label className="block text-[10px] text-slate-400 mb-1">Amount</label>
                                     <input

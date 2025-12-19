@@ -94,3 +94,4 @@ export async function getAuthenticatedUser(request?: NextRequest) {
     return null;
   }
 }
+

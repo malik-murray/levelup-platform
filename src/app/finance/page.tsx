@@ -1105,7 +1105,7 @@ export default function FinancePage() {
                     </button>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
                     <div>
                         <div className="text-xs sm:text-sm text-slate-400">Money in</div>
                         <div className="mt-1 text-xs sm:text-sm font-semibold text-emerald-400">
@@ -1409,7 +1409,7 @@ export default function FinancePage() {
                         <div className="space-y-3 max-h-96 overflow-y-auto">
                             {bulkTransactions.map((tx, index) => (
                                 <div key={index} className="rounded-md border border-slate-700 bg-slate-950 p-3 space-y-2">
-                                    <div className="grid grid-cols-2 gap-2">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                         <div>
                                             <label className="block text-[10px] text-slate-400 mb-1">Date</label>
                                             <input
@@ -1439,7 +1439,7 @@ export default function FinancePage() {
                                             </select>
                                         </div>
                                     </div>
-                                    <div className="grid grid-cols-2 gap-2">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                         <div>
                                             <label className="block text-[10px] text-slate-400 mb-1">Account</label>
                                             <select
@@ -1521,7 +1521,7 @@ export default function FinancePage() {
                                             </datalist>
                                         </div>
                                     </div>
-                                    <div className="grid grid-cols-2 gap-2">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                         <div>
                                             <label className="block text-[10px] text-slate-400 mb-1">Amount</label>
                                             <input

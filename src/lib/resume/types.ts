@@ -246,3 +246,4 @@ export interface GenerationRequest {
   cover_letter_template_id?: string;
   options: Generation['options'];
 }
+
