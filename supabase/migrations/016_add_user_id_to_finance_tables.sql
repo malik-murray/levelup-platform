@@ -31,9 +31,11 @@ ALTER TABLE category_budgets ENABLE ROW LEVEL SECURITY;
 
 -- Step 7: Create RLS policies for accounts table
 -- Users can only see their own accounts
+-- NOTE: Temporarily allow NULL user_id for backward compatibility with existing data
+-- After assigning user_ids to existing rows, you should update this policy to remove the NULL check
 CREATE POLICY "Users can view their own accounts"
     ON accounts FOR SELECT
-    USING (auth.uid() = user_id);
+    USING (auth.uid() = user_id OR user_id IS NULL);
 
 -- Users can insert their own accounts
 CREATE POLICY "Users can insert their own accounts"
@@ -52,9 +54,11 @@ CREATE POLICY "Users can delete their own accounts"
 
 -- Step 8: Create RLS policies for transactions table
 -- Users can only see their own transactions
+-- NOTE: Temporarily allow NULL user_id for backward compatibility with existing data
+-- After assigning user_ids to existing rows, you should update this policy to remove the NULL check
 CREATE POLICY "Users can view their own transactions"
     ON transactions FOR SELECT
-    USING (auth.uid() = user_id);
+    USING (auth.uid() = user_id OR user_id IS NULL);
 
 -- Users can insert their own transactions
 CREATE POLICY "Users can insert their own transactions"
@@ -73,9 +77,11 @@ CREATE POLICY "Users can delete their own transactions"
 
 -- Step 9: Create RLS policies for categories table
 -- Users can only see their own categories
+-- NOTE: Temporarily allow NULL user_id for backward compatibility with existing data
+-- After assigning user_ids to existing rows, you should update this policy to remove the NULL check
 CREATE POLICY "Users can view their own categories"
     ON categories FOR SELECT
-    USING (auth.uid() = user_id);
+    USING (auth.uid() = user_id OR user_id IS NULL);
 
 -- Users can insert their own categories
 CREATE POLICY "Users can insert their own categories"
@@ -94,9 +100,11 @@ CREATE POLICY "Users can delete their own categories"
 
 -- Step 10: Create RLS policies for category_budgets table
 -- Users can only see their own budgets
+-- NOTE: Temporarily allow NULL user_id for backward compatibility with existing data
+-- After assigning user_ids to existing rows, you should update this policy to remove the NULL check
 CREATE POLICY "Users can view their own category_budgets"
     ON category_budgets FOR SELECT
-    USING (auth.uid() = user_id);
+    USING (auth.uid() = user_id OR user_id IS NULL);
 
 -- Users can insert their own budgets
 CREATE POLICY "Users can insert their own category_budgets"
@@ -117,3 +125,24 @@ CREATE POLICY "Users can delete their own category_budgets"
 -- Note: For existing data, you may need to assign user_id values manually
 -- This migration adds the column as nullable first to avoid breaking existing data
 -- You should update existing rows with appropriate user_id values before making it NOT NULL
+
+-- IMPORTANT: Data Recovery Instructions
+-- If you have existing finance data with NULL user_id values, you need to assign them:
+-- 
+-- Option 1: Assign all NULL user_id rows to a specific user (if you know which user created them)
+-- UPDATE accounts SET user_id = 'USER_UUID_HERE' WHERE user_id IS NULL;
+-- UPDATE transactions SET user_id = 'USER_UUID_HERE' WHERE user_id IS NULL;
+-- UPDATE categories SET user_id = 'USER_UUID_HERE' WHERE user_id IS NULL;
+-- UPDATE category_budgets SET user_id = 'USER_UUID_HERE' WHERE user_id IS NULL;
+--
+-- Option 2: After assigning user_ids, update RLS policies to remove NULL allowance:
+-- DROP POLICY "Users can view their own accounts" ON accounts;
+-- CREATE POLICY "Users can view their own accounts" ON accounts FOR SELECT USING (auth.uid() = user_id);
+-- (Repeat for transactions, categories, category_budgets)
+--
+-- Option 3: If you want to delete orphaned data (NULL user_id):
+-- DELETE FROM category_budgets WHERE user_id IS NULL;
+-- DELETE FROM transactions WHERE user_id IS NULL;
+-- DELETE FROM accounts WHERE user_id IS NULL;
+-- DELETE FROM categories WHERE user_id IS NULL;
+
