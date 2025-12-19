@@ -99,23 +99,20 @@ export default function TickerAnalysisPage() {
 
     const loadUserPosition = async () => {
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            // Get authenticated user
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (!authUser) {
+                router.push('/login');
+                return;
+            }
 
             // Check for both ETH and ETH-USD formats
             const searchTicker = isEth ? ['ETH', 'ETH-USD'] : [ticker];
-            
-            // Get authenticated user
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
-                window.location.href = '/login';
-                return;
-            }
 
             const { data } = await supabase
                 .from('market_positions')
                 .select('*')
-                .eq('user_id', user.id)
+                .eq('user_id', authUser.id)
                 .in('ticker', searchTicker)
                 .single();
 
@@ -185,9 +182,9 @@ export default function TickerAnalysisPage() {
             
             // Check if we should create an alert for this analysis
             try {
-                const { data: { user } } = await supabase.auth.getUser();
-                if (user) {
-                    await createAlertIfNeeded(result, user.id);
+                const { data: { user: authUser } } = await supabase.auth.getUser();
+                if (authUser) {
+                    await createAlertIfNeeded(result, authUser.id);
                 }
             } catch (error) {
                 // Ignore alert errors - don't break the analysis flow

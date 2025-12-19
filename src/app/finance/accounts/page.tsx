@@ -494,7 +494,7 @@ export default function AccountsPage() {
         }
         
         // Find or create category if categoryName is provided
-        let finalCategoryId = txCategoryId;
+        let finalCategoryId: string | null = txCategoryId || null;
         if (txCategoryName && !txCategoryId) {
             finalCategoryId = await findOrCreateCategory(txCategoryName, txType);
             if (!finalCategoryId) {
@@ -1053,7 +1053,7 @@ export default function AccountsPage() {
                                             const subcategories = categories.filter(c => c.kind === 'category' && c.parent_id && c.type === txType);
                                             const standalone = categories.filter(c => c.kind === 'category' && !c.parent_id && c.type === txType);
                                             
-                                            const options: JSX.Element[] = [];
+                                            const options: React.ReactElement[] = [];
                                             
                                             // Add groups with their subcategories
                                             groups.forEach(group => {

@@ -33,15 +33,9 @@ export default function IntegrationsPage() {
         setNotification(null);
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
-                window.location.href = '/login';
-                return;
-            }
-
             // Get authenticated user
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (!authUser) {
                 window.location.href = '/login';
                 return;
             }
@@ -49,7 +43,7 @@ export default function IntegrationsPage() {
             const { data, error } = await supabase
                 .from('fitness_integrations')
                 .select('*')
-                .eq('user_id', user.id)
+                .eq('user_id', authUser.id)
                 .order('provider');
 
             if (error) throw error;

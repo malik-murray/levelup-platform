@@ -53,6 +53,10 @@ export default function PortfolioPage() {
         if (positions.length === 0) return;
         
         try {
+            // Get authenticated user
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (!authUser) return;
+
             const updatedPositions = await Promise.all(
                 positions.map(async (pos) => {
                     try {
@@ -62,7 +66,7 @@ export default function PortfolioPage() {
                             .from('market_positions')
                             .update({ current_price: priceData.price })
                             .eq('id', pos.id)
-                            .eq('user_id', user.id);
+                            .eq('user_id', authUser.id);
                         
                         return {
                             ...pos,
@@ -86,8 +90,8 @@ export default function PortfolioPage() {
     const loadData = async () => {
         try {
             setLoading(true);
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (!authUser) {
                 window.location.href = '/login';
                 return;
             }
@@ -96,7 +100,7 @@ export default function PortfolioPage() {
             const { data: positionsData, error: positionsError } = await supabase
                 .from('market_positions')
                 .select('*')
-                .eq('user_id', user.id)
+                .eq('user_id', authUser.id)
                 .order('ticker');
 
             if (positionsError) {
@@ -118,7 +122,7 @@ export default function PortfolioPage() {
                                     .from('market_positions')
                                     .update({ current_price: priceData.price })
                                     .eq('id', pos.id)
-                                    .eq('user_id', user.id);
+                                    .eq('user_id', authUser.id);
                                 
                                 return {
                                     ...pos,
@@ -141,7 +145,7 @@ export default function PortfolioPage() {
             const { data: settingsData } = await supabase
                 .from('market_user_settings')
                 .select('default_mode')
-                .eq('user_id', user.id)
+                .eq('user_id', authUser.id)
                 .single();
 
             if (settingsData?.default_mode) {
@@ -181,8 +185,8 @@ export default function PortfolioPage() {
             setAddingPosition(true);
             setNotification(null);
             
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (!authUser) {
                 setNotification('You must be logged in to add positions.');
                 return;
             }
@@ -204,7 +208,7 @@ export default function PortfolioPage() {
             const { data, error } = await supabase
                 .from('market_positions')
                 .insert({
-                    user_id: user.id,
+                    user_id: authUser.id,
                     ticker: newTicker.trim().toUpperCase(),
                     asset_type: newAssetType,
                     quantity,
@@ -269,14 +273,14 @@ export default function PortfolioPage() {
         
         try {
             // Get authenticated user
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (!authUser) return;
 
             const { error } = await supabase
                 .from('market_positions')
                 .delete()
                 .eq('id', positionId)
-                .eq('user_id', user.id);
+                .eq('user_id', authUser.id);
             
             if (error) {
                 console.error('Error deleting position:', error);
@@ -321,15 +325,15 @@ export default function PortfolioPage() {
             setAnalysisResults(prev => new Map(prev).set(position.ticker, result));
 
             // Get authenticated user
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (!authUser) return;
 
             // Update position current price in database
             await supabase
                 .from('market_positions')
                 .update({ current_price: currentPriceData.price })
                 .eq('id', position.id)
-                .eq('user_id', user.id);
+                .eq('user_id', authUser.id);
         } catch (error) {
             console.error('Error analyzing position:', error);
             setNotification(`Error analyzing ${position.ticker}. Check console for details.`);

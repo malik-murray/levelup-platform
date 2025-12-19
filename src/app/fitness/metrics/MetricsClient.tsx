@@ -44,8 +44,9 @@ export default function MetricsClient({ initialDate, initialShowForm = false }: 
         setNotification(null);
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
+            // Get authenticated user
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (!authUser) {
                 window.location.href = '/login';
                 return;
             }
@@ -55,17 +56,10 @@ export default function MetricsClient({ initialDate, initialShowForm = false }: 
             thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
             const startDate = thirtyDaysAgo.toISOString().split('T')[0];
 
-            // Get authenticated user
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
-                window.location.href = '/login';
-                return;
-            }
-
             const { data, error } = await supabase
                 .from('fitness_metrics')
                 .select('*')
-                .eq('user_id', user.id)
+                .eq('user_id', authUser.id)
                 .gte('date', startDate)
                 .order('date', { ascending: false })
                 .limit(30);
@@ -78,7 +72,7 @@ export default function MetricsClient({ initialDate, initialShowForm = false }: 
             const { data: todayData } = await supabase
                 .from('fitness_metrics')
                 .select('*')
-                .eq('user_id', user.id)
+                .eq('user_id', authUser.id)
                 .eq('date', today)
                 .single();
 
@@ -101,19 +95,19 @@ export default function MetricsClient({ initialDate, initialShowForm = false }: 
         setNotification(null);
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error('Not authenticated');
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (!authUser) throw new Error('Not authenticated');
 
             // Check if metric exists for this date
             const { data: existing } = await supabase
                 .from('fitness_metrics')
                 .select('id')
-                .eq('user_id', user.id)
+                .eq('user_id', authUser.id)
                 .eq('date', date)
                 .single();
 
             const metricData = {
-                user_id: user.id,
+                user_id: authUser.id,
                 date,
                 weight_kg: weightKg ? parseFloat(weightKg) : null,
                 steps: steps ? parseInt(steps) : null,
@@ -128,7 +122,7 @@ export default function MetricsClient({ initialDate, initialShowForm = false }: 
                     .from('fitness_metrics')
                     .update(metricData)
                     .eq('id', existing.id)
-                    .eq('user_id', user.id);
+                    .eq('user_id', authUser.id);
                 error = updateError;
             } else {
                 // Insert new
