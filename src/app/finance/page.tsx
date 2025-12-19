@@ -17,7 +17,9 @@ type Account = {
 type Category = {
     id: string;
     name: string;
-    type: 'income' | 'expense' | string;
+    kind: 'group' | 'category';
+    parent_id: string | null;
+    type: 'income' | 'expense' | 'transfer' | string | null;
 };
 
 type Transaction = {
@@ -73,7 +75,9 @@ export default function FinancePage() {
     );
     const [accountId, setAccountId] = useState<string>('');
     const [categoryId, setCategoryId] = useState<string>('');
-    const [amount, setAmount] = useState<string>('0');
+    const [categoryName, setCategoryName] = useState<string>('');
+    const [transactionType, setTransactionType] = useState<'expense' | 'income'>('expense');
+    const [amount, setAmount] = useState<string>('');
     const [person, setPerson] = useState<string>('Malik');
     const [note, setNote] = useState<string>('');
 
@@ -89,6 +93,28 @@ export default function FinancePage() {
 
     // Add Transaction form visibility
     const [showAddTransaction, setShowAddTransaction] = useState<boolean>(false);
+    const [showBulkTransaction, setShowBulkTransaction] = useState<boolean>(false);
+    
+    // Bulk transaction state
+    const [bulkTransactions, setBulkTransactions] = useState<Array<{
+        date: string;
+        accountId: string;
+        categoryId: string;
+        categoryName: string;
+        type: 'expense' | 'income';
+        amount: string;
+        person: string;
+        note: string;
+    }>>([{
+        date: new Date().toISOString().slice(0, 10),
+        accountId: '',
+        categoryId: '',
+        categoryName: '',
+        type: 'expense',
+        amount: '',
+        person: 'Malik',
+        note: '',
+    }]);
 
     // month selector state: store the first day of the currently selected month
     const [monthDate, setMonthDate] = useState<Date>(() => {
@@ -130,6 +156,12 @@ export default function FinancePage() {
 
     // helper to load transactions for the currently selected month
     const reloadTransactionsForMonth = async (): Promise<Transaction[]> => {
+        // Get authenticated user
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            return [];
+        }
+
         const startOfMonth = new Date(
             monthDate.getFullYear(),
             monthDate.getMonth(),
@@ -158,6 +190,7 @@ export default function FinancePage() {
         accounts ( id, name ),
         categories ( id, name )
     `)
+            .eq('user_id', user.id)
             .gte('date', startStr)
             .lt('date', endStr)
             .order('date', { ascending: false });
@@ -209,16 +242,24 @@ export default function FinancePage() {
         const loadDebug = async () => {
             console.log('FINANCE: starting debug Supabase queries');
 
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                return;
+            }
+
             const { data: accountsData, error: accountsError } = await supabase
                 .from('accounts')
                 .select('id, name, type, starting_balance')
+                .eq('user_id', user.id)
                 .order('name');
 
             console.log('FINANCE DEBUG ACCOUNTS:', { accountsData, accountsError });
 
             const { data: categoriesData, error: categoriesError } = await supabase
                 .from('categories')
-                .select('id, name, type')
+                .select('id, name, kind, parent_id, type')
+                .eq('user_id', user.id)
                 .order('name');
 
             console.log('FINANCE DEBUG CATEGORIES:', {
@@ -237,6 +278,13 @@ export default function FinancePage() {
         const load = async () => {
             setLoading(true);
             console.log('RUNNING SUPABASE QUERIES...');
+
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                window.location.href = '/login';
+                return;
+            }
 
             // 🔍 DEBUG: raw fetch directly to Supabase REST API
             try {
@@ -257,26 +305,29 @@ export default function FinancePage() {
                 console.error('DEBUG RAW FETCH ERROR:', err);
             }
 
-            // 1) ACCOUNTS
+            // 1) ACCOUNTS - filter by user_id
             const { data: accountsData, error: accountsError } = await supabase
                 .from('accounts')
                 .select('id, name, type, starting_balance')
+                .eq('user_id', user.id)
                 .order('name');
 
             console.log('ACCOUNTS RESULT:', { accountsData, accountsError });
 
-            // 2) CATEGORIES
+            // 2) CATEGORIES - filter by user_id
             const { data: categoriesData, error: categoriesError } = await supabase
                 .from('categories')
-                .select('id, name, type')
+                .select('id, name, kind, parent_id, type')
+                .eq('user_id', user.id)
                 .order('name');
 
             console.log('CATEGORIES RESULT:', { categoriesData, categoriesError });
 
-            // 3) BUDGETS
+            // 3) BUDGETS - filter by user_id
             const { data: budgetsData, error: budgetsError } = await supabase
                 .from('category_budgets')
                 .select('id, category_id, month, amount')
+                .eq('user_id', user.id)
                 .eq('month', monthStr);
 
             console.log('BUDGETS RESULT:', { budgetsData, budgetsError });
@@ -318,9 +369,16 @@ export default function FinancePage() {
     // Load all transactions for net worth calculation
     useEffect(() => {
         const loadAllTransactions = async () => {
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                return;
+            }
+
             const { data: txData, error: txError } = await supabase
                 .from('transactions')
                 .select('id, amount, account_id')
+                .eq('user_id', user.id)
                 .order('date', { ascending: false });
 
             if (txError) {
@@ -413,17 +471,108 @@ export default function FinancePage() {
         setDate(new Date().toISOString().slice(0, 10));
         setAccountId('');
         setCategoryId('');
-        setAmount('0');
+        setCategoryName('');
+        setTransactionType('expense');
+        setAmount('');
         setPerson('Malik');
         setNote('');
         setEditingId(null);
     };
+    
+    const findOrCreateCategory = async (categoryNameInput: string, type: 'expense' | 'income'): Promise<string | null> => {
+        if (!categoryNameInput.trim()) return null;
+        
+        const trimmedName = categoryNameInput.trim();
+        
+        // First, try to find existing category
+        const existingCategory = categories.find(
+            c => c.name.toLowerCase() === trimmedName.toLowerCase() && c.type === type
+        );
+        
+        if (existingCategory) {
+            return existingCategory.id;
+        }
+        
+        // Category doesn't exist, create it
+        try {
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                setNotification('You must be logged in to create categories.');
+                return null;
+            }
 
-    const handleAddOrUpdateTransaction = async (e: FormEvent) => {
+            const { data, error } = await supabase
+                .from('categories')
+                .insert({
+                    name: trimmedName,
+                    type: type,
+                    kind: 'category',
+                    parent_id: null, // Will be a standalone category
+                    user_id: user.id,
+                })
+                .select()
+                .single();
+            
+            if (error) {
+                console.error('Error creating category:', error);
+                setNotification(`Error creating category: ${error.message}`);
+                return null;
+            }
+            
+            // Add to local state
+            setCategories(prev => [...prev, data as Category]);
+            setNotification(`Created new category: "${trimmedName}"`);
+            
+            return data.id;
+        } catch (error) {
+            console.error('Error creating category:', error);
+            setNotification('Error creating category. Check console/logs.');
+            return null;
+        }
+    };
+
+    const handleAddOrUpdateTransaction = async (e: FormEvent, addAnother: boolean = false) => {
         e.preventDefault();
 
+        // Get authenticated user
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            setNotification('You must be logged in to save transactions.');
+            return;
+        }
+
         const numAmount = Number(amount);
-        if (!numAmount || !accountId || !categoryId) return;
+        if (!numAmount || !accountId) {
+            setNotification('Please fill in all required fields.');
+            return;
+        }
+
+        // Find or create category if categoryName is provided
+        let finalCategoryId: string | null = categoryId || null;
+        if (categoryName && !categoryId) {
+            finalCategoryId = await findOrCreateCategory(categoryName, transactionType);
+            if (!finalCategoryId) {
+                setNotification('Please select or create a category.');
+                return;
+            }
+        } else if (!categoryId) {
+            setNotification('Please select or enter a category.');
+            return;
+        }
+        
+        if (!finalCategoryId) {
+            setNotification('Please select or create a category.');
+            return;
+        }
+
+        // Ensure amount has correct sign based on transaction type
+        let finalAmount = numAmount;
+        if (transactionType === 'expense' && numAmount > 0) {
+            finalAmount = -Math.abs(numAmount);
+        } else if (transactionType === 'income' && numAmount < 0) {
+            finalAmount = Math.abs(numAmount);
+        }
 
         setNotification(null);
 
@@ -434,12 +583,13 @@ export default function FinancePage() {
                 .update({
                     date,
                     account_id: accountId,
-                    category_id: categoryId,
-                    amount: numAmount,
+                    category_id: finalCategoryId,
+                    amount: finalAmount,
                     person,
                     note: note || null,
                 })
-                .eq('id', editingId);
+                .eq('id', editingId)
+                .eq('user_id', user.id); // Ensure user can only update their own transactions
 
             if (error) {
                 console.error(error);
@@ -451,10 +601,11 @@ export default function FinancePage() {
             const { error } = await supabase.from('transactions').insert({
                 date,
                 account_id: accountId,
-                category_id: categoryId,
-                amount: numAmount,
+                category_id: finalCategoryId,
+                amount: finalAmount,
                 person,
                 note: note || null,
+                user_id: user.id,
             });
 
             if (error) {
@@ -468,29 +619,30 @@ export default function FinancePage() {
         const newTransactions = await reloadTransactionsForMonth();
 
         // compute notification about remaining budget for this category
-        const selectedCategory = categories.find(c => c.id === categoryId);
+        const selectedCategory = finalCategoryId ? categories.find(c => c.id === finalCategoryId) : null;
         const selectedCategoryName = selectedCategory?.name ?? null;
 
         if (selectedCategoryName) {
-            const budgetRecord = budgetsByCategoryId.get(categoryId);
-            if (budgetRecord) {
-                const updatedThisMonthTx = newTransactions.filter(tx =>
-                    tx.date.startsWith(monthStr)
-                );
-                const updatedSpendingByCategory = new Map<string, number>();
-                updatedThisMonthTx.forEach(tx => {
-                    if (!tx.category) return;
-                    if (tx.amount >= 0) return;
-                    const prev = updatedSpendingByCategory.get(tx.category) || 0;
-                    updatedSpendingByCategory.set(
-                        tx.category,
-                        prev + Math.abs(tx.amount)
+            if (finalCategoryId) {
+                const budgetRecord = budgetsByCategoryId.get(finalCategoryId);
+                if (budgetRecord) {
+                    const updatedThisMonthTx = newTransactions.filter(tx =>
+                        tx.date.startsWith(monthStr)
                     );
-                });
+                    const updatedSpendingByCategory = new Map<string, number>();
+                    updatedThisMonthTx.forEach(tx => {
+                        if (!tx.category) return;
+                        if (tx.amount >= 0) return;
+                        const prev = updatedSpendingByCategory.get(tx.category) || 0;
+                        updatedSpendingByCategory.set(
+                            tx.category,
+                            prev + Math.abs(tx.amount)
+                        );
+                    });
 
-                const spent =
-                    updatedSpendingByCategory.get(selectedCategoryName) || 0;
-                const remaining = budgetRecord.amount - spent;
+                    const spent =
+                        updatedSpendingByCategory.get(selectedCategoryName) || 0;
+                    const remaining = budgetRecord.amount - spent;
 
                 const spentStr = new Intl.NumberFormat('en-US', {
                     style: 'currency',
@@ -506,37 +658,52 @@ export default function FinancePage() {
                     style: 'currency',
                     currency: 'USD',
                     minimumFractionDigits: 2,
-                }).format(Math.abs(numAmount));
+                }).format(Math.abs(finalAmount));
                 const budgetStr = new Intl.NumberFormat('en-US', {
                     style: 'currency',
                     currency: 'USD',
                     minimumFractionDigits: 2,
                 }).format(budgetRecord.amount);
 
-                setNotification(
-                    `You just ${editingId ? 'updated' : 'logged'} ${
-                        numAmount < 0 ? '-' : '+'
-                    }${amountStr} in ${selectedCategoryName}. This month: spent ${spentStr}, remaining ${remainingStr} of your ${budgetStr} budget.`
-                );
-            } else {
-                const amountStrNoBudget = new Intl.NumberFormat('en-US', {
-                    style: 'currency',
-                    currency: 'USD',
-                    minimumFractionDigits: 2,
-                }).format(Math.abs(numAmount));
-                setNotification(
-                    `You just ${editingId ? 'updated' : 'logged'} ${
-                        numAmount < 0 ? '-' : '+'
-                    }${amountStrNoBudget} in ${selectedCategoryName}. No budget set for this category.`
-                );
+                    setNotification(
+                        `You just ${editingId ? 'updated' : 'logged'} ${
+                            finalAmount < 0 ? '-' : '+'
+                        }${amountStr} in ${selectedCategoryName}. This month: spent ${spentStr}, remaining ${remainingStr} of your ${budgetStr} budget.`
+                    );
+                } else {
+                    const amountStrNoBudget = new Intl.NumberFormat('en-US', {
+                        style: 'currency',
+                        currency: 'USD',
+                        minimumFractionDigits: 2,
+                    }).format(Math.abs(finalAmount));
+                    setNotification(
+                        `You just ${editingId ? 'updated' : 'logged'} ${
+                            finalAmount < 0 ? '-' : '+'
+                        }${amountStrNoBudget} in ${selectedCategoryName}. No budget set for this category.`
+                    );
+                }
             }
         }
 
-        // Reset form state after save/update
-        resetFormToDefault();
-        
-        // Collapse the form after successful save/update
-        setShowAddTransaction(false);
+        // Reset form after successful insert (not update)
+        if (!editingId) {
+            if (addAnother) {
+                // Keep form open and reset fields but keep account and date
+                setCategoryId('');
+                setCategoryName('');
+                setAmount('');
+                setNote('');
+                setTransactionType('expense');
+                // Keep accountId and date for quick entry
+            } else {
+                resetFormToDefault();
+                setShowAddTransaction(false);
+            }
+        } else {
+            setEditingId(null);
+            resetFormToDefault();
+            setShowAddTransaction(false);
+        }
     };
 
     const handleSaveBudget = async (e: FormEvent) => {
@@ -549,10 +716,18 @@ export default function FinancePage() {
 
         setNotification(null);
 
+        // Get authenticated user
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            setNotification('You must be logged in to save budgets.');
+            return;
+        }
+
         // Check if a budget already exists for this category + month
         const { data: existingRows, error: fetchError } = await supabase
             .from('category_budgets')
             .select('id')
+            .eq('user_id', user.id)
             .eq('category_id', budgetCategoryId)
             .eq('month', monthStr)
             .limit(1);
@@ -569,7 +744,8 @@ export default function FinancePage() {
             const { error: updateError } = await supabase
                 .from('category_budgets')
                 .update({ amount: numAmount })
-                .eq('id', id);
+                .eq('id', id)
+                .eq('user_id', user.id); // Ensure user can only update their own budgets
 
             if (updateError) {
                 console.error(updateError);
@@ -584,6 +760,7 @@ export default function FinancePage() {
                     category_id: budgetCategoryId,
                     month: monthStr,
                     amount: numAmount,
+                    user_id: user.id,
                 });
 
             if (insertError) {
@@ -597,6 +774,7 @@ export default function FinancePage() {
         const { data: budgetsData, error: budgetsError } = await supabase
             .from('category_budgets')
             .select('id, category_id, month, amount')
+            .eq('user_id', user.id)
             .eq('month', monthStr);
 
         if (budgetsError) {
@@ -623,7 +801,8 @@ export default function FinancePage() {
         setEditingId(tx.id);
         // date input expects YYYY-MM-DD
         setDate(tx.date.slice(0, 10));
-        setAmount(tx.amount.toString());
+        setAmount(Math.abs(tx.amount).toString());
+        setTransactionType(tx.amount >= 0 ? 'income' : 'expense');
         setPerson(tx.person);
         setNote(tx.note ?? '');
 
@@ -639,15 +818,107 @@ export default function FinancePage() {
 
         if (tx.categoryId) {
             setCategoryId(tx.categoryId);
+            const cat = categories.find(c => c.id === tx.categoryId);
+            setCategoryName(cat?.name || '');
         } else if (tx.category) {
             const cat = categories.find(c => c.name === tx.category);
             setCategoryId(cat?.id ?? '');
+            setCategoryName(tx.category);
         } else {
             setCategoryId('');
+            setCategoryName('');
         }
 
         // Open the form when editing
         setShowAddTransaction(true);
+    };
+    
+    const handleBulkSave = async () => {
+        // Get authenticated user
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            setNotification('You must be logged in to save transactions.');
+            return;
+        }
+
+        const validTransactions = bulkTransactions.filter(tx => 
+            tx.date && tx.accountId && tx.amount && (tx.categoryId || tx.categoryName)
+        );
+        
+        if (validTransactions.length === 0) {
+            setNotification('Please add at least one valid transaction.');
+            return;
+        }
+        
+        setNotification(null);
+        
+        // Process each transaction, creating categories as needed
+        const transactionsToInsert = [];
+        for (const tx of validTransactions) {
+            // Find or create category
+            let finalCategoryId: string | null = tx.categoryId || null;
+            if (tx.categoryName && !tx.categoryId) {
+                finalCategoryId = await findOrCreateCategory(tx.categoryName, tx.type);
+                if (!finalCategoryId) {
+                    setNotification(`Error creating category "${tx.categoryName}". Skipping transaction.`);
+                    continue;
+                }
+            } else if (!tx.categoryId) {
+                setNotification(`Missing category for transaction. Skipping.`);
+                continue;
+            }
+            
+            if (!finalCategoryId) {
+                setNotification(`Missing category for transaction. Skipping.`);
+                continue;
+            }
+            
+            let finalAmount = Number(tx.amount);
+            if (tx.type === 'expense' && finalAmount > 0) {
+                finalAmount = -Math.abs(finalAmount);
+            } else if (tx.type === 'income' && finalAmount < 0) {
+                finalAmount = Math.abs(finalAmount);
+            }
+            
+            transactionsToInsert.push({
+                date: tx.date,
+                account_id: tx.accountId,
+                category_id: finalCategoryId,
+                amount: finalAmount,
+                person: tx.person,
+                note: tx.note || null,
+                user_id: user.id,
+            });
+        }
+        
+        if (transactionsToInsert.length === 0) {
+            setNotification('No valid transactions to save.');
+            return;
+        }
+        
+        const { error } = await supabase
+            .from('transactions')
+            .insert(transactionsToInsert);
+        
+        if (error) {
+            console.error(error);
+            setNotification('Error saving bulk transactions. Check console/logs.');
+            return;
+        }
+        
+        await reloadTransactionsForMonth();
+        setNotification(`Successfully saved ${transactionsToInsert.length} transaction(s).`);
+        setBulkTransactions([{
+            date: new Date().toISOString().slice(0, 10),
+            accountId: '',
+            categoryId: '',
+            categoryName: '',
+            type: 'expense',
+            amount: '',
+            person: 'Malik',
+            note: '',
+        }]);
+        setShowBulkTransaction(false);
     };
 
     const handleCancelEdit = () => {
@@ -656,6 +927,13 @@ export default function FinancePage() {
 
     const handleDeleteTransaction = async (id: string) => {
         setNotification(null);
+
+        // Get authenticated user
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            setNotification('You must be logged in to delete transactions.');
+            return;
+        }
 
         // optional confirm
         if (typeof window !== 'undefined') {
@@ -666,7 +944,8 @@ export default function FinancePage() {
         const { error } = await supabase
             .from('transactions')
             .delete()
-            .eq('id', id);
+            .eq('id', id)
+            .eq('user_id', user.id); // Ensure user can only delete their own transactions
 
         if (error) {
             console.error(error);
@@ -686,6 +965,13 @@ export default function FinancePage() {
 
     const handleDuplicateTransaction = async (tx: Transaction) => {
         setNotification(null);
+
+        // Get authenticated user
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            setNotification('You must be logged in to duplicate transactions.');
+            return;
+        }
 
         // resolve account/category IDs (use stored ids, else match by name)
         let accId: string | null = tx.accountId;
@@ -715,6 +1001,7 @@ export default function FinancePage() {
             amount: tx.amount,
             person: tx.person,
             note: tx.note,
+            user_id: user.id,
         });
 
         if (error) {
@@ -858,24 +1145,35 @@ export default function FinancePage() {
 
             {/* 🔹 Add Transaction - Collapsible */}
             <div className="rounded-lg border border-slate-800 bg-slate-900">
-                <button
-                    type="button"
-                    onClick={() => {
-                        setShowAddTransaction(!showAddTransaction);
-                        // If opening and editing, reset form
-                        if (!showAddTransaction && editingId) {
-                            resetFormToDefault();
-                        }
-                    }}
-                    className="w-full flex items-center justify-between p-4 text-left hover:bg-slate-800 transition-colors"
-                >
-                    <h2 className="text-sm font-semibold">
-                        {editingId ? 'Edit transaction' : 'Add Transaction'}
-                    </h2>
-                    <span className="text-xs text-slate-400">
-                        {showAddTransaction ? '▼' : '▶'}
-                    </span>
-                </button>
+                <div className="flex items-center justify-between p-4">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setShowAddTransaction(!showAddTransaction);
+                            // If opening and editing, reset form
+                            if (!showAddTransaction && editingId) {
+                                resetFormToDefault();
+                            }
+                        }}
+                        className="flex-1 flex items-center justify-between text-left hover:bg-slate-800 transition-colors -ml-4 -mr-4 px-4 py-2 rounded"
+                    >
+                        <h2 className="text-sm font-semibold">
+                            {editingId ? 'Edit transaction' : 'Add Transaction'}
+                        </h2>
+                        <span className="text-xs text-slate-400">
+                            {showAddTransaction ? '▼' : '▶'}
+                        </span>
+                    </button>
+                    {!showAddTransaction && !editingId && (
+                        <button
+                            type="button"
+                            onClick={() => setShowBulkTransaction(!showBulkTransaction)}
+                            className="ml-2 rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-[11px] font-semibold text-slate-200 hover:bg-slate-700"
+                        >
+                            Bulk Add
+                        </button>
+                    )}
+                </div>
 
                 {showAddTransaction && (
                     <div className="border-t border-slate-800 p-4">
@@ -915,19 +1213,100 @@ export default function FinancePage() {
                             </div>
 
                             <div className="space-y-1">
-                                <label className="block text-slate-300">Category</label>
+                                <label className="block text-slate-300">Type</label>
                                 <select
                                     className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
-                                    value={categoryId}
-                                    onChange={e => setCategoryId(e.target.value)}
+                                    value={transactionType}
+                                    onChange={e => {
+                                        setTransactionType(e.target.value as 'expense' | 'income');
+                                        // Update amount sign when type changes
+                                        if (amount) {
+                                            const numAmount = Number(amount);
+                                            if (e.target.value === 'expense' && numAmount > 0) {
+                                                setAmount('-' + Math.abs(numAmount).toString());
+                                            } else if (e.target.value === 'income' && numAmount < 0) {
+                                                setAmount(Math.abs(numAmount).toString());
+                                            }
+                                        }
+                                    }}
                                 >
-                                    <option value="">Select</option>
-                                    {categories.map(c => (
-                                        <option key={c.id} value={c.id}>
-                                            {c.type === 'income' ? '⬆️' : '⬇️'} {c.name}
-                                        </option>
-                                    ))}
+                                    <option value="expense">⬇️ Expense</option>
+                                    <option value="income">⬆️ Income</option>
                                 </select>
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="block text-slate-300">Category</label>
+                                <div className="space-y-1">
+                                    <input
+                                        type="text"
+                                        list={`category-list-${transactionType}`}
+                                        className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
+                                        value={categoryName || (categoryId ? categories.find(c => c.id === categoryId)?.name || '' : '')}
+                                        onChange={async (e) => {
+                                            const inputValue = e.target.value;
+                                            setCategoryName(inputValue);
+                                            
+                                            // Try to find matching category
+                                            const matchingCategory = categories.find(
+                                                c => c.name.toLowerCase() === inputValue.toLowerCase() && 
+                                                ((transactionType === 'income' && c.type === 'income') || 
+                                                 (transactionType === 'expense' && c.type === 'expense'))
+                                            );
+                                            
+                                            if (matchingCategory) {
+                                                setCategoryId(matchingCategory.id);
+                                            } else {
+                                                setCategoryId(''); // Will create new category on save
+                                            }
+                                        }}
+                                        placeholder="Type or select category..."
+                                    />
+                                    <datalist id={`category-list-${transactionType}`}>
+                                        {(() => {
+                                            // Organize categories into hierarchy
+                                            const groups = categories.filter(c => c.kind === 'group' && 
+                                                ((transactionType === 'income' && c.type === 'income') || 
+                                                 (transactionType === 'expense' && c.type === 'expense')));
+                                            const subcategories = categories.filter(c => c.kind === 'category' && c.parent_id &&
+                                                ((transactionType === 'income' && c.type === 'income') || 
+                                                 (transactionType === 'expense' && c.type === 'expense')));
+                                            const standalone = categories.filter(c => c.kind === 'category' && !c.parent_id &&
+                                                ((transactionType === 'income' && c.type === 'income') || 
+                                                 (transactionType === 'expense' && c.type === 'expense')));
+                                            
+                                            const options: React.ReactElement[] = [];
+                                            
+                                            // Add groups with their subcategories
+                                            groups.forEach(group => {
+                                                const groupSubcats = subcategories.filter(sc => sc.parent_id === group.id);
+                                                if (groupSubcats.length > 0) {
+                                                    groupSubcats.forEach(subcat => {
+                                                        options.push(
+                                                            <option key={subcat.id} value={subcat.name}>
+                                                                {group.name} — {subcat.name}
+                                                            </option>
+                                                        );
+                                                    });
+                                                }
+                                            });
+                                            
+                                            // Add standalone categories
+                                            standalone.forEach(cat => {
+                                                options.push(
+                                                    <option key={cat.id} value={cat.name}>
+                                                        {cat.type === 'income' ? '⬆️' : '⬇️'} {cat.name}
+                                                    </option>
+                                                );
+                                            });
+                                            
+                                            return options;
+                                        })()}
+                                    </datalist>
+                                    <p className="text-[10px] text-slate-500">
+                                        Type a category name to create a new one, or select from the list
+                                    </p>
+                                </div>
                             </div>
 
                             <div className="space-y-1">
@@ -938,10 +1317,12 @@ export default function FinancePage() {
                                     className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
                                     value={amount}
                                     onChange={e => setAmount(e.target.value)}
+                                    placeholder={transactionType === 'expense' ? '-45.23' : '45.23'}
                                 />
                                 <p className="text-[10px] text-slate-500">
-                                    Use positive for income, negative for expenses (e.g. -45.23
-                                    for groceries).
+                                    {transactionType === 'expense' 
+                                        ? 'Enter amount as positive number (will be saved as negative)'
+                                        : 'Enter amount as positive number'}
                                 </p>
                             </div>
 
@@ -971,9 +1352,18 @@ export default function FinancePage() {
                             </div>
 
                             <div className="mt-2 flex gap-2">
+                                {!editingId && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => handleAddOrUpdateTransaction(e, true)}
+                                        className="flex-1 rounded-md border border-amber-400 bg-amber-950 py-2 text-xs font-semibold text-amber-200 hover:bg-amber-900"
+                                    >
+                                        Save & Add Another
+                                    </button>
+                                )}
                                 <button
                                     type="submit"
-                                    className="w-full rounded-md bg-amber-400 py-2 text-xs font-semibold text-black hover:bg-amber-300"
+                                    className={`${editingId ? 'w-full' : 'flex-1'} rounded-md bg-amber-400 py-2 text-xs font-semibold text-black hover:bg-amber-300`}
                                 >
                                     {editingId ? 'Update transaction' : 'Save transaction'}
                                 </button>
@@ -988,6 +1378,237 @@ export default function FinancePage() {
                                 )}
                             </div>
                         </form>
+                    </div>
+                )}
+                
+                {/* Bulk Transaction Form */}
+                {showBulkTransaction && (
+                    <div className="border-t border-slate-800 p-4">
+                        <div className="mb-3 flex items-center justify-between">
+                            <h3 className="text-xs font-semibold">Bulk Add Transactions</h3>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setBulkTransactions([{
+                                        date: new Date().toISOString().slice(0, 10),
+                                        accountId: '',
+                                        categoryId: '',
+                                        categoryName: '',
+                                        type: 'expense',
+                                        amount: '',
+                                        person: 'Malik',
+                                        note: '',
+                                    }]);
+                                    setShowBulkTransaction(false);
+                                }}
+                                className="text-xs text-slate-400 hover:text-slate-200"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="space-y-3 max-h-96 overflow-y-auto">
+                            {bulkTransactions.map((tx, index) => (
+                                <div key={index} className="rounded-md border border-slate-700 bg-slate-950 p-3 space-y-2">
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                            <label className="block text-[10px] text-slate-400 mb-1">Date</label>
+                                            <input
+                                                type="date"
+                                                className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                                value={tx.date}
+                                                onChange={e => {
+                                                    const newTxs = [...bulkTransactions];
+                                                    newTxs[index].date = e.target.value;
+                                                    setBulkTransactions(newTxs);
+                                                }}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] text-slate-400 mb-1">Type</label>
+                                            <select
+                                                className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                                value={tx.type}
+                                                onChange={e => {
+                                                    const newTxs = [...bulkTransactions];
+                                                    newTxs[index].type = e.target.value as 'expense' | 'income';
+                                                    setBulkTransactions(newTxs);
+                                                }}
+                                            >
+                                                <option value="expense">⬇️ Expense</option>
+                                                <option value="income">⬆️ Income</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                            <label className="block text-[10px] text-slate-400 mb-1">Account</label>
+                                            <select
+                                                className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                                value={tx.accountId}
+                                                onChange={e => {
+                                                    const newTxs = [...bulkTransactions];
+                                                    newTxs[index].accountId = e.target.value;
+                                                    setBulkTransactions(newTxs);
+                                                }}
+                                            >
+                                                <option value="">Select</option>
+                                                {accounts.map(a => (
+                                                    <option key={a.id} value={a.id}>{a.name}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] text-slate-400 mb-1">Category</label>
+                                            <input
+                                                type="text"
+                                                list={`bulk-category-list-${index}-${tx.type}`}
+                                                className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                                value={tx.categoryName || (tx.categoryId ? categories.find(c => c.id === tx.categoryId)?.name || '' : '')}
+                                                onChange={e => {
+                                                    const newTxs = [...bulkTransactions];
+                                                    const inputValue = e.target.value;
+                                                    newTxs[index].categoryName = inputValue;
+                                                    
+                                                    // Try to find matching category
+                                                    const matchingCategory = categories.find(
+                                                        c => c.name.toLowerCase() === inputValue.toLowerCase() && c.type === tx.type
+                                                    );
+                                                    
+                                                    if (matchingCategory) {
+                                                        newTxs[index].categoryId = matchingCategory.id;
+                                                    } else {
+                                                        newTxs[index].categoryId = ''; // Will create new category on save
+                                                    }
+                                                    
+                                                    setBulkTransactions(newTxs);
+                                                }}
+                                                placeholder="Type or select category..."
+                                            />
+                                            <datalist id={`bulk-category-list-${index}-${tx.type}`}>
+                                                {(() => {
+                                                    // Organize categories into hierarchy
+                                                    const groups = categories.filter(c => c.kind === 'group' && c.type === tx.type);
+                                                    const subcategories = categories.filter(c => c.kind === 'category' && c.parent_id && c.type === tx.type);
+                                                    const standalone = categories.filter(c => c.kind === 'category' && !c.parent_id && c.type === tx.type);
+                                                    
+                                                    const options: React.ReactElement[] = [];
+                                                    
+                                                    // Add groups with their subcategories
+                                                    groups.forEach(group => {
+                                                        const groupSubcats = subcategories.filter(sc => sc.parent_id === group.id);
+                                                        if (groupSubcats.length > 0) {
+                                                            groupSubcats.forEach(subcat => {
+                                                                options.push(
+                                                                    <option key={subcat.id} value={subcat.name}>
+                                                                        {group.name} — {subcat.name}
+                                                                    </option>
+                                                                );
+                                                            });
+                                                        }
+                                                    });
+                                                    
+                                                    // Add standalone categories
+                                                    standalone.forEach(cat => {
+                                                        options.push(
+                                                            <option key={cat.id} value={cat.name}>
+                                                                {cat.name}
+                                                            </option>
+                                                        );
+                                                    });
+                                                    
+                                                    return options;
+                                                })()}
+                                            </datalist>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                            <label className="block text-[10px] text-slate-400 mb-1">Amount</label>
+                                            <input
+                                                type="number"
+                                                step="0.01"
+                                                className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                                value={tx.amount}
+                                                onChange={e => {
+                                                    const newTxs = [...bulkTransactions];
+                                                    newTxs[index].amount = e.target.value;
+                                                    setBulkTransactions(newTxs);
+                                                }}
+                                                placeholder={tx.type === 'expense' ? '-45.23' : '45.23'}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] text-slate-400 mb-1">Person</label>
+                                            <select
+                                                className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                                value={tx.person}
+                                                onChange={e => {
+                                                    const newTxs = [...bulkTransactions];
+                                                    newTxs[index].person = e.target.value;
+                                                    setBulkTransactions(newTxs);
+                                                }}
+                                            >
+                                                <option value="Malik">Malik</option>
+                                                <option value="Mikia">Mikia</option>
+                                                <option value="Both">Both</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] text-slate-400 mb-1">Note (optional)</label>
+                                        <input
+                                            type="text"
+                                            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                            value={tx.note}
+                                            onChange={e => {
+                                                const newTxs = [...bulkTransactions];
+                                                newTxs[index].note = e.target.value;
+                                                setBulkTransactions(newTxs);
+                                            }}
+                                            placeholder="Optional note"
+                                        />
+                                    </div>
+                                    {bulkTransactions.length > 1 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setBulkTransactions(bulkTransactions.filter((_, i) => i !== index));
+                                            }}
+                                            className="text-[10px] text-red-400 hover:text-red-300"
+                                        >
+                                            Remove
+                                        </button>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="mt-3 flex gap-2">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setBulkTransactions([...bulkTransactions, {
+                                        date: new Date().toISOString().slice(0, 10),
+                                        accountId: bulkTransactions[0]?.accountId || '',
+                                        categoryId: '',
+                                        categoryName: '',
+                                        type: 'expense',
+                                        amount: '',
+                                        person: bulkTransactions[0]?.person || 'Malik',
+                                        note: '',
+                                    }]);
+                                }}
+                                className="flex-1 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-[11px] font-semibold text-slate-200 hover:bg-slate-700"
+                            >
+                                + Add Another
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleBulkSave}
+                                className="flex-1 rounded-md bg-amber-400 px-3 py-2 text-[11px] font-semibold text-black hover:bg-amber-300"
+                            >
+                                Save All ({bulkTransactions.filter(tx => tx.date && tx.accountId && tx.categoryId && tx.amount).length})
+                            </button>
+                        </div>
                     </div>
                 )}
             </div>

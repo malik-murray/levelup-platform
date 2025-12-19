@@ -17,13 +17,40 @@ type TxRow = {
     date: string;
     amount: number;
     account_id: string | null;
+    category_id: string | null;
+    person: string | null;
+    note: string | null;
+    name: string | null;
+};
+
+type Category = {
+    id: string;
+    name: string;
+    kind: 'group' | 'category';
+    parent_id: string | null;
+    type: 'income' | 'expense' | 'transfer' | null;
 };
 
 export default function AccountsPage() {
     const [accounts, setAccounts] = useState<Account[]>([]);
+    const [categories, setCategories] = useState<Category[]>([]);
     const [transactions, setTransactions] = useState<TxRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [notification, setNotification] = useState<string | null>(null);
+    
+    // Selected account state
+    const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+    
+    // Transaction form state
+    const [showAddTransaction, setShowAddTransaction] = useState(false);
+    const [txDate, setTxDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+    const [txAccountId, setTxAccountId] = useState<string>('');
+    const [txCategoryId, setTxCategoryId] = useState<string>('');
+    const [txCategoryName, setTxCategoryName] = useState<string>('');
+    const [txType, setTxType] = useState<'expense' | 'income'>('expense');
+    const [txAmount, setTxAmount] = useState<string>('');
+    const [txPerson, setTxPerson] = useState<string>('Malik');
+    const [txNote, setTxNote] = useState<string>('');
 
     // New UI state for CRUD
     const [newAccountName, setNewAccountName] = useState('');
@@ -75,6 +102,13 @@ export default function AccountsPage() {
             setLoading(true);
             setNotification(null);
 
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                window.location.href = '/login';
+                return;
+            }
+
             const startOfMonth = new Date(
                 monthDate.getFullYear(),
                 monthDate.getMonth(),
@@ -91,13 +125,16 @@ export default function AccountsPage() {
 
             const [
                 { data: accountsData, error: accountsError },
+                { data: categoriesData, error: categoriesError },
                 { data: txData, error: txError },
             ] = await Promise.all([
-                // 🔹 Include starting_balance
-                supabase.from('accounts').select('id, name, type, starting_balance'),
+                // 🔹 Include starting_balance - filter by user_id
+                supabase.from('accounts').select('id, name, type, starting_balance').eq('user_id', user.id),
+                supabase.from('categories').select('id, name, kind, parent_id, type').eq('user_id', user.id).order('name'),
                 supabase
                     .from('transactions')
-                    .select('id, date, amount, account_id')
+                    .select('id, date, amount, account_id, category_id, person, note, name')
+                    .eq('user_id', user.id)
                     .gte('date', startStr)
                     .lt('date', endStr),
             ]);
@@ -111,8 +148,13 @@ export default function AccountsPage() {
                 console.error(txError);
                 setNotification('Error loading transactions. Check console/logs.');
             }
+            
+            if (categoriesError) {
+                console.error(categoriesError);
+            }
 
             setAccounts((accountsData as Account[]) ?? []);
+            setCategories((categoriesData as Category[]) ?? []);
             setTransactions((txData as TxRow[]) ?? []);
             setLoading(false);
         };
@@ -124,6 +166,12 @@ export default function AccountsPage() {
         });
     }, [monthDate]);
 
+    // Filter transactions by selected account
+    const filteredTransactions = useMemo(() => {
+        if (!selectedAccountId) return [];
+        return transactions.filter(tx => tx.account_id === selectedAccountId);
+    }, [transactions, selectedAccountId]);
+    
     // Net change this month per account (sum of tx amounts)
     const netChangeByAccountId = useMemo(() => {
         const map = new Map<string, number>();
@@ -159,6 +207,18 @@ export default function AccountsPage() {
             return sum + signedBalance;
         }, 0);
     }, [accounts, netChangeByAccountId]);
+    
+    // Get selected account details
+    const selectedAccount = selectedAccountId 
+        ? accounts.find(acc => acc.id === selectedAccountId)
+        : null;
+    
+    // When account is selected, pre-populate transaction form
+    useEffect(() => {
+        if (selectedAccountId && !txAccountId) {
+            setTxAccountId(selectedAccountId);
+        }
+    }, [selectedAccountId, txAccountId]);
 
     const totalNetChange = useMemo(
         () =>
@@ -202,6 +262,13 @@ export default function AccountsPage() {
         }
 
         try {
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                setNotification('You must be logged in to create accounts.');
+                return;
+            }
+
             setNotification(null);
             setActionLoadingId('new');
 
@@ -211,6 +278,7 @@ export default function AccountsPage() {
                     name: newAccountName.trim(),
                     type: newAccountType || null,
                     starting_balance: startingBalanceValue,
+                    user_id: user.id,
                 })
                 .select()
                 .single();
@@ -273,6 +341,13 @@ export default function AccountsPage() {
         }
 
         try {
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                setNotification('You must be logged in to update accounts.');
+                return;
+            }
+
             setNotification(null);
             setActionLoadingId(accountId);
 
@@ -284,6 +359,7 @@ export default function AccountsPage() {
                     starting_balance: startingBalanceValue,
                 })
                 .eq('id', accountId)
+                .eq('user_id', user.id) // Ensure user can only update their own accounts
                 .select()
                 .single();
 
@@ -314,13 +390,21 @@ export default function AccountsPage() {
         if (!ok) return;
 
         try {
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                setNotification('You must be logged in to delete accounts.');
+                return;
+            }
+
             setNotification(null);
             setActionLoadingId(accountId);
 
             const { error } = await supabase
                 .from('accounts')
                 .delete()
-                .eq('id', accountId);
+                .eq('id', accountId)
+                .eq('user_id', user.id); // Ensure user can only delete their own accounts
 
             if (error) {
                 console.error(error);
@@ -346,6 +430,151 @@ export default function AccountsPage() {
         'investment',
         'other',
     ];
+    
+    const findOrCreateCategory = async (categoryNameInput: string, type: 'expense' | 'income'): Promise<string | null> => {
+        if (!categoryNameInput.trim()) return null;
+        
+        const trimmedName = categoryNameInput.trim();
+        
+        // First, try to find existing category
+        const existingCategory = categories.find(
+            c => c.name.toLowerCase() === trimmedName.toLowerCase() && c.type === type
+        );
+        
+        if (existingCategory) {
+            return existingCategory.id;
+        }
+        
+        // Category doesn't exist, create it
+        try {
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                setNotification('You must be logged in to create categories.');
+                return null;
+            }
+
+            const { data, error } = await supabase
+                .from('categories')
+                .insert({
+                    name: trimmedName,
+                    type: type,
+                    kind: 'category',
+                    parent_id: null, // Will be a standalone category
+                    user_id: user.id,
+                })
+                .select()
+                .single();
+            
+            if (error) {
+                console.error('Error creating category:', error);
+                setNotification(`Error creating category: ${error.message}`);
+                return null;
+            }
+            
+            // Add to local state
+            setCategories(prev => [...prev, data as Category]);
+            setNotification(`Created new category: "${trimmedName}"`);
+            
+            return data.id;
+        } catch (error) {
+            console.error('Error creating category:', error);
+            setNotification('Error creating category. Check console/logs.');
+            return null;
+        }
+    };
+    
+    const handleAddTransaction = async (e: FormEvent, addAnother: boolean = false) => {
+        e.preventDefault();
+        
+        const numAmount = Number(txAmount);
+        if (!numAmount || !txAccountId) {
+            setNotification('Please fill in all required fields.');
+            return;
+        }
+        
+        // Find or create category if categoryName is provided
+        let finalCategoryId = txCategoryId;
+        if (txCategoryName && !txCategoryId) {
+            finalCategoryId = await findOrCreateCategory(txCategoryName, txType);
+            if (!finalCategoryId) {
+                setNotification('Please select or create a category.');
+                return;
+            }
+        } else if (!txCategoryId) {
+            setNotification('Please select or enter a category.');
+            return;
+        }
+        
+        let finalAmount = numAmount;
+        if (txType === 'expense' && numAmount > 0) {
+            finalAmount = -Math.abs(numAmount);
+        } else if (txType === 'income' && numAmount < 0) {
+            finalAmount = Math.abs(numAmount);
+        }
+        
+        setNotification(null);
+        
+        // Get authenticated user
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            setNotification('You must be logged in to save transactions.');
+            return;
+        }
+        
+        const { error } = await supabase.from('transactions').insert({
+            date: txDate,
+            account_id: txAccountId,
+            category_id: finalCategoryId,
+            amount: finalAmount,
+            person: txPerson,
+            note: txNote || null,
+            user_id: user.id,
+        });
+        
+        if (error) {
+            console.error(error);
+            setNotification('Error saving transaction. Check console/logs.');
+            return;
+        }
+        
+        // Reload transactions
+        const startOfMonth = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
+        const endOfMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
+        const startStr = startOfMonth.toISOString().slice(0, 10);
+        const endStr = endOfMonth.toISOString().slice(0, 10);
+        
+        const { data: txData } = await supabase
+            .from('transactions')
+            .select('id, date, amount, account_id, category_id, person, note, name')
+            .gte('date', startStr)
+            .lt('date', endStr);
+        
+        setTransactions((txData as TxRow[]) ?? []);
+        setNotification('Transaction saved successfully.');
+        
+        if (addAnother) {
+            setTxCategoryId('');
+            setTxCategoryName('');
+            setTxAmount('');
+            setTxNote('');
+            setTxType('expense');
+            // Keep account and date for quick entry
+        } else {
+            setShowAddTransaction(false);
+            setTxDate(new Date().toISOString().slice(0, 10));
+            // Keep selected account if one is selected, otherwise clear
+            if (!selectedAccountId) {
+                setTxAccountId('');
+            }
+            setTxCategoryId('');
+            setTxCategoryName('');
+            setTxType('expense');
+            setTxAmount('');
+            setTxPerson('Malik');
+            setTxNote('');
+        }
+    };
 
     return (
         <section className="space-y-4 px-6 py-4">
@@ -409,6 +638,32 @@ export default function AccountsPage() {
                         {formatCurrency(netWorth)}
                     </span>
                 </p>
+            </div>
+
+            {/* Account Selector */}
+            <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
+                <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-semibold">Select Account</h3>
+                </div>
+                <select
+                    value={selectedAccountId || ''}
+                    onChange={e => {
+                        const accountId = e.target.value || null;
+                        setSelectedAccountId(accountId);
+                        // Pre-populate transaction form with selected account
+                        if (accountId) {
+                            setTxAccountId(accountId);
+                        }
+                    }}
+                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                >
+                    <option value="">All Accounts</option>
+                    {accounts.map(acc => (
+                        <option key={acc.id} value={acc.id}>
+                            {acc.name} ({formatAccountType(acc.type)})
+                        </option>
+                    ))}
+                </select>
             </div>
 
             {/* Accounts list */}
@@ -539,6 +794,20 @@ export default function AccountsPage() {
                                             <div className="flex items-center gap-2">
                                                 <button
                                                     type="button"
+                                                    onClick={() => {
+                                                        setSelectedAccountId(acc.id);
+                                                        setTxAccountId(acc.id);
+                                                    }}
+                                                    className={`rounded-md border px-2 py-1 text-[11px] ${
+                                                        selectedAccountId === acc.id
+                                                            ? 'border-emerald-600 bg-emerald-900 text-emerald-100'
+                                                            : 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
+                                                    }`}
+                                                >
+                                                    {selectedAccountId === acc.id ? 'Selected' : 'View Transactions'}
+                                                </button>
+                                                <button
+                                                    type="button"
                                                     onClick={() => startEditing(acc)}
                                                     className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800"
                                                 >
@@ -608,6 +877,268 @@ export default function AccountsPage() {
                         For credit cards, starting balance can be your current card balance. New
                         spending will push this more negative and reduce your net worth.
                     </p>
+                </div>
+                
+                {/* Transactions List for Selected Account */}
+                {selectedAccountId && (
+                    <div className="mt-4 border-t border-slate-800 pt-4">
+                        <div className="mb-2 flex items-center justify-between">
+                            <h4 className="text-[11px] font-semibold text-slate-200">
+                                Transactions for {selectedAccount?.name || 'Selected Account'}
+                            </h4>
+                            <button
+                                type="button"
+                                onClick={() => setSelectedAccountId(null)}
+                                className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700"
+                            >
+                                Clear Selection
+                            </button>
+                        </div>
+                        {filteredTransactions.length === 0 ? (
+                            <p className="text-[11px] text-slate-400">
+                                No transactions found for this account in {monthLabel}.
+                            </p>
+                        ) : (
+                            <div className="space-y-1 max-h-96 overflow-y-auto">
+                                {filteredTransactions
+                                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                                    .map(tx => {
+                                        const category = tx.category_id 
+                                            ? categories.find(c => c.id === tx.category_id)
+                                            : null;
+                                        const isPositive = tx.amount >= 0;
+                                        return (
+                                            <div
+                                                key={tx.id}
+                                                className="rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-[11px]"
+                                            >
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={`font-semibold ${
+                                                                isPositive ? 'text-emerald-400' : 'text-red-400'
+                                                            }`}>
+                                                                {formatCurrency(tx.amount)}
+                                                            </span>
+                                                            {category && (
+                                                                <span className="text-slate-400">
+                                                                    {category.name}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="text-[10px] text-slate-500 mt-0.5">
+                                                            {new Date(tx.date).toLocaleDateString('en-US', {
+                                                                month: 'short',
+                                                                day: 'numeric',
+                                                                year: 'numeric'
+                                                            })}
+                                                            {tx.name && ` • ${tx.name}`}
+                                                            {tx.person && ` • ${tx.person}`}
+                                                        </div>
+                                                        {tx.note && (
+                                                            <div className="text-[10px] text-slate-500 mt-0.5">
+                                                                {tx.note}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* Add Transaction Section */}
+                <div className="mt-4 border-t border-slate-800 pt-4">
+                    <div className="mb-2 flex items-center justify-between">
+                        <h4 className="text-[11px] font-semibold text-slate-200">
+                            Add Transaction{selectedAccount ? ` (${selectedAccount.name})` : ''}
+                        </h4>
+                        <button
+                            type="button"
+                            onClick={() => setShowAddTransaction(!showAddTransaction)}
+                            className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700"
+                        >
+                            {showAddTransaction ? 'Hide' : 'Show'}
+                        </button>
+                    </div>
+                    
+                    {showAddTransaction && (
+                        <form onSubmit={(e) => handleAddTransaction(e, false)} className="space-y-2 text-xs">
+                            <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label className="block text-[10px] text-slate-400 mb-1">Date</label>
+                                    <input
+                                        type="date"
+                                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                        value={txDate}
+                                        onChange={e => setTxDate(e.target.value)}
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] text-slate-400 mb-1">Account</label>
+                                    <select
+                                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                        value={txAccountId}
+                                        onChange={e => setTxAccountId(e.target.value)}
+                                        required
+                                    >
+                                        <option value="">Select</option>
+                                        {accounts.map(a => (
+                                            <option key={a.id} value={a.id}>{a.name}</option>
+                                        ))}
+                                    </select>
+                                    {selectedAccountId && (
+                                        <p className="text-[9px] text-slate-500 mt-0.5">
+                                            Pre-filled from selected account
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label className="block text-[10px] text-slate-400 mb-1">Type</label>
+                                    <select
+                                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                        value={txType}
+                                        onChange={e => {
+                                            setTxType(e.target.value as 'expense' | 'income');
+                                            if (txAmount) {
+                                                const numAmount = Number(txAmount);
+                                                if (e.target.value === 'expense' && numAmount > 0) {
+                                                    setTxAmount('-' + Math.abs(numAmount).toString());
+                                                } else if (e.target.value === 'income' && numAmount < 0) {
+                                                    setTxAmount(Math.abs(numAmount).toString());
+                                                }
+                                            }
+                                        }}
+                                    >
+                                        <option value="expense">⬇️ Expense</option>
+                                        <option value="income">⬆️ Income</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] text-slate-400 mb-1">Category</label>
+                                    <input
+                                        type="text"
+                                        list={`category-list-accounts-${txType}`}
+                                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                        value={txCategoryName || (txCategoryId ? categories.find(c => c.id === txCategoryId)?.name || '' : '')}
+                                        onChange={async (e) => {
+                                            const inputValue = e.target.value;
+                                            setTxCategoryName(inputValue);
+                                            
+                                            // Try to find matching category
+                                            const matchingCategory = categories.find(
+                                                c => c.name.toLowerCase() === inputValue.toLowerCase() && c.type === txType
+                                            );
+                                            
+                                            if (matchingCategory) {
+                                                setTxCategoryId(matchingCategory.id);
+                                            } else {
+                                                setTxCategoryId(''); // Will create new category on save
+                                            }
+                                        }}
+                                        placeholder="Type or select category..."
+                                        required
+                                    />
+                                    <datalist id={`category-list-accounts-${txType}`}>
+                                        {(() => {
+                                            // Organize categories into hierarchy
+                                            const groups = categories.filter(c => c.kind === 'group' && c.type === txType);
+                                            const subcategories = categories.filter(c => c.kind === 'category' && c.parent_id && c.type === txType);
+                                            const standalone = categories.filter(c => c.kind === 'category' && !c.parent_id && c.type === txType);
+                                            
+                                            const options: JSX.Element[] = [];
+                                            
+                                            // Add groups with their subcategories
+                                            groups.forEach(group => {
+                                                const groupSubcats = subcategories.filter(sc => sc.parent_id === group.id);
+                                                if (groupSubcats.length > 0) {
+                                                    groupSubcats.forEach(subcat => {
+                                                        options.push(
+                                                            <option key={subcat.id} value={subcat.name}>
+                                                                {group.name} — {subcat.name}
+                                                            </option>
+                                                        );
+                                                    });
+                                                }
+                                            });
+                                            
+                                            // Add standalone categories
+                                            standalone.forEach(cat => {
+                                                options.push(
+                                                    <option key={cat.id} value={cat.name}>
+                                                        {cat.name}
+                                                    </option>
+                                                );
+                                            });
+                                            
+                                            return options;
+                                        })()}
+                                    </datalist>
+                                </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label className="block text-[10px] text-slate-400 mb-1">Amount</label>
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                        value={txAmount}
+                                        onChange={e => setTxAmount(e.target.value)}
+                                        placeholder={txType === 'expense' ? '-45.23' : '45.23'}
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] text-slate-400 mb-1">Person</label>
+                                    <select
+                                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                        value={txPerson}
+                                        onChange={e => setTxPerson(e.target.value)}
+                                    >
+                                        <option value="Malik">Malik</option>
+                                        <option value="Mikia">Mikia</option>
+                                        <option value="Both">Both</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label className="block text-[10px] text-slate-400 mb-1">Note (optional)</label>
+                                <input
+                                    type="text"
+                                    className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                    value={txNote}
+                                    onChange={e => setTxNote(e.target.value)}
+                                    placeholder="Optional note"
+                                />
+                            </div>
+                            
+                            <div className="flex gap-2 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={(e) => handleAddTransaction(e, true)}
+                                    className="flex-1 rounded-md border border-amber-400 bg-amber-950 py-1.5 text-[11px] font-semibold text-amber-200 hover:bg-amber-900"
+                                >
+                                    Save & Add Another
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="flex-1 rounded-md bg-amber-400 py-1.5 text-[11px] font-semibold text-black hover:bg-amber-300"
+                                >
+                                    Save Transaction
+                                </button>
+                            </div>
+                        </form>
+                    )}
                 </div>
             </div>
         </section>

@@ -79,6 +79,7 @@ export default function FitnessPage() {
             const { data: workoutsData, error: workoutsError } = await supabase
                 .from('fitness_workouts')
                 .select('*')
+                .eq('user_id', user.id)
                 .eq('date', today)
                 .order('created_at', { ascending: false });
 
@@ -88,6 +89,7 @@ export default function FitnessPage() {
             const { data: mealsData, error: mealsError } = await supabase
                 .from('fitness_meals')
                 .select('*')
+                .eq('user_id', user.id)
                 .eq('date', today)
                 .order('created_at', { ascending: false });
 
@@ -97,6 +99,7 @@ export default function FitnessPage() {
             const { data: metricsData, error: metricsError } = await supabase
                 .from('fitness_metrics')
                 .select('*')
+                .eq('user_id', user.id)
                 .eq('date', today)
                 .single();
 
@@ -108,6 +111,7 @@ export default function FitnessPage() {
             const { data: goalsData, error: goalsError } = await supabase
                 .from('fitness_goals')
                 .select('*')
+                .eq('user_id', user.id)
                 .single();
 
             if (goalsError && goalsError.code === 'PGRST116') {
@@ -115,6 +119,7 @@ export default function FitnessPage() {
                 const { data: newGoals, error: insertError } = await supabase
                     .from('fitness_goals')
                     .insert({
+                        user_id: user.id,
                         daily_steps_target: 10000,
                         daily_calories_target: 2000,
                         daily_water_ml_target: 2500,
@@ -144,6 +149,7 @@ export default function FitnessPage() {
             const { data: weeklyWorkouts, error: weeklyError } = await supabase
                 .from('fitness_workouts')
                 .select('duration_minutes')
+                .eq('user_id', user.id)
                 .gte('date', weekStartStr);
 
             if (!weeklyError && weeklyWorkouts) {

@@ -91,6 +91,7 @@ export default function MealsClient({ initialShowForm = false }: MealsClientProp
             const { data, error } = await supabase
                 .from('fitness_meals')
                 .select('*')
+                .eq('user_id', user.id)
                 .order('date', { ascending: false })
                 .order('created_at', { ascending: false })
                 .limit(200);
@@ -116,6 +117,7 @@ export default function MealsClient({ initialShowForm = false }: MealsClientProp
             const { error } = await supabase
                 .from('fitness_meals')
                 .insert({
+                    user_id: user.id,
                     date,
                     meal_type: mealType,
                     description: description.trim(),

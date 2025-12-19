@@ -24,10 +24,17 @@ export async function getBudgetGroupsForMonth(
     let categoriesData: any[] | null = null;
     let categoriesError: any = null;
     
+    // Get authenticated user
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+        throw new Error('User must be authenticated to fetch budget data');
+    }
+
     // First try with sort_order
     const result = await supabase
         .from('categories')
         .select('id, name, kind, parent_id, type, sort_order')
+        .eq('user_id', user.id)
         .order('name', { ascending: true });
     
     categoriesData = result.data;
@@ -45,6 +52,7 @@ export async function getBudgetGroupsForMonth(
         const retryResult = await supabase
             .from('categories')
             .select('id, name, kind, parent_id, type')
+            .eq('user_id', user.id)
             .order('name', { ascending: true });
         
         categoriesData = retryResult.data;
@@ -85,6 +93,7 @@ export async function getBudgetGroupsForMonth(
     const { data: budgetsData, error: budgetsError } = await supabase
         .from('category_budgets')
         .select('id, category_id, month, amount')
+        .eq('user_id', user.id)
         .eq('month', monthStr);
 
     if (budgetsError) {
@@ -110,6 +119,7 @@ export async function getBudgetGroupsForMonth(
     const { data: transactionsData, error: transactionsError } = await supabase
         .from('transactions')
         .select('id, date, amount, category_id')
+        .eq('user_id', user.id)
         .gte('date', startStr)
         .lt('date', endStr);
 
@@ -166,11 +176,15 @@ export async function getBudgetGroupsForMonth(
     // Separate groups and categories
     const groups = categories.filter(c => c.kind === 'group');
     const categoryItems = categories.filter(c => c.kind === 'category');
+    
+    // Separate categories by whether they have a parent (belong to a group) or are standalone
+    const groupedCategories = categoryItems.filter(c => c.parent_id !== null);
+    const standaloneCategories = categoryItems.filter(c => c.parent_id === null);
 
-    // Build BudgetGroup array
+    // Build BudgetGroup array from actual groups
     const budgetGroups: BudgetGroup[] = groups.map(group => {
         // Find all categories that belong to this group
-        const groupCategories = categoryItems.filter(c => c.parent_id === group.id);
+        const groupCategories = groupedCategories.filter(c => c.parent_id === group.id);
 
         // Build BudgetCategoryRow array for this group's categories
         const categoryRows: BudgetCategoryRow[] = groupCategories.map(cat => {
@@ -243,6 +257,81 @@ export async function getBudgetGroupsForMonth(
             sort_order: group.sort_order ?? 999999,
         };
     });
+    
+    // Create virtual groups for standalone categories (grouped by type)
+    const standaloneByType = new Map<string, Category[]>();
+    standaloneCategories.forEach(cat => {
+        const type = cat.type || 'other';
+        if (!standaloneByType.has(type)) {
+            standaloneByType.set(type, []);
+        }
+        standaloneByType.get(type)!.push(cat);
+    });
+    
+    // Add virtual groups for standalone categories
+    standaloneByType.forEach((cats, type) => {
+        const categoryRows: BudgetCategoryRow[] = cats.map(cat => {
+            const rawAssigned = budgetsByCategoryId.get(cat.id) || 0;
+            const activity = activityByCategoryId.get(cat.id) || 0;
+            
+            let assigned: number;
+            let available: number;
+            
+            if (type === 'expense') {
+                assigned = rawAssigned;
+                const assignedAbs = Math.abs(rawAssigned);
+                available = assignedAbs - activity;
+            } else if (type === 'income') {
+                assigned = rawAssigned;
+                available = assigned - activity;
+            } else {
+                assigned = rawAssigned;
+                available = Math.abs(assigned) - activity;
+            }
+
+            return {
+                id: cat.id,
+                name: cat.name,
+                assigned,
+                activity,
+                available,
+            };
+        });
+        
+        const totalAssigned = categoryRows.reduce((sum, row) => {
+            if (type === 'expense') {
+                return sum + Math.abs(row.assigned);
+            } else {
+                return sum + row.assigned;
+            }
+        }, 0);
+        const totalActivity = categoryRows.reduce((sum, row) => sum + row.activity, 0);
+        const totalAvailable = totalAssigned - totalActivity;
+        
+        // Create a virtual group for standalone categories
+        // Use a special ID format to distinguish from real groups
+        const virtualGroupId = `__standalone_${type}`;
+        budgetGroups.push({
+            id: virtualGroupId,
+            name: type === 'income' ? '⬆️ Standalone Income Categories' 
+                 : type === 'expense' ? '⬇️ Standalone Expense Categories'
+                 : type === 'transfer' ? '💱 Standalone Transfer Categories'
+                 : '📋 Standalone Categories',
+            categories: categoryRows.sort((a, b) => {
+                const catA = cats.find(c => c.id === a.id);
+                const catB = cats.find(c => c.id === b.id);
+                const orderA = catA?.sort_order ?? 999999;
+                const orderB = catB?.sort_order ?? 999999;
+                if (orderA !== orderB) return orderA - orderB;
+                return a.name.localeCompare(b.name);
+            }),
+            totalAssigned,
+            totalActivity,
+            totalAvailable,
+            type: type as 'income' | 'expense' | 'transfer' | null,
+            sort_order: 999998, // Put standalone categories at the end
+        });
+    });
 
     // Sort groups by sort_order, then by name
     return budgetGroups.sort((a, b) => {
@@ -281,11 +370,18 @@ export async function saveCategoryBudget(
     monthStr: string,
     amount: number
 ): Promise<void> {
+    // Get authenticated user
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+        throw new Error('User must be authenticated to save budgets');
+    }
+
     // First, verify this is not a group category
     const { data: categoryData, error: categoryError } = await supabase
         .from('categories')
         .select('id, kind')
         .eq('id', categoryId)
+        .eq('user_id', user.id)
         .single();
 
     if (categoryError) {
@@ -304,6 +400,7 @@ export async function saveCategoryBudget(
     const { data: existing, error: fetchError } = await supabase
         .from('category_budgets')
         .select('id')
+        .eq('user_id', user.id)
         .eq('category_id', categoryId)
         .eq('month', monthStr)
         .single();
@@ -317,7 +414,8 @@ export async function saveCategoryBudget(
         const { error: updateError } = await supabase
             .from('category_budgets')
             .update({ amount })
-            .eq('id', existing.id);
+            .eq('id', existing.id)
+            .eq('user_id', user.id);
 
         if (updateError) {
             throw new Error(`Failed to update budget: ${updateError.message}`);
@@ -330,6 +428,7 @@ export async function saveCategoryBudget(
                 category_id: categoryId,
                 month: monthStr,
                 amount,
+                user_id: user.id,
             });
 
         if (insertError) {
@@ -345,9 +444,16 @@ export async function deleteCategoryBudget(
     categoryId: string,
     monthStr: string
 ): Promise<void> {
+    // Get authenticated user
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+        throw new Error('User must be authenticated to delete budgets');
+    }
+
     const { error } = await supabase
         .from('category_budgets')
         .delete()
+        .eq('user_id', user.id)
         .eq('category_id', categoryId)
         .eq('month', monthStr);
 
@@ -364,6 +470,12 @@ export async function duplicateBudgets(
     sourceMonthStr: string, // Format: YYYY-MM
     targetMonthStr: string  // Format: YYYY-MM
 ): Promise<number> {
+    // Get authenticated user
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+        throw new Error('User must be authenticated to duplicate budgets');
+    }
+
     if (sourceMonthStr === targetMonthStr) {
         throw new Error('Source and target months cannot be the same.');
     }
@@ -372,6 +484,7 @@ export async function duplicateBudgets(
     const { data: sourceBudgets, error: fetchError } = await supabase
         .from('category_budgets')
         .select('category_id, amount')
+        .eq('user_id', user.id)
         .eq('month', sourceMonthStr);
 
     if (fetchError) {
@@ -387,6 +500,7 @@ export async function duplicateBudgets(
     const { data: categories, error: categoriesError } = await supabase
         .from('categories')
         .select('id, kind')
+        .eq('user_id', user.id)
         .in('id', categoryIds);
 
     if (categoriesError) {
@@ -407,6 +521,7 @@ export async function duplicateBudgets(
     const { data: existingBudgets, error: existingError } = await supabase
         .from('category_budgets')
         .select('category_id')
+        .eq('user_id', user.id)
         .eq('month', targetMonthStr);
 
     if (existingError) {
@@ -422,6 +537,7 @@ export async function duplicateBudgets(
         category_id: b.category_id,
         month: targetMonthStr,
         amount: b.amount,
+        user_id: user.id,
     }));
 
     // For budgets that already exist, update them instead
@@ -436,6 +552,7 @@ export async function duplicateBudgets(
         const { error: updateError } = await supabase
             .from('category_budgets')
             .update({ amount: budget.amount })
+            .eq('user_id', user.id)
             .eq('category_id', budget.category_id)
             .eq('month', targetMonthStr);
 
@@ -498,6 +615,12 @@ export async function updateCategorySortOrder(
 export async function reorderCategories(
     categoryIds: string[]
 ): Promise<void> {
+    // Get authenticated user
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+        throw new Error('User must be authenticated to reorder categories');
+    }
+
     // Update all categories with their new sort_order
     const updates = categoryIds.map((id, index) => ({
         id,
@@ -509,7 +632,8 @@ export async function reorderCategories(
         const { error } = await supabase
             .from('categories')
             .update({ sort_order: update.sort_order })
-            .eq('id', update.id);
+            .eq('id', update.id)
+            .eq('user_id', user.id); // Ensure user can only update their own categories
 
         if (error) {
             throw new Error(`Failed to update sort order for category ${update.id}: ${error.message}`);

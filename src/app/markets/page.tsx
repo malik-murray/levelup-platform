@@ -61,6 +61,7 @@ export default function MarketsDashboardPage() {
             const { data: watchlistData, error: watchlistError } = await supabase
                 .from('market_watchlist')
                 .select('*')
+                .eq('user_id', user.id)
                 .order('ticker');
 
             if (watchlistError) {
@@ -73,6 +74,7 @@ export default function MarketsDashboardPage() {
             const { data: positionsData, error: positionsError } = await supabase
                 .from('market_positions')
                 .select('*')
+                .eq('user_id', user.id)
                 .order('ticker');
 
             if (positionsError) {
@@ -85,6 +87,7 @@ export default function MarketsDashboardPage() {
             const { data: settingsData } = await supabase
                 .from('market_user_settings')
                 .select('default_mode')
+                .eq('user_id', user.id)
                 .single();
 
             if (settingsData?.default_mode) {
@@ -143,9 +146,14 @@ export default function MarketsDashboardPage() {
 
     const handleRemoveFromWatchlist = async (ticker: string) => {
         try {
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
             const { error } = await supabase
                 .from('market_watchlist')
                 .delete()
+                .eq('user_id', user.id)
                 .eq('ticker', ticker);
 
             if (error) {

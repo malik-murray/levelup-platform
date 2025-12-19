@@ -54,6 +54,7 @@ export default function WorkoutsClient({ initialShowForm = false }: WorkoutsClie
             const { data, error } = await supabase
                 .from('fitness_workouts')
                 .select('*')
+                .eq('user_id', user.id)
                 .order('date', { ascending: false })
                 .order('created_at', { ascending: false })
                 .limit(100);
@@ -79,6 +80,7 @@ export default function WorkoutsClient({ initialShowForm = false }: WorkoutsClie
             const { error } = await supabase
                 .from('fitness_workouts')
                 .insert({
+                    user_id: user.id,
                     date,
                     type,
                     muscle_group: muscleGroup || null,

@@ -11,7 +11,9 @@ type Account = {
 type Category = {
     id: string;
     name: string;
-    type: 'income' | 'expense' | string;
+    kind: 'group' | 'category';
+    parent_id: string | null;
+    type: 'income' | 'expense' | 'transfer' | string | null;
 };
 
 type Transaction = {
@@ -67,6 +69,7 @@ export default function TransactionsPage() {
         description: string;
         amount: number;
         categoryId?: string | null;
+        categoryName?: string; // For typed category names
         selected: boolean;
         isTransfer?: boolean;
         transferToAccountId?: string | null;
@@ -77,13 +80,19 @@ export default function TransactionsPage() {
         suggestionReasoning?: string;
         isSuggesting?: boolean;
         suggestionError?: string | null;
+        // Duplicate detection state
+        isDuplicate?: boolean;
+        existingTransactionId?: string;
+        duplicateChecked?: boolean;
     };
     const [pendingImportTransactions, setPendingImportTransactions] = useState<PendingTransaction[]>([]);
     const [importAccountId, setImportAccountId] = useState<string>('');
 
     // ✅ NEW: transaction form state
     const [showTransactionForm, setShowTransactionForm] = useState(false);
+    const [showBulkTransaction, setShowBulkTransaction] = useState(false);
     const [transactionType, setTransactionType] = useState<'transaction' | 'transfer'>('transaction');
+    const [expenseIncomeType, setExpenseIncomeType] = useState<'expense' | 'income'>('expense');
     
     // Transfer-specific state (used when transactionType === 'transfer')
     const [transferFromAccount, setTransferFromAccount] = useState<string>('');
@@ -96,9 +105,31 @@ export default function TransactionsPage() {
     );
     const [accountId, setAccountId] = useState<string>('');
     const [categoryId, setCategoryId] = useState<string>('');
-    const [amount, setAmount] = useState<string>('0');
+    const [categoryName, setCategoryName] = useState<string>('');
+    const [amount, setAmount] = useState<string>('');
     const [person, setPerson] = useState<string>('Malik');
     const [note, setNote] = useState<string>('');
+    
+    // Bulk transaction state
+    const [bulkTransactions, setBulkTransactions] = useState<Array<{
+        date: string;
+        accountId: string;
+        categoryId: string;
+        categoryName: string;
+        type: 'expense' | 'income';
+        amount: string;
+        person: string;
+        note: string;
+    }>>([{
+        date: new Date().toISOString().slice(0, 10),
+        accountId: '',
+        categoryId: '',
+        categoryName: '',
+        type: 'expense',
+        amount: '',
+        person: 'Malik',
+        note: '',
+    }]);
 
     // month state
     const [monthDate, setMonthDate] = useState<Date>(() => {
@@ -157,12 +188,19 @@ export default function TransactionsPage() {
     // Load accounts and categories
     useEffect(() => {
         const loadData = async () => {
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                window.location.href = '/login';
+                return;
+            }
+
             const [
                 { data: accountsData, error: accountsError },
                 { data: categoriesData, error: categoriesError },
             ] = await Promise.all([
-                supabase.from('accounts').select('id, name').order('name'),
-                supabase.from('categories').select('id, name, type').order('name'),
+                supabase.from('accounts').select('id, name').eq('user_id', user.id).order('name'),
+                supabase.from('categories').select('id, name, kind, parent_id, type').eq('user_id', user.id).order('name'),
             ]);
 
             if (accountsError) {
@@ -203,6 +241,14 @@ export default function TransactionsPage() {
             const startStr = startOfMonth.toISOString().slice(0, 10);
             const endStr = endOfMonth.toISOString().slice(0, 10);
 
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                window.location.href = '/login';
+                setLoading(false);
+                return;
+            }
+
             // Try to fetch with name field first (if migration has been run)
             let { data: txData, error: txError } = await supabase
                 .from('transactions')
@@ -220,6 +266,7 @@ export default function TransactionsPage() {
           accounts ( id, name ),
           categories ( id, name )
         `)
+                .eq('user_id', user.id)
                 .gte('date', startStr)
                 .lt('date', endStr)
                 .order('date', { ascending: false });
@@ -242,6 +289,7 @@ export default function TransactionsPage() {
           accounts ( id, name ),
           categories ( id, name )
         `)
+                    .eq('user_id', user.id)
                     .gte('date', startStr)
                     .lt('date', endStr)
                     .order('date', { ascending: false });
@@ -322,15 +370,62 @@ export default function TransactionsPage() {
         setDate(new Date().toISOString().slice(0, 10));
         setAccountId('');
         setCategoryId('');
-        setAmount('0');
+        setCategoryName('');
+        setAmount('');
         setPerson('Malik');
         setNote('');
         setEditingId(null);
         setOriginalTransactionType(null);
         setShowTransactionForm(false);
         setTransactionType('transaction');
+        setExpenseIncomeType('expense');
         setTransferFromAccount('');
         setTransferToAccount('');
+    };
+    
+    const findOrCreateCategory = async (categoryNameInput: string, type: 'expense' | 'income'): Promise<string | null> => {
+        if (!categoryNameInput.trim()) return null;
+        
+        const trimmedName = categoryNameInput.trim();
+        
+        // First, try to find existing category
+        const existingCategory = categories.find(
+            c => c.name.toLowerCase() === trimmedName.toLowerCase() && c.type === type
+        );
+        
+        if (existingCategory) {
+            return existingCategory.id;
+        }
+        
+        // Category doesn't exist, create it
+        try {
+            const { data, error } = await supabase
+                .from('categories')
+                .insert({
+                    name: trimmedName,
+                    type: type,
+                    kind: 'category',
+                    parent_id: null, // Will be a standalone category
+                })
+                .select()
+                .single();
+            
+            if (error) {
+                console.error('Error creating category:', error);
+                setNotification(`Error creating category: ${error.message}`);
+                return null;
+            }
+            
+            // Add to local state
+            setCategories(prev => [...prev, data as Category]);
+            setNotification(`Created new category: "${trimmedName}"`);
+            
+            return data.id;
+        } catch (error) {
+            console.error('Error creating category:', error);
+            setNotification('Error creating category. Check console/logs.');
+            return null;
+        }
     };
 
     const handleEditTransaction = (tx: Transaction) => {
@@ -364,12 +459,15 @@ export default function TransactionsPage() {
             setEditingId(tx.id);
             setOriginalTransactionType('transaction'); // Track original type
             setTransactionType('transaction');
+            setExpenseIncomeType(tx.amount >= 0 ? 'income' : 'expense');
             setDate(tx.date.slice(0, 10));
-            setAmount(tx.amount.toString());
+            setAmount(Math.abs(tx.amount).toString());
             setPerson(tx.person);
             setNote(tx.name || tx.note || '');
             setAccountId(tx.accountId ?? '');
             setCategoryId(tx.categoryId ?? '');
+            const cat = categories.find(c => c.id === tx.categoryId);
+            setCategoryName(cat?.name || tx.category || '');
             // Pre-fill transfer fields in case user switches to transfer type
             setTransferFromAccount(tx.accountId ?? '');
             setTransferToAccount('');
@@ -381,13 +479,41 @@ export default function TransactionsPage() {
         resetFormToDefault();
     };
 
-    const handleSaveTransaction = async (e: FormEvent) => {
+    const handleSaveTransaction = async (e: FormEvent, addAnother: boolean = false) => {
         e.preventDefault();
 
         const numAmount = Number(amount);
-        if (!numAmount || !accountId || !categoryId) {
+        if (!numAmount || !accountId) {
             setNotification('Please fill in all required fields.');
             return;
+        }
+
+        // Find or create category if categoryName is provided
+        let finalCategoryId: string | null = categoryId || null;
+        if (categoryName && !categoryId) {
+            finalCategoryId = await findOrCreateCategory(categoryName, expenseIncomeType);
+            if (!finalCategoryId) {
+                setNotification('Please select or create a category.');
+                return;
+            }
+        } else if (!categoryId) {
+            setNotification('Please select or enter a category.');
+            return;
+        }
+        
+        if (!finalCategoryId) {
+            setNotification('Please select or create a category.');
+            return;
+        }
+
+        // Ensure amount has correct sign based on expense/income type
+        let finalAmount = numAmount;
+        if (transactionType === 'transaction') {
+            if (expenseIncomeType === 'expense' && numAmount > 0) {
+                finalAmount = -Math.abs(numAmount);
+            } else if (expenseIncomeType === 'income' && numAmount < 0) {
+                finalAmount = Math.abs(numAmount);
+            }
         }
 
         setNotification(null);
@@ -428,8 +554,8 @@ export default function TransactionsPage() {
                 const { error: insertError } = await supabase.from('transactions').insert({
                     date,
                     account_id: accountId,
-                    category_id: categoryId,
-                    amount: numAmount,
+                    category_id: finalCategoryId,
+                    amount: finalAmount,
                     name: note || null, // Use note as name for manual transactions
                     person,
                     note: null, // Clear note since we're using name
@@ -446,13 +572,17 @@ export default function TransactionsPage() {
                 setNotification('Transfer converted to transaction.');
             } else {
                 // UPDATE existing transaction (same type)
+                if (!finalCategoryId) {
+                    setNotification('Please select or create a category.');
+                    return;
+                }
                 const { error } = await supabase
                     .from('transactions')
                     .update({
                         date,
                         account_id: accountId,
-                        category_id: categoryId,
-                        amount: numAmount,
+                        category_id: finalCategoryId,
+                        amount: finalAmount,
                         name: note || null, // Use note as name for manual transactions
                         person,
                         note: null, // Clear note since we're using name
@@ -468,11 +598,15 @@ export default function TransactionsPage() {
             }
         } else {
             // INSERT new transaction
+            if (!finalCategoryId) {
+                setNotification('Please select or create a category.');
+                return;
+            }
             const { error } = await supabase.from('transactions').insert({
                 date,
                 account_id: accountId,
-                category_id: categoryId,
-                amount: numAmount,
+                category_id: finalCategoryId,
+                amount: finalAmount,
                 name: note || null, // Use note as name for manual transactions
                 person,
                 note: null, // Clear note since we're using name
@@ -488,7 +622,102 @@ export default function TransactionsPage() {
             setNotification('Transaction saved.');
         }
 
-        resetFormToDefault();
+        if (!editingId && addAnother) {
+            // Keep form open and reset fields but keep account and date
+            setCategoryId('');
+            setCategoryName('');
+            setAmount('');
+            setNote('');
+            setExpenseIncomeType('expense');
+            // Keep accountId and date for quick entry
+        } else {
+            resetFormToDefault();
+            setShowTransactionForm(false);
+        }
+        // Reload transactions
+        setMonthDate(prev => new Date(prev));
+    };
+    
+    const handleBulkSave = async () => {
+        const validTransactions = bulkTransactions.filter(tx => 
+            tx.date && tx.accountId && tx.amount && (tx.categoryId || tx.categoryName)
+        );
+        
+        if (validTransactions.length === 0) {
+            setNotification('Please add at least one valid transaction.');
+            return;
+        }
+        
+        setNotification(null);
+        
+        // Process each transaction, creating categories as needed
+        const transactionsToInsert = [];
+        for (const tx of validTransactions) {
+            // Find or create category
+            let finalCategoryId: string | null = tx.categoryId || null;
+            if (tx.categoryName && !tx.categoryId) {
+                finalCategoryId = await findOrCreateCategory(tx.categoryName, tx.type);
+                if (!finalCategoryId) {
+                    setNotification(`Error creating category "${tx.categoryName}". Skipping transaction.`);
+                    continue;
+                }
+            } else if (!tx.categoryId) {
+                setNotification(`Missing category for transaction. Skipping.`);
+                continue;
+            }
+            
+            if (!finalCategoryId) {
+                setNotification(`Missing category for transaction. Skipping.`);
+                continue;
+            }
+            
+            let finalAmount = Number(tx.amount);
+            if (tx.type === 'expense' && finalAmount > 0) {
+                finalAmount = -Math.abs(finalAmount);
+            } else if (tx.type === 'income' && finalAmount < 0) {
+                finalAmount = Math.abs(finalAmount);
+            }
+            
+            transactionsToInsert.push({
+                date: tx.date,
+                account_id: tx.accountId,
+                category_id: finalCategoryId,
+                amount: finalAmount,
+                person: tx.person,
+                name: tx.note || null,
+                note: null,
+                is_transfer: false,
+                transfer_group_id: null,
+            });
+        }
+        
+        if (transactionsToInsert.length === 0) {
+            setNotification('No valid transactions to save.');
+            return;
+        }
+        
+        const { error } = await supabase
+            .from('transactions')
+            .insert(transactionsToInsert);
+        
+        if (error) {
+            console.error(error);
+            setNotification('Error saving bulk transactions. Check console/logs.');
+            return;
+        }
+        
+        setNotification(`Successfully saved ${transactionsToInsert.length} transaction(s).`);
+        setBulkTransactions([{
+            date: new Date().toISOString().slice(0, 10),
+            accountId: '',
+            categoryId: '',
+            categoryName: '',
+            type: 'expense',
+            amount: '',
+            person: 'Malik',
+            note: '',
+        }]);
+        setShowBulkTransaction(false);
         // Reload transactions
         setMonthDate(prev => new Date(prev));
     };
@@ -959,6 +1188,35 @@ export default function TransactionsPage() {
 
             // Commit regular transactions
             if (regularTransactions.length > 0) {
+                // Process transactions, creating categories as needed
+                const processedTransactions = [];
+                for (const tx of regularTransactions) {
+                    let finalCategoryId = tx.categoryId;
+                    
+                    // If we have a categoryName but no categoryId, try to find or create it
+                    if (tx.categoryName && !tx.categoryId) {
+                        // Determine transaction type from amount
+                        const txType = tx.amount < 0 ? 'expense' : 'income';
+                        finalCategoryId = await findOrCreateCategory(tx.categoryName, txType);
+                        if (!finalCategoryId) {
+                            setNotification(`Error creating category "${tx.categoryName}". Skipping transaction.`);
+                            continue;
+                        }
+                    }
+                    
+                    processedTransactions.push({
+                        date: tx.date,
+                        description: tx.description, // This will become the 'name' field
+                        amount: tx.amount,
+                        categoryId: finalCategoryId || null,
+                    });
+                }
+                
+                if (processedTransactions.length === 0) {
+                    setNotification('No valid transactions to import.');
+                    return;
+                }
+                
                 const response = await fetch('/api/import/commit', {
                     method: 'POST',
                     headers: {
@@ -966,12 +1224,7 @@ export default function TransactionsPage() {
                     },
                     body: JSON.stringify({
                         accountId: importAccountId,
-                        transactions: regularTransactions.map(tx => ({
-                            date: tx.date,
-                            description: tx.description, // This will become the 'name' field
-                            amount: tx.amount,
-                            categoryId: tx.categoryId || null,
-                        })),
+                        transactions: processedTransactions,
                     }),
                 });
 
@@ -1074,13 +1327,18 @@ export default function TransactionsPage() {
 
     const handleUpdatePendingTransaction = (
         index: number,
-        field: 'date' | 'description' | 'amount' | 'categoryId' | 'isTransfer' | 'transferToAccountId',
-        value: string | number | boolean | null
+        field: keyof PendingTransaction,
+        value: any
     ) => {
         setPendingImportTransactions(prev =>
             prev.map((tx, i) => {
                 if (i === index) {
-                    return { ...tx, [field]: value };
+                    const updated = { ...tx, [field]: value };
+                    // If updating categoryId to null and we have categoryName, keep the name
+                    if (field === 'categoryId' && value === null && updated.categoryName) {
+                        // Keep categoryName for later creation
+                    }
+                    return updated;
                 }
                 return tx;
             })
@@ -1088,6 +1346,108 @@ export default function TransactionsPage() {
     };
 
     // AI Category Suggestion
+    const checkDuplicatesAndAutoCategorize = async (transactions: PendingTransaction[]) => {
+        if (!importAccountId || transactions.length === 0) {
+            setPendingImportTransactions(transactions);
+            setNotification(
+                `Parsed ${transactions.length} transactions. Review and confirm below.`
+            );
+            return;
+        }
+
+        try {
+            setNotification('Checking for duplicates and auto-categorizing...');
+            
+            const response = await fetch('/api/transactions/check-duplicates', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    transactions: transactions.map(tx => ({
+                        date: tx.date,
+                        description: tx.description,
+                        amount: tx.amount,
+                    })),
+                    accountId: importAccountId,
+                }),
+            });
+
+            if (!response.ok) {
+                console.error('Duplicate check failed');
+                setPendingImportTransactions(transactions);
+                setNotification(
+                    `Parsed ${transactions.length} transactions. Review and confirm below.`
+                );
+                return;
+            }
+
+            const result = await response.json();
+            const duplicateResults = result.results || [];
+
+            // Update transactions with duplicate info and auto-categorization
+            const updatedTransactions = transactions.map((tx, index) => {
+                const duplicateInfo = duplicateResults[index];
+                if (!duplicateInfo) return tx;
+
+                const updated: PendingTransaction = {
+                    ...tx,
+                    isDuplicate: duplicateInfo.isDuplicate,
+                    existingTransactionId: duplicateInfo.existingTransactionId,
+                    duplicateChecked: true,
+                };
+
+                // Auto-apply category from duplicate or suggestion
+                if (duplicateInfo.isDuplicate && duplicateInfo.existingCategoryId) {
+                    // Use category from duplicate
+                    updated.categoryId = duplicateInfo.existingCategoryId;
+                    updated.suggestedCategoryId = duplicateInfo.existingCategoryId;
+                    updated.suggestedCategoryName = duplicateInfo.suggestedCategoryName;
+                    updated.suggestionConfidence = 1.0;
+                    updated.suggestionReasoning = 'Category from existing duplicate transaction';
+                } else if (duplicateInfo.suggestedCategoryId && !tx.categoryId) {
+                    // Use suggested category from pattern matching
+                    updated.categoryId = duplicateInfo.suggestedCategoryId;
+                    updated.suggestedCategoryId = duplicateInfo.suggestedCategoryId;
+                    updated.suggestedCategoryName = duplicateInfo.suggestedCategoryName;
+                    updated.suggestionConfidence = 0.8;
+                    updated.suggestionReasoning = 'Category suggested based on similar existing transactions';
+                }
+
+                // Auto-deselect duplicates
+                if (duplicateInfo.isDuplicate) {
+                    updated.selected = false;
+                }
+
+                return updated;
+            });
+
+            const duplicateCount = updatedTransactions.filter(tx => tx.isDuplicate).length;
+            const autoCategorizedCount = updatedTransactions.filter(
+                tx => tx.categoryId && !tx.isDuplicate
+            ).length;
+
+            setPendingImportTransactions(updatedTransactions);
+            
+            let notificationMsg = `Parsed ${transactions.length} transactions.`;
+            if (duplicateCount > 0) {
+                notificationMsg += ` Found ${duplicateCount} duplicate${duplicateCount !== 1 ? 's' : ''} (deselected).`;
+            }
+            if (autoCategorizedCount > 0) {
+                notificationMsg += ` Auto-categorized ${autoCategorizedCount} transaction${autoCategorizedCount !== 1 ? 's' : ''} based on existing patterns.`;
+            }
+            notificationMsg += ' Review and confirm below.';
+            
+            setNotification(notificationMsg);
+        } catch (error) {
+            console.error('Error checking duplicates:', error);
+            setPendingImportTransactions(transactions);
+            setNotification(
+                `Parsed ${transactions.length} transactions. Review and confirm below.`
+            );
+        }
+    };
+
     const handleSuggestCategories = async () => {
         if (pendingImportTransactions.length === 0) {
             setNotification('No transactions to suggest categories for.');
@@ -1189,6 +1549,7 @@ export default function TransactionsPage() {
                     ? {
                           ...tx,
                           categoryId: tx.suggestedCategoryId,
+                          categoryName: undefined, // Clear typed name when accepting suggestion
                           suggestedCategoryId: undefined,
                           suggestedCategoryName: undefined,
                       }
@@ -1301,10 +1662,8 @@ export default function TransactionsPage() {
                     transferToAccountId: null,
                 }));
 
-                setPendingImportTransactions(pending);
-                setNotification(
-                    `Parsed ${result.count} transactions. Review and confirm below.`
-                );
+                // Check for duplicates and auto-categorize
+                await checkDuplicatesAndAutoCategorize(pending);
                 return;
             }
 
@@ -1489,11 +1848,8 @@ export default function TransactionsPage() {
                     return;
                 }
 
-                // Show preview (same as PDF)
-                setPendingImportTransactions(parsed);
-                setNotification(
-                    `Parsed ${parsed.length} transactions. Review and confirm below.`
-                );
+                // Check for duplicates and auto-categorize
+                await checkDuplicatesAndAutoCategorize(parsed);
                 return;
             } else {
                 setNotification('Unsupported file type. Please upload a CSV or PDF file.');
@@ -1643,6 +1999,28 @@ export default function TransactionsPage() {
                         ) : (
                             <>
                                 <div className="space-y-1">
+                                    <label className="block text-slate-300">Type</label>
+                                    <select
+                                        className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
+                                        value={expenseIncomeType}
+                                        onChange={e => {
+                                            setExpenseIncomeType(e.target.value as 'expense' | 'income');
+                                            // Update amount sign when type changes
+                                            if (amount) {
+                                                const numAmount = Number(amount);
+                                                if (e.target.value === 'expense' && numAmount > 0) {
+                                                    setAmount('-' + Math.abs(numAmount).toString());
+                                                } else if (e.target.value === 'income' && numAmount < 0) {
+                                                    setAmount(Math.abs(numAmount).toString());
+                                                }
+                                            }
+                                        }}
+                                    >
+                                        <option value="expense">⬇️ Expense</option>
+                                        <option value="income">⬆️ Income</option>
+                                    </select>
+                                </div>
+                                <div className="space-y-1">
                                     <label className="block text-slate-300">Account</label>
                                     <select
                                         className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
@@ -1660,19 +2038,69 @@ export default function TransactionsPage() {
                                 </div>
                                 <div className="space-y-1">
                                     <label className="block text-slate-300">Category</label>
-                                    <select
-                                        className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
-                                        value={categoryId}
-                                        onChange={e => setCategoryId(e.target.value)}
-                                        required
-                                    >
-                                        <option value="">Select</option>
-                                        {categories.map(c => (
-                                            <option key={c.id} value={c.id}>
-                                                {c.type === 'income' ? '⬆️' : '⬇️'} {c.name}
-                                            </option>
-                                        ))}
-                                    </select>
+                                    <div className="space-y-1">
+                                        <input
+                                            type="text"
+                                            list={`category-list-tx-${expenseIncomeType}`}
+                                            className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
+                                            value={categoryName || (categoryId ? categories.find(c => c.id === categoryId)?.name || '' : '')}
+                                            onChange={async (e) => {
+                                                const inputValue = e.target.value;
+                                                setCategoryName(inputValue);
+                                                
+                                                // Try to find matching category
+                                                const matchingCategory = categories.find(
+                                                    c => c.name.toLowerCase() === inputValue.toLowerCase() && c.type === expenseIncomeType
+                                                );
+                                                
+                                                if (matchingCategory) {
+                                                    setCategoryId(matchingCategory.id);
+                                                } else {
+                                                    setCategoryId(''); // Will create new category on save
+                                                }
+                                            }}
+                                            placeholder="Type or select category..."
+                                            required
+                                        />
+                                        <datalist id={`category-list-tx-${expenseIncomeType}`}>
+                                            {(() => {
+                                                // Organize categories into hierarchy
+                                                const groups = categories.filter(c => c.kind === 'group' && c.type === expenseIncomeType);
+                                                const subcategories = categories.filter(c => c.kind === 'category' && c.parent_id && c.type === expenseIncomeType);
+                                                const standalone = categories.filter(c => c.kind === 'category' && !c.parent_id && c.type === expenseIncomeType);
+                                                
+                                                const options: React.ReactElement[] = [];
+                                                
+                                                // Add groups with their subcategories
+                                                groups.forEach(group => {
+                                                    const groupSubcats = subcategories.filter(sc => sc.parent_id === group.id);
+                                                    if (groupSubcats.length > 0) {
+                                                        groupSubcats.forEach(subcat => {
+                                                            options.push(
+                                                                <option key={subcat.id} value={subcat.name}>
+                                                                    {group.name} — {subcat.name}
+                                                                </option>
+                                                            );
+                                                        });
+                                                    }
+                                                });
+                                                
+                                                // Add standalone categories
+                                                standalone.forEach(cat => {
+                                                    options.push(
+                                                        <option key={cat.id} value={cat.name}>
+                                                            {cat.type === 'income' ? '⬆️' : '⬇️'} {cat.name}
+                                                        </option>
+                                                    );
+                                                });
+                                                
+                                                return options;
+                                            })()}
+                                        </datalist>
+                                        <p className="text-[10px] text-slate-500">
+                                            Type a category name to create a new one, or select from the list
+                                        </p>
+                                    </div>
                                 </div>
                             </>
                         )}
@@ -1685,6 +2113,7 @@ export default function TransactionsPage() {
                                 className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
                                 value={amount}
                                 onChange={e => setAmount(e.target.value)}
+                                placeholder={transactionType === 'transfer' ? '100.00' : (expenseIncomeType === 'expense' ? '45.23' : '100.00')}
                                 required
                             />
                             {transactionType === 'transfer' ? (
@@ -1693,8 +2122,9 @@ export default function TransactionsPage() {
                                 </p>
                             ) : (
                                 <p className="text-[10px] text-slate-500">
-                                    Use positive for income, negative for expenses (e.g. -45.23
-                                    for groceries).
+                                    {expenseIncomeType === 'expense' 
+                                        ? 'Enter amount as positive number (will be saved as negative)'
+                                        : 'Enter amount as positive number'}
                                 </p>
                             )}
                         </div>
@@ -1725,10 +2155,19 @@ export default function TransactionsPage() {
                             />
                         </div>
                         <div className="flex gap-2 mt-2">
+                            {!editingId && transactionType === 'transaction' && (
+                                <button
+                                    type="button"
+                                    onClick={(e) => handleSaveTransaction(e, true)}
+                                    className="flex-1 rounded-md border border-amber-400 bg-amber-950 py-2 text-xs font-semibold text-amber-200 hover:bg-amber-900"
+                                >
+                                    Save & Add Another
+                                </button>
+                            )}
                             <button
                                 type="submit"
                                 disabled={transactionType === 'transfer' && creatingTransfer}
-                                className="flex-1 rounded-md bg-amber-400 py-2 text-xs font-semibold text-black hover:bg-amber-300 disabled:opacity-50"
+                                className={`${!editingId && transactionType === 'transaction' ? 'flex-1' : 'w-full'} rounded-md bg-amber-400 py-2 text-xs font-semibold text-black hover:bg-amber-300 disabled:opacity-50`}
                             >
                                 {transactionType === 'transfer'
                                     ? creatingTransfer
@@ -1751,10 +2190,253 @@ export default function TransactionsPage() {
                     </form>
                 </div>
             )}
+            
+            {/* Bulk Transaction Form */}
+            {showBulkTransaction && (
+                <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 sm:p-6 text-xs sm:text-sm">
+                    <div className="mb-3 flex items-center justify-between">
+                        <h3 className="text-sm sm:text-base font-semibold">
+                            Bulk Add Transactions
+                        </h3>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setBulkTransactions([{
+                                    date: new Date().toISOString().slice(0, 10),
+                                    accountId: '',
+                                    categoryId: '',
+                                    categoryName: '',
+                                    type: 'expense',
+                                    amount: '',
+                                    person: 'Malik',
+                                    note: '',
+                                }]);
+                                setShowBulkTransaction(false);
+                            }}
+                            className="text-slate-400 hover:text-slate-200 p-2 -mr-2 active:opacity-70"
+                            aria-label="Close"
+                        >
+                            ✕
+                        </button>
+                    </div>
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
+                        {bulkTransactions.map((tx, index) => (
+                            <div key={index} className="rounded-md border border-slate-700 bg-slate-950 p-3 space-y-2">
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label className="block text-[10px] text-slate-400 mb-1">Date</label>
+                                        <input
+                                            type="date"
+                                            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                            value={tx.date}
+                                            onChange={e => {
+                                                const newTxs = [...bulkTransactions];
+                                                newTxs[index].date = e.target.value;
+                                                setBulkTransactions(newTxs);
+                                            }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] text-slate-400 mb-1">Type</label>
+                                        <select
+                                            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                            value={tx.type}
+                                            onChange={e => {
+                                                const newTxs = [...bulkTransactions];
+                                                newTxs[index].type = e.target.value as 'expense' | 'income';
+                                                setBulkTransactions(newTxs);
+                                            }}
+                                        >
+                                            <option value="expense">⬇️ Expense</option>
+                                            <option value="income">⬆️ Income</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label className="block text-[10px] text-slate-400 mb-1">Account</label>
+                                        <select
+                                            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                            value={tx.accountId}
+                                            onChange={e => {
+                                                const newTxs = [...bulkTransactions];
+                                                newTxs[index].accountId = e.target.value;
+                                                setBulkTransactions(newTxs);
+                                            }}
+                                        >
+                                            <option value="">Select</option>
+                                            {accounts.map(a => (
+                                                <option key={a.id} value={a.id}>{a.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] text-slate-400 mb-1">Category</label>
+                                        <input
+                                            type="text"
+                                            list={`bulk-category-list-tx-${index}-${tx.type}`}
+                                            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                            value={tx.categoryName || (tx.categoryId ? categories.find(c => c.id === tx.categoryId)?.name || '' : '')}
+                                            onChange={e => {
+                                                const newTxs = [...bulkTransactions];
+                                                const inputValue = e.target.value;
+                                                newTxs[index].categoryName = inputValue;
+                                                
+                                                // Try to find matching category
+                                                const matchingCategory = categories.find(
+                                                    c => c.name.toLowerCase() === inputValue.toLowerCase() && c.type === tx.type
+                                                );
+                                                
+                                                if (matchingCategory) {
+                                                    newTxs[index].categoryId = matchingCategory.id;
+                                                } else {
+                                                    newTxs[index].categoryId = ''; // Will create new category on save
+                                                }
+                                                
+                                                setBulkTransactions(newTxs);
+                                            }}
+                                            placeholder="Type or select category..."
+                                        />
+                                            <datalist id={`bulk-category-list-tx-${index}-${tx.type}`}>
+                                                {(() => {
+                                                    // Organize categories into hierarchy
+                                                    const groups = categories.filter(c => c.kind === 'group' && c.type === tx.type);
+                                                    const subcategories = categories.filter(c => c.kind === 'category' && c.parent_id && c.type === tx.type);
+                                                    const standalone = categories.filter(c => c.kind === 'category' && !c.parent_id && c.type === tx.type);
+                                                    
+                                                    const options: React.ReactElement[] = [];
+                                                    
+                                                    // Add groups with their subcategories
+                                                    groups.forEach(group => {
+                                                        const groupSubcats = subcategories.filter(sc => sc.parent_id === group.id);
+                                                        if (groupSubcats.length > 0) {
+                                                            groupSubcats.forEach(subcat => {
+                                                                options.push(
+                                                                    <option key={subcat.id} value={subcat.name}>
+                                                                        {group.name} — {subcat.name}
+                                                                    </option>
+                                                                );
+                                                            });
+                                                        }
+                                                    });
+                                                    
+                                                    // Add standalone categories
+                                                    standalone.forEach(cat => {
+                                                        options.push(
+                                                            <option key={cat.id} value={cat.name}>
+                                                                {cat.name}
+                                                            </option>
+                                                        );
+                                                    });
+                                                    
+                                                    return options;
+                                                })()}
+                                            </datalist>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label className="block text-[10px] text-slate-400 mb-1">Amount</label>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                            value={tx.amount}
+                                            onChange={e => {
+                                                const newTxs = [...bulkTransactions];
+                                                newTxs[index].amount = e.target.value;
+                                                setBulkTransactions(newTxs);
+                                            }}
+                                            placeholder={tx.type === 'expense' ? '-45.23' : '45.23'}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] text-slate-400 mb-1">Person</label>
+                                        <select
+                                            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                            value={tx.person}
+                                            onChange={e => {
+                                                const newTxs = [...bulkTransactions];
+                                                newTxs[index].person = e.target.value;
+                                                setBulkTransactions(newTxs);
+                                            }}
+                                        >
+                                            <option value="Malik">Malik</option>
+                                            <option value="Mikia">Mikia</option>
+                                            <option value="Both">Both</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] text-slate-400 mb-1">Note (optional)</label>
+                                    <input
+                                        type="text"
+                                        className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                        value={tx.note}
+                                        onChange={e => {
+                                            const newTxs = [...bulkTransactions];
+                                            newTxs[index].note = e.target.value;
+                                            setBulkTransactions(newTxs);
+                                        }}
+                                        placeholder="Optional note"
+                                    />
+                                </div>
+                                {bulkTransactions.length > 1 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setBulkTransactions(bulkTransactions.filter((_, i) => i !== index));
+                                        }}
+                                        className="text-[10px] text-red-400 hover:text-red-300"
+                                    >
+                                        Remove
+                                    </button>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setBulkTransactions([...bulkTransactions, {
+                                    date: new Date().toISOString().slice(0, 10),
+                                    accountId: bulkTransactions[0]?.accountId || '',
+                                    categoryId: '',
+                                    categoryName: '',
+                                    type: 'expense',
+                                    amount: '',
+                                    person: bulkTransactions[0]?.person || 'Malik',
+                                    note: '',
+                                }]);
+                            }}
+                            className="flex-1 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-[11px] font-semibold text-slate-200 hover:bg-slate-700"
+                        >
+                            + Add Another
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleBulkSave}
+                            className="flex-1 rounded-md bg-amber-400 px-3 py-2 text-[11px] font-semibold text-black hover:bg-amber-300"
+                        >
+                            Save All ({bulkTransactions.filter(tx => tx.date && tx.accountId && tx.amount && (tx.categoryId || tx.categoryName)).length})
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* 🆕 Action buttons */}
-            {!showTransactionForm && (
+            {!showTransactionForm && !showBulkTransaction && (
                 <div className="flex justify-end gap-2">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setShowBulkTransaction(true);
+                        }}
+                        className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700"
+                    >
+                        Bulk Add
+                    </button>
                     <button
                         type="button"
                         onClick={() => {
@@ -1788,15 +2470,22 @@ export default function TransactionsPage() {
                     />
                 </div>
                 
-                {/* Account selection for PDF imports */}
+                {/* Account selection for imports */}
                 <div className="space-y-1">
                     <label className="block text-[10px] text-slate-400">
-                        Account (required for PDF imports)
+                        Account (required for duplicate detection & auto-categorization)
                     </label>
                     <select
                         className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px]"
                         value={importAccountId}
-                        onChange={e => setImportAccountId(e.target.value)}
+                        onChange={async (e) => {
+                            const newAccountId = e.target.value;
+                            setImportAccountId(newAccountId);
+                            // Re-check duplicates if we have pending transactions
+                            if (newAccountId && pendingImportTransactions.length > 0) {
+                                await checkDuplicatesAndAutoCategorize(pendingImportTransactions);
+                            }
+                        }}
                     >
                         <option value="">Select account</option>
                         {accounts.map(acc => (
@@ -1824,6 +2513,11 @@ export default function TransactionsPage() {
                             <p className="text-[10px] text-slate-400">
                                 {pendingImportTransactions.filter(tx => tx.selected).length} of{' '}
                                 {pendingImportTransactions.length} transactions selected
+                                {pendingImportTransactions.filter(tx => tx.isDuplicate).length > 0 && (
+                                    <span className="text-red-400 ml-2">
+                                        • {pendingImportTransactions.filter(tx => tx.isDuplicate).length} duplicate{pendingImportTransactions.filter(tx => tx.isDuplicate).length !== 1 ? 's' : ''} found
+                                    </span>
+                                )}
                             </p>
                         </div>
                         <button
@@ -1852,6 +2546,15 @@ export default function TransactionsPage() {
                         >
                             Remove Selected
                         </button>
+                        {importAccountId && (
+                            <button
+                                type="button"
+                                onClick={() => checkDuplicatesAndAutoCategorize(pendingImportTransactions)}
+                                className="rounded-md border border-blue-700 bg-blue-950 px-2 py-1 text-[10px] text-blue-300 hover:bg-blue-900"
+                            >
+                                🔍 Re-check Duplicates
+                            </button>
+                        )}
                         <div className="flex items-center gap-2">
                             <label className="text-[10px] text-slate-400">Bulk Category:</label>
                             <select
@@ -1907,15 +2610,25 @@ export default function TransactionsPage() {
                                         key={index}
                                         className={`border-b border-slate-800 ${
                                             tx.selected ? 'bg-slate-950/50' : ''
+                                        } ${
+                                            tx.isDuplicate ? 'bg-red-950/30 border-red-800/50' : ''
                                         }`}
                                     >
                                         <td className="p-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={tx.selected}
-                                                onChange={() => handleToggleSelect(index)}
-                                                className="rounded border-slate-600"
-                                            />
+                                            <div className="flex items-center gap-1">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={tx.selected}
+                                                    onChange={() => handleToggleSelect(index)}
+                                                    className="rounded border-slate-600"
+                                                    disabled={tx.isDuplicate}
+                                                />
+                                                {tx.isDuplicate && (
+                                                    <span className="text-[8px] text-red-400" title="Duplicate transaction">
+                                                        ⚠️
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="p-2">
                                             <input
@@ -1943,7 +2656,11 @@ export default function TransactionsPage() {
                                             />
                                         </td>
                                         <td className="p-2">
-                                            {tx.isSuggesting ? (
+                                            {tx.isDuplicate ? (
+                                                <div className="text-[9px] text-red-400">
+                                                    Duplicate (deselected)
+                                                </div>
+                                            ) : tx.isSuggesting ? (
                                                 <div className="text-[9px] text-slate-500">Loading...</div>
                                             ) : tx.suggestedCategoryId && !tx.categoryId ? (
                                                 <div className="space-y-1">
@@ -1968,18 +2685,38 @@ export default function TransactionsPage() {
                                                     </div>
                                                 </div>
                                             ) : (
-                                                <select
-                                                    value={tx.categoryId || ''}
-                                                    onChange={e => handleUpdatePendingTransaction(index, 'categoryId', e.target.value || null)}
-                                                    className="w-full rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[10px]"
-                                                >
-                                                    <option value="">None</option>
-                                                    {categories.map(cat => (
-                                                        <option key={cat.id} value={cat.id}>
-                                                            {cat.type === 'income' ? '⬆️' : '⬇️'} {cat.name}
-                                                        </option>
-                                                    ))}
-                                                </select>
+                                                <div className="space-y-1">
+                                                    <input
+                                                        type="text"
+                                                        list={`import-category-list-${index}`}
+                                                        className="w-full rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[10px]"
+                                                        value={tx.categoryName || (tx.categoryId ? (categories.find(c => c.id === tx.categoryId)?.name || '') : '')}
+                                                        onChange={async (e) => {
+                                                            const inputValue = e.target.value;
+                                                            // Try to find matching category
+                                                            const matchingCategory = categories.find(
+                                                                c => c.name.toLowerCase() === inputValue.toLowerCase()
+                                                            );
+                                                            
+                                                            if (matchingCategory) {
+                                                                handleUpdatePendingTransaction(index, 'categoryId', matchingCategory.id);
+                                                                handleUpdatePendingTransaction(index, 'categoryName', undefined);
+                                                            } else {
+                                                                // Store the name for later creation
+                                                                handleUpdatePendingTransaction(index, 'categoryId', null);
+                                                                handleUpdatePendingTransaction(index, 'categoryName', inputValue);
+                                                            }
+                                                        }}
+                                                        placeholder="Type or select category..."
+                                                    />
+                                                    <datalist id={`import-category-list-${index}`}>
+                                                        {categories.map(cat => (
+                                                            <option key={cat.id} value={cat.name}>
+                                                                {cat.type === 'income' ? '⬆️' : '⬇️'} {cat.name}
+                                                            </option>
+                                                        ))}
+                                                    </datalist>
+                                                </div>
                                             )}
                                         </td>
                                         <td className="p-2">

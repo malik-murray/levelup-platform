@@ -55,9 +55,17 @@ export default function MetricsClient({ initialDate, initialShowForm = false }: 
             thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
             const startDate = thirtyDaysAgo.toISOString().split('T')[0];
 
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                window.location.href = '/login';
+                return;
+            }
+
             const { data, error } = await supabase
                 .from('fitness_metrics')
                 .select('*')
+                .eq('user_id', user.id)
                 .gte('date', startDate)
                 .order('date', { ascending: false })
                 .limit(30);
@@ -70,6 +78,7 @@ export default function MetricsClient({ initialDate, initialShowForm = false }: 
             const { data: todayData } = await supabase
                 .from('fitness_metrics')
                 .select('*')
+                .eq('user_id', user.id)
                 .eq('date', today)
                 .single();
 
@@ -99,10 +108,12 @@ export default function MetricsClient({ initialDate, initialShowForm = false }: 
             const { data: existing } = await supabase
                 .from('fitness_metrics')
                 .select('id')
+                .eq('user_id', user.id)
                 .eq('date', date)
                 .single();
 
             const metricData = {
+                user_id: user.id,
                 date,
                 weight_kg: weightKg ? parseFloat(weightKg) : null,
                 steps: steps ? parseInt(steps) : null,
@@ -116,7 +127,8 @@ export default function MetricsClient({ initialDate, initialShowForm = false }: 
                 const { error: updateError } = await supabase
                     .from('fitness_metrics')
                     .update(metricData)
-                    .eq('id', existing.id);
+                    .eq('id', existing.id)
+                    .eq('user_id', user.id);
                 error = updateError;
             } else {
                 // Insert new

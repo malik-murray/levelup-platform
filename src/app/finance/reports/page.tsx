@@ -38,12 +38,21 @@ export default function ReportsPage() {
             setLoading(true);
             setNotification(null);
 
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                window.location.href = '/login';
+                setLoading(false);
+                return;
+            }
+
             const startStr = startDate.toISOString().slice(0, 10);
             const endStr = endDate.toISOString().slice(0, 10);
 
             const { data, error } = await supabase
                 .from('transactions')
                 .select('id, date, amount')
+                .eq('user_id', user.id)
                 .gte('date', startStr)
                 .lt('date', endStr)
                 .order('date', { ascending: true });

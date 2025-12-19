@@ -77,17 +77,47 @@ function AppCard({ app }: { app: App }) {
 
 export default function DashboardPage() {
     const [email, setEmail] = useState<string | null>(null);
+    const [userId, setUserId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        supabase.auth.getUser().then(({ data }) => {
-            if (!data.user) {
+        const checkAuth = async () => {
+            try {
+                // CRITICAL SECURITY: Enforce user authentication and user_id context
+                // All database queries across all apps MUST filter by user_id to prevent data leakage
+                const { data: { user }, error } = await supabase.auth.getUser();
+                
+                if (error || !user) {
+                    console.error('Authentication error:', error);
+                    window.location.href = "/login";
+                    return;
+                }
+
+                // CRITICAL: Store user ID - this ensures all subsequent database operations
+                // in child apps (finance, fitness, habit, etc.) are properly scoped to this user
+                // All queries MUST include .eq('user_id', user.id) to prevent cross-user data access
+                setUserId(user.id);
+                setEmail(user.email ?? null);
+                
+                // Verify session is still valid
+                const { data: { session } } = await supabase.auth.getSession();
+                if (!session) {
+                    console.error('No active session found');
+                    window.location.href = "/login";
+                    return;
+                }
+
+                // Log for debugging (remove in production if desired)
+                console.log('✅ User authenticated:', { userId: user.id, email: user.email });
+            } catch (err) {
+                console.error('Error checking authentication:', err);
                 window.location.href = "/login";
-            } else {
-                setEmail(data.user.email ?? null);
+            } finally {
+                setLoading(false);
             }
-            setLoading(false);
-        });
+        };
+
+        checkAuth();
     }, []);
 
     const apps: App[] = [
@@ -245,7 +275,7 @@ export default function DashboardPage() {
                         </div>
 
                         {/* User Actions */}
-                        {email && (
+                        {email && userId && (
                             <div className="flex flex-col w-full sm:w-auto items-stretch sm:items-end gap-2 sm:gap-3 sm:flex-row sm:items-center">
                                 <div className="flex items-center gap-2 rounded-full border border-slate-300 bg-white/50 px-3 py-2 sm:px-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50">
                                     <span className="hidden sm:inline text-xs text-slate-600 dark:text-slate-400">Logged in as</span>

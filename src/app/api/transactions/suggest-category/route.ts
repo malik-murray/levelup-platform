@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 
 // Lazy initialization of OpenAI client
 let openaiClient: OpenAI | null = null;
@@ -43,15 +45,33 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Get Supabase client to fetch available categories
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-        const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-        const supabase = createClient(supabaseUrl, supabaseAnonKey);
+        // Get authenticated user from cookies
+        const cookieStore = await cookies();
+        const supabase = createServerClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+            {
+                cookies: {
+                    get(name: string) {
+                        return cookieStore.get(name)?.value;
+                    },
+                },
+            }
+        );
 
-        // Fetch all budgetable categories (kind='category', not groups)
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        if (authError || !user) {
+            return NextResponse.json(
+                { error: 'Unauthorized - you must be logged in' },
+                { status: 401 }
+            );
+        }
+
+        // Fetch all budgetable categories (kind='category', not groups) for this user
         const { data: categories, error: categoriesError } = await supabase
             .from('categories')
             .select('id, name, type, parent_id')
+            .eq('user_id', user.id)
             .eq('kind', 'category')
             .order('name');
 

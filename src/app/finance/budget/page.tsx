@@ -14,7 +14,7 @@ export default function BudgetPage() {
     // Category creation state
     const [showAddCategory, setShowAddCategory] = useState(false);
     const [newCategoryName, setNewCategoryName] = useState('');
-    const [newCategoryType, setNewCategoryType] = useState<'income' | 'expense'>('expense');
+    const [newCategoryType, setNewCategoryType] = useState<'income' | 'expense' | 'transfer'>('expense');
     const [newCategoryParentId, setNewCategoryParentId] = useState<string>('');
     const [newCategoryKind, setNewCategoryKind] = useState<'group' | 'category'>('category');
     const [creatingCategory, setCreatingCategory] = useState(false);
@@ -35,6 +35,15 @@ export default function BudgetPage() {
     const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
     const [duplicateTargetMonth, setDuplicateTargetMonth] = useState<string>('');
     const [duplicating, setDuplicating] = useState(false);
+    
+    // Category management modal state
+    const [showManageCategories, setShowManageCategories] = useState(false);
+    const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+    const [addingSubcategoryTo, setAddingSubcategoryTo] = useState<string | null>(null);
+    const [newSubcategoryName, setNewSubcategoryName] = useState('');
+    const [newSubcategoryType, setNewSubcategoryType] = useState<'income' | 'expense' | 'transfer'>('expense');
+    const [convertingCategory, setConvertingCategory] = useState<string | null>(null);
+    const [targetParentId, setTargetParentId] = useState<string>('');
 
     const [monthDate, setMonthDate] = useState<Date>(() => {
         const now = new Date();
@@ -146,11 +155,11 @@ export default function BudgetPage() {
         if (valueStr === undefined) return;
 
         // Find the category to determine its type
-        let categoryType: 'income' | 'expense' | null = null;
+        let categoryType: 'income' | 'expense' | 'transfer' | null = null;
         for (const group of budgetGroups) {
             const cat = group.categories.find(c => c.id === categoryId);
             if (cat) {
-                categoryType = group.type === 'income' ? 'income' : 'expense';
+                categoryType = group.type;
                 break;
             }
         }
@@ -167,8 +176,7 @@ export default function BudgetPage() {
 
         // For expenses, allow negative values (or positive, we'll convert)
         // For income, allow positive values (or negative, we'll convert)
-        // Actually, let's allow the user to enter negative for expenses and positive for income
-        // But ensure expenses are stored as negative and income as positive
+        // For transfers, use as-is (can be positive or negative depending on direction)
         let finalAmount = numAmount;
         if (numAmount !== 0) {
             if (categoryType === 'expense') {
@@ -178,7 +186,7 @@ export default function BudgetPage() {
                 // Income should be positive
                 finalAmount = Math.abs(numAmount);
             } else {
-                // Default behavior: use as-is (could be either)
+                // Transfer/savings: use as-is (could be either direction)
                 finalAmount = numAmount;
             }
         }
@@ -361,6 +369,15 @@ export default function BudgetPage() {
             
             setAllCategories((categoriesData as Category[]) ?? []);
             await loadBudgetData();
+            
+            // Reload categories in manage modal if open
+            if (showManageCategories) {
+                const { data: updatedCategories } = await supabase
+                    .from('categories')
+                    .select('id, name, kind, parent_id, type')
+                    .order('name');
+                setAllCategories((updatedCategories as Category[]) ?? []);
+            }
         } catch (error) {
             console.error('Category creation failed:', error);
             setNotification(
@@ -378,6 +395,186 @@ export default function BudgetPage() {
         allCategories.filter(c => c.kind === 'group' && c.type === newCategoryType),
         [allCategories, newCategoryType]
     );
+    
+    // Organize categories into hierarchy for display
+    const categoryHierarchy = useMemo(() => {
+        const groups = allCategories.filter(c => c.kind === 'group');
+        const categories = allCategories.filter(c => c.kind === 'category');
+        const standalone = categories.filter(c => !c.parent_id);
+        
+        // Build tree structure
+        const tree: Array<{
+            category: Category;
+            children: Category[];
+            level: number;
+        }> = [];
+        
+        // Add groups with their children
+        groups.forEach(group => {
+            const children = categories.filter(c => c.parent_id === group.id);
+            tree.push({
+                category: group,
+                children,
+                level: 0,
+            });
+        });
+        
+        // Add standalone categories
+        standalone.forEach(cat => {
+            tree.push({
+                category: cat,
+                children: [],
+                level: 0,
+            });
+        });
+        
+        return tree;
+    }, [allCategories]);
+    
+    // Get all potential parent categories (groups and standalone categories)
+    const potentialParents = useMemo(() => {
+        const groups = allCategories.filter(c => c.kind === 'group');
+        const standalone = allCategories.filter(c => c.kind === 'category' && !c.parent_id);
+        return [...groups, ...standalone];
+    }, [allCategories]);
+    
+    // Toggle category expansion
+    const toggleCategoryExpansion = (categoryId: string) => {
+        setExpandedCategories(prev => {
+            const next = new Set(prev);
+            if (next.has(categoryId)) {
+                next.delete(categoryId);
+            } else {
+                next.add(categoryId);
+            }
+            return next;
+        });
+    };
+    
+    // Add subcategory to a category
+    const handleAddSubcategory = async (parentId: string, name: string, type: 'income' | 'expense' | 'transfer') => {
+        if (!name.trim()) {
+            setNotification('Subcategory name is required.');
+            return;
+        }
+        
+        setNotification(null);
+        
+        try {
+            const parent = allCategories.find(c => c.id === parentId);
+            if (!parent) {
+                setNotification('Parent category not found.');
+                return;
+            }
+            
+            const { error } = await supabase
+                .from('categories')
+                .insert({
+                    name: name.trim(),
+                    kind: 'category',
+                    type: type,
+                    parent_id: parentId,
+                });
+            
+            if (error) {
+                throw new Error(error.message);
+            }
+            
+            // Reload categories
+            const { data: categoriesData } = await supabase
+                .from('categories')
+                .select('id, name, kind, parent_id, type')
+                .order('name');
+            
+            setAllCategories((categoriesData as Category[]) ?? []);
+            await loadBudgetData();
+            
+            // Reload categories in manage modal if open
+            if (showManageCategories) {
+                const { data: updatedCategories } = await supabase
+                    .from('categories')
+                    .select('id, name, kind, parent_id, type')
+                    .order('name');
+                setAllCategories((updatedCategories as Category[]) ?? []);
+            }
+            
+            setAddingSubcategoryTo(null);
+            setNewSubcategoryName('');
+            setNotification('Subcategory added successfully.');
+        } catch (error) {
+            console.error('Error adding subcategory:', error);
+            setNotification(
+                error instanceof Error ? error.message : 'Failed to add subcategory'
+            );
+        }
+    };
+    
+    // Convert category to subcategory
+    const handleConvertToSubcategory = async (categoryId: string, newParentId: string) => {
+        if (!newParentId) {
+            setNotification('Please select a parent category.');
+            return;
+        }
+        
+        // Prevent circular reference
+        if (categoryId === newParentId) {
+            setNotification('A category cannot be its own parent.');
+            return;
+        }
+        
+        // Check if new parent is a descendant (would create cycle)
+        const checkCycle = (parentId: string, targetId: string): boolean => {
+            const parent = allCategories.find(c => c.id === parentId);
+            if (!parent || !parent.parent_id) return false;
+            if (parent.parent_id === targetId) return true;
+            return checkCycle(parent.parent_id, targetId);
+        };
+        
+        if (checkCycle(newParentId, categoryId)) {
+            setNotification('Cannot create circular reference. This would make a category its own ancestor.');
+            return;
+        }
+        
+        setNotification(null);
+        
+        try {
+            const { error } = await supabase
+                .from('categories')
+                .update({ parent_id: newParentId })
+                .eq('id', categoryId);
+            
+            if (error) {
+                throw new Error(error.message);
+            }
+            
+            // Reload categories
+            const { data: categoriesData } = await supabase
+                .from('categories')
+                .select('id, name, kind, parent_id, type')
+                .order('name');
+            
+            setAllCategories((categoriesData as Category[]) ?? []);
+            await loadBudgetData();
+            
+            // Reload categories in manage modal if open
+            if (showManageCategories) {
+                const { data: updatedCategories } = await supabase
+                    .from('categories')
+                    .select('id, name, kind, parent_id, type')
+                    .order('name');
+                setAllCategories((updatedCategories as Category[]) ?? []);
+            }
+            
+            setConvertingCategory(null);
+            setTargetParentId('');
+            setNotification('Category converted to subcategory successfully.');
+        } catch (error) {
+            console.error('Error converting category:', error);
+            setNotification(
+                error instanceof Error ? error.message : 'Failed to convert category'
+            );
+        }
+    };
 
     // Format currency
     const formatCurrency = (amount: number) => {
@@ -426,6 +623,15 @@ export default function BudgetPage() {
             
             setAllCategories((categoriesData as Category[]) ?? []);
             await loadBudgetData();
+            
+            // Reload categories in manage modal if open
+            if (showManageCategories) {
+                const { data: updatedCategories } = await supabase
+                    .from('categories')
+                    .select('id, name, kind, parent_id, type')
+                    .order('name');
+                setAllCategories((updatedCategories as Category[]) ?? []);
+            }
 
             // Clear editing state
             setEditingCategoryNames(prev => {
@@ -456,6 +662,168 @@ export default function BudgetPage() {
             delete next[categoryId];
             return next;
         });
+    };
+
+    const handleDeleteCategory = async (categoryId: string, categoryName: string, isGroup: boolean) => {
+        // First, verify the category exists and get its kind
+        const { data: categoryData, error: fetchError } = await supabase
+            .from('categories')
+            .select('id, name, kind, parent_id')
+            .eq('id', categoryId)
+            .single();
+
+        if (fetchError || !categoryData) {
+            setNotification('Category not found.');
+            return;
+        }
+
+        const actualKind = categoryData.kind;
+        const isActuallyGroup = actualKind === 'group';
+
+        // Check if it's a group with subcategories
+        if (isActuallyGroup) {
+            // Get all subcategories for this group
+            const { data: subcategories } = await supabase
+                .from('categories')
+                .select('id')
+                .eq('parent_id', categoryId);
+
+            const subcategoryCount = subcategories?.length || 0;
+            
+            if (subcategoryCount > 0) {
+                const confirmMessage = `This group has ${subcategoryCount} subcategor${subcategoryCount === 1 ? 'y' : 'ies'}. Deleting it will also delete all subcategories. Are you sure?`;
+                if (!confirm(confirmMessage)) {
+                    return;
+                }
+            } else {
+                if (!confirm(`Are you sure you want to delete the category group "${categoryName}"?`)) {
+                    return;
+                }
+            }
+        } else {
+            // Check if subcategory has budgets or transactions
+            const group = budgetGroups.find(g => g.categories.some(c => c.id === categoryId));
+            const category = group?.categories.find(c => c.id === categoryId);
+            
+            let warningMessage = `Are you sure you want to delete "${categoryName}"?`;
+            if (category && category.assigned !== 0) {
+                warningMessage += `\n\nThis category has a budget assigned. The budget will be deleted.`;
+            }
+            if (category && category.activity !== 0) {
+                warningMessage += `\n\nThis category has ${category.activity > 0 ? 'income' : 'expense'} activity. Transactions will be uncategorized.`;
+            }
+            
+            if (!confirm(warningMessage)) {
+                return;
+            }
+        }
+
+        setNotification(null);
+
+        try {
+            // If it's a group, first delete all subcategories
+            if (isActuallyGroup) {
+                // Get all subcategories for this group
+                const { data: subcategories } = await supabase
+                    .from('categories')
+                    .select('id')
+                    .eq('parent_id', categoryId);
+
+                const subcategoryIds = subcategories?.map(s => s.id) || [];
+                
+                if (subcategoryIds.length > 0) {
+                    // Delete budgets for subcategories
+                    for (const subId of subcategoryIds) {
+                        // Delete all budgets for this category across all months
+                        const { error: budgetError } = await supabase
+                            .from('category_budgets')
+                            .delete()
+                            .eq('category_id', subId);
+                        
+                        if (budgetError) {
+                            console.error('Error deleting budgets:', budgetError);
+                        }
+                    }
+                    
+                    // Set transactions to null (uncategorized) for subcategories
+                    const { error: txError } = await supabase
+                        .from('transactions')
+                        .update({ category_id: null })
+                        .in('category_id', subcategoryIds);
+                    
+                    if (txError) {
+                        console.error('Error updating transactions:', txError);
+                    }
+                    
+                    // Delete subcategories
+                    const { error: subError } = await supabase
+                        .from('categories')
+                        .delete()
+                        .in('id', subcategoryIds);
+                    
+                    if (subError) {
+                        throw new Error(`Failed to delete subcategories: ${subError.message}`);
+                    }
+                }
+            } else {
+                // For subcategories, delete budgets first
+                const { error: budgetError } = await supabase
+                    .from('category_budgets')
+                    .delete()
+                    .eq('category_id', categoryId);
+                
+                if (budgetError) {
+                    console.error('Error deleting budgets:', budgetError);
+                }
+                
+                // Set transactions to null (uncategorized) instead of deleting them
+                const { error: txError } = await supabase
+                    .from('transactions')
+                    .update({ category_id: null })
+                    .eq('category_id', categoryId);
+                
+                if (txError) {
+                    console.error('Error updating transactions:', txError);
+                }
+            }
+            
+            // Delete the category itself
+            const { error } = await supabase
+                .from('categories')
+                .delete()
+                .eq('id', categoryId);
+
+            if (error) {
+                throw new Error(error.message);
+            }
+
+            setNotification(`Category "${categoryName}" deleted successfully.`);
+
+            // Reload categories and budget data
+            const { data: categoriesData } = await supabase
+                .from('categories')
+                .select('id, name, kind, parent_id, type')
+                .order('name');
+            
+            setAllCategories((categoriesData as Category[]) ?? []);
+            await loadBudgetData();
+            
+            // Reload categories in manage modal if open
+            if (showManageCategories) {
+                const { data: updatedCategories } = await supabase
+                    .from('categories')
+                    .select('id, name, kind, parent_id, type')
+                    .order('name');
+                setAllCategories((updatedCategories as Category[]) ?? []);
+            }
+        } catch (error) {
+            console.error('Error deleting category:', error);
+            setNotification(
+                error instanceof Error 
+                    ? `Error deleting category: ${error.message}` 
+                    : 'Error deleting category. Check console/logs.'
+            );
+        }
     };
 
     // Reorder groups functions
@@ -582,6 +950,14 @@ export default function BudgetPage() {
             <div className="flex gap-2 justify-end">
                 <button
                     type="button"
+                    onClick={() => setShowManageCategories(true)}
+                    disabled={loading}
+                    className="rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-[11px] font-semibold text-slate-200 hover:bg-slate-700 disabled:opacity-50"
+                >
+                    Manage Categories
+                </button>
+                <button
+                    type="button"
                     onClick={() => setEditMode(!editMode)}
                     disabled={loading}
                     className={`rounded-md px-3 py-1.5 text-[11px] font-semibold transition-colors disabled:opacity-50 ${
@@ -609,33 +985,101 @@ export default function BudgetPage() {
             )}
 
             {/* Summary Section */}
-            {summary && (
-                <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-                    <h3 className="mb-3 text-sm font-semibold">Ready to Assign</h3>
-                    <div className="grid grid-cols-3 gap-4 text-xs">
-                        <div>
-                            <div className="text-slate-400">Total Assigned</div>
-                            <div className="text-lg font-semibold text-slate-100">
-                                {formatCurrency(summary.totalAssigned)}
+            {summary && (() => {
+                // Calculate income and expense totals separately
+                const incomeGroups = budgetGroups.filter(g => g.type === 'income');
+                const expenseGroups = budgetGroups.filter(g => g.type === 'expense');
+                const transferGroups = budgetGroups.filter(g => g.type === 'transfer');
+                
+                const incomeAssigned = incomeGroups.reduce((sum, g) => sum + g.totalAssigned, 0);
+                const incomeActivity = incomeGroups.reduce((sum, g) => sum + g.totalActivity, 0);
+                const incomeAvailable = incomeAssigned - incomeActivity;
+                
+                const expenseAssigned = expenseGroups.reduce((sum, g) => sum + Math.abs(g.totalAssigned), 0);
+                const expenseActivity = expenseGroups.reduce((sum, g) => sum + Math.abs(g.totalActivity), 0);
+                const expenseAvailable = expenseAssigned - expenseActivity;
+                
+                const netIncome = incomeAvailable - expenseAvailable;
+                
+                return (
+                    <div className="space-y-3">
+                        {/* Income vs Expenses Summary */}
+                        <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+                            <h3 className="mb-3 text-sm font-semibold">Budget Overview</h3>
+                            <div className="grid grid-cols-2 gap-4 text-xs mb-4">
+                                <div className="rounded-md border border-emerald-700/50 bg-emerald-950/30 p-3">
+                                    <div className="text-emerald-400 text-[10px] font-semibold uppercase mb-1">⬆️ Income</div>
+                                    <div className="text-lg font-semibold text-emerald-300 mb-1">
+                                        {formatCurrency(incomeAssigned)}
+                                    </div>
+                                    <div className="text-[10px] text-slate-400">
+                                        Activity: {formatCurrency(incomeActivity)}
+                                    </div>
+                                    <div className={`text-[10px] font-medium mt-1 ${
+                                        incomeAvailable >= 0 ? 'text-emerald-300' : 'text-red-400'
+                                    }`}>
+                                        Available: {formatCurrency(incomeAvailable)}
+                                    </div>
+                                </div>
+                                <div className="rounded-md border border-red-700/50 bg-red-950/30 p-3">
+                                    <div className="text-red-400 text-[10px] font-semibold uppercase mb-1">⬇️ Expenses</div>
+                                    <div className="text-lg font-semibold text-red-300 mb-1">
+                                        {formatCurrency(expenseAssigned)}
+                                    </div>
+                                    <div className="text-[10px] text-slate-400">
+                                        Activity: {formatCurrency(expenseActivity)}
+                                    </div>
+                                    <div className={`text-[10px] font-medium mt-1 ${
+                                        expenseAvailable >= 0 ? 'text-emerald-300' : 'text-red-400'
+                                    }`}>
+                                        Available: {formatCurrency(expenseAvailable)}
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="border-t border-slate-700 pt-3">
+                                <div className="flex items-center justify-between">
+                                    <div className="text-slate-400 text-xs">Net Available</div>
+                                    <div className={`text-xl font-bold ${
+                                        netIncome >= 0 ? 'text-emerald-400' : 'text-red-400'
+                                    }`}>
+                                        {formatCurrency(netIncome)}
+                                    </div>
+                                </div>
+                                <div className="text-[10px] text-slate-500 mt-1">
+                                    {netIncome >= 0 ? 'You have money left to assign' : 'You\'ve overspent your income'}
+                                </div>
                             </div>
                         </div>
-                        <div>
-                            <div className="text-slate-400">Total Activity</div>
-                            <div className="text-lg font-semibold text-slate-100">
-                                {formatCurrency(summary.totalActivity)}
-                            </div>
-                        </div>
-                        <div>
-                            <div className="text-slate-400">Available</div>
-                            <div className={`text-lg font-semibold ${
-                                summary.totalAvailable >= 0 ? 'text-emerald-400' : 'text-blue-400'
-                            }`}>
-                                {formatCurrency(summary.totalAvailable)}
+                        
+                        {/* Detailed Summary */}
+                        <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+                            <h3 className="mb-3 text-sm font-semibold">Total Summary</h3>
+                            <div className="grid grid-cols-3 gap-4 text-xs">
+                                <div>
+                                    <div className="text-slate-400">Total Assigned</div>
+                                    <div className="text-lg font-semibold text-slate-100">
+                                        {formatCurrency(summary.totalAssigned)}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-slate-400">Total Activity</div>
+                                    <div className="text-lg font-semibold text-slate-100">
+                                        {formatCurrency(summary.totalActivity)}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-slate-400">Available</div>
+                                    <div className={`text-lg font-semibold ${
+                                        summary.totalAvailable >= 0 ? 'text-emerald-400' : 'text-blue-400'
+                                    }`}>
+                                        {formatCurrency(summary.totalAvailable)}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
 
             {/* Duplicate Budget Dialog */}
             {showDuplicateDialog && (
@@ -744,10 +1188,11 @@ export default function BudgetPage() {
                             <select
                                 className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1"
                                 value={newCategoryType}
-                                onChange={e => setNewCategoryType(e.target.value as 'income' | 'expense')}
+                                onChange={e => setNewCategoryType(e.target.value as 'income' | 'expense' | 'transfer')}
                             >
                                 <option value="expense">⬇️ Expense</option>
                                 <option value="income">⬆️ Income</option>
+                                <option value="transfer">💱 Transfer/Savings</option>
                             </select>
                         </div>
 
@@ -775,7 +1220,7 @@ export default function BudgetPage() {
                                     <option value="">Select a group</option>
                                     {groupCategories.map(group => (
                                         <option key={group.id} value={group.id}>
-                                            {group.type === 'income' ? '⬆️' : '⬇️'} {group.name}
+                                            {group.type === 'income' ? '⬆️' : group.type === 'transfer' ? '💱' : '⬇️'} {group.name}
                                         </option>
                                     ))}
                                 </select>
@@ -803,26 +1248,27 @@ export default function BudgetPage() {
                     <div className="text-[11px] text-slate-400">
                         No budget categories found. Create a group and add categories to get started.
                     </div>
-                ) : (
-                    <div className="space-y-1">
-                        {/* Column Headers */}
-                        <div className="grid grid-cols-[1fr_100px_100px_100px] gap-2 border-b border-slate-700 pb-2 mb-2 text-[10px] font-semibold text-slate-400 uppercase">
-                            <div>Category</div>
-                            <div className="text-right">Assigned</div>
-                            <div className="text-right">Activity</div>
-                            <div className="text-right">Available</div>
-                        </div>
+                ) : (() => {
+                    // Separate groups by type
+                    // Filter out virtual standalone groups for separate display
+                    const realGroups = budgetGroups.filter(g => !g.id.startsWith('__standalone_'));
+                    const standaloneGroups = budgetGroups.filter(g => g.id.startsWith('__standalone_'));
+                    
+                    const incomeGroups = realGroups.filter(g => g.type === 'income');
+                    const expenseGroups = realGroups.filter(g => g.type === 'expense');
+                    const transferGroups = realGroups.filter(g => g.type === 'transfer' || g.type === null);
+                    
+                    const renderGroup = (group: BudgetGroup, groupIndex: number, totalInSection: number, allGroups: BudgetGroup[]) => {
+                        const isCollapsed = collapsedGroups[group.id];
+                        const hasCategories = group.categories.length > 0;
+                        const globalIndex = allGroups.findIndex(g => g.id === group.id);
 
-                        {budgetGroups.map((group, groupIndex) => {
-                            const isCollapsed = collapsedGroups[group.id];
-                            const hasCategories = group.categories.length > 0;
-
-                            return (
-                                <div key={group.id} className="space-y-0">
-                                    {/* Group Row */}
-                                    <div className={`rounded-md bg-slate-950 hover:bg-slate-900 transition-colors ${
-                                        groupIndex < budgetGroups.length - 1 ? 'mb-1' : ''
-                                    }`}>
+                        return (
+                            <div key={group.id} className="space-y-0">
+                                {/* Group Row */}
+                                <div className={`rounded-md bg-slate-950 hover:bg-slate-900 transition-colors ${
+                                    groupIndex < totalInSection - 1 ? 'mb-1' : ''
+                                }`}>
                                         <div 
                                             className={`grid grid-cols-[1fr_100px_100px_100px] gap-2 items-center p-2 ${
                                                 hasCategories && !editMode ? 'cursor-pointer' : 'cursor-default'
@@ -835,7 +1281,7 @@ export default function BudgetPage() {
                                                         <button
                                                             type="button"
                                                             onClick={() => handleMoveGroupUp(group.id)}
-                                                            disabled={groupIndex === 0}
+                                                            disabled={globalIndex === 0}
                                                             className="text-[8px] px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded disabled:opacity-30 disabled:cursor-not-allowed"
                                                             title="Move up"
                                                         >
@@ -844,7 +1290,7 @@ export default function BudgetPage() {
                                                         <button
                                                             type="button"
                                                             onClick={() => handleMoveGroupDown(group.id)}
-                                                            disabled={groupIndex === budgetGroups.length - 1}
+                                                            disabled={globalIndex === allGroups.length - 1}
                                                             className="text-[8px] px-1 py-0.5 bg-slate-800 hover:bg-slate-700 rounded disabled:opacity-30 disabled:cursor-not-allowed"
                                                             title="Move down"
                                                         >
@@ -888,8 +1334,21 @@ export default function BudgetPage() {
                                                         }}
                                                         className={editMode ? 'cursor-pointer hover:text-amber-400' : ''}
                                                     >
-                                                        {group.type === 'income' ? '⬆️' : '⬇️'} {group.name}
+                                                        {group.type === 'income' ? '⬆️' : group.type === 'transfer' ? '💱' : '⬇️'} {group.name}
                                                     </span>
+                                                )}
+                                                {editMode && editingCategoryNames[group.id] === undefined && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDeleteCategory(group.id, group.name, true);
+                                                        }}
+                                                        className="ml-auto rounded bg-red-900 px-1.5 py-0.5 text-[9px] hover:bg-red-800 text-red-200"
+                                                        title="Delete category group"
+                                                    >
+                                                        🗑️
+                                                    </button>
                                                 )}
                                             </div>
                                             <div className="text-right text-slate-300 font-medium">
@@ -947,11 +1406,11 @@ export default function BudgetPage() {
                                                         }`}
                                                     >
                                                         <div className="grid grid-cols-[1fr_100px_100px_100px] gap-2 items-center p-2">
-                                                            <div className="text-slate-200 pl-4">
+                                                            <div className="text-slate-200 pl-4 flex items-center gap-2">
                                                                 {editMode && editingCategoryNames[category.id] !== undefined ? (
                                                                     <input
                                                                         type="text"
-                                                                        className="w-full rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px]"
+                                                                        className="flex-1 rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[11px]"
                                                                         value={editingCategoryNames[category.id]}
                                                                         onChange={e => setEditingCategoryNames(prev => ({
                                                                             ...prev,
@@ -979,6 +1438,16 @@ export default function BudgetPage() {
                                                                     >
                                                                         {category.name}
                                                                     </span>
+                                                                )}
+                                                                {editMode && editingCategoryNames[category.id] === undefined && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleDeleteCategory(category.id, category.name, false)}
+                                                                        className="rounded bg-red-900 px-1.5 py-0.5 text-[9px] hover:bg-red-800 text-red-200"
+                                                                        title="Delete category"
+                                                                    >
+                                                                        🗑️
+                                                                    </button>
                                                                 )}
                                                             </div>
                                                             <div className="text-right">
@@ -1074,7 +1543,7 @@ export default function BudgetPage() {
                                                         </div>
                                                         
                                                         {/* Progress bar for subcategory */}
-                                                        {category.assigned > 0 && (
+                                                        {(category.assigned !== 0 || category.activity > 0) && (
                                                             <div className="px-2 pb-2">
                                                                 <div className="h-0.5 rounded-full bg-slate-800">
                                                                     <div
@@ -1083,12 +1552,16 @@ export default function BudgetPage() {
                                                                                 ? group.type === 'income' 
                                                                                     ? 'bg-blue-500'  // Overpaid (good)
                                                                                     : 'bg-red-500'   // Overspent (bad)
-                                                                                : (category.activity / category.assigned) > 0.9
+                                                                                : category.assigned !== 0 && (category.activity / Math.abs(category.assigned)) > 0.9
                                                                                     ? 'bg-yellow-400'
                                                                                     : 'bg-emerald-500'
                                                                         }`}
                                                                         style={{
-                                                                            width: `${Math.min(100, (category.activity / category.assigned) * 100)}%`
+                                                                            width: category.assigned !== 0 
+                                                                                ? `${Math.min(100, (category.activity / Math.abs(category.assigned)) * 100)}%`
+                                                                                : category.activity > 0 
+                                                                                    ? '100%' 
+                                                                                    : '0%'
                                                                         }}
                                                                     />
                                                                 </div>
@@ -1137,15 +1610,408 @@ export default function BudgetPage() {
                                     )}
 
                                     {/* Divider between groups */}
-                                    {groupIndex < budgetGroups.length - 1 && (
+                                    {groupIndex < totalInSection - 1 && (
                                         <div className="h-px bg-slate-700 my-2" />
                                     )}
                                 </div>
                             );
-                        })}
-                    </div>
-                )}
+                    };
+                    
+                    return (
+                        <div className="space-y-4">
+                            {/* Column Headers */}
+                            <div className="grid grid-cols-[1fr_100px_100px_100px] gap-2 border-b border-slate-700 pb-2 text-[10px] font-semibold text-slate-400 uppercase">
+                                <div>Category</div>
+                                <div className="text-right">Assigned</div>
+                                <div className="text-right">Activity</div>
+                                <div className="text-right">Available</div>
+                            </div>
+                            
+                            {/* Income Section */}
+                            {incomeGroups.length > 0 && (
+                                <div className="space-y-1">
+                                    <div className="flex items-center gap-2 mb-2 pb-1 border-b border-emerald-700/30">
+                                        <span className="text-emerald-400 text-[11px] font-semibold">⬆️ INCOME</span>
+                                        <span className="text-[10px] text-slate-500">
+                                            ({formatCurrency(incomeGroups.reduce((sum, g) => sum + g.totalAssigned, 0))} assigned)
+                                        </span>
+                                    </div>
+                                    {incomeGroups.map((group, idx) => renderGroup(group, idx, incomeGroups.length, budgetGroups))}
+                                    {standaloneGroups.filter(g => g.type === 'income').map((group, idx) => renderGroup(group, idx, standaloneGroups.filter(g => g.type === 'income').length, budgetGroups))}
+                                </div>
+                            )}
+                            
+                            {/* Expense Section */}
+                            {expenseGroups.length > 0 && (
+                                <div className="space-y-1">
+                                    {incomeGroups.length > 0 && <div className="h-4" />}
+                                    <div className="flex items-center gap-2 mb-2 pb-1 border-b border-red-700/30">
+                                        <span className="text-red-400 text-[11px] font-semibold">⬇️ EXPENSES</span>
+                                        <span className="text-[10px] text-slate-500">
+                                            ({formatCurrency(expenseGroups.reduce((sum, g) => sum + Math.abs(g.totalAssigned), 0))} assigned)
+                                        </span>
+                                    </div>
+                                    {expenseGroups.map((group, idx) => renderGroup(group, idx, expenseGroups.length, budgetGroups))}
+                                    {standaloneGroups.filter(g => g.type === 'expense').map((group, idx) => renderGroup(group, idx, standaloneGroups.filter(g => g.type === 'expense').length, budgetGroups))}
+                                </div>
+                            )}
+                            
+                            {/* Transfer Section */}
+                            {transferGroups.length > 0 && (
+                                <div className="space-y-1">
+                                    {(incomeGroups.length > 0 || expenseGroups.length > 0) && <div className="h-4" />}
+                                    <div className="flex items-center gap-2 mb-2 pb-1 border-b border-slate-700/50">
+                                        <span className="text-slate-400 text-[11px] font-semibold">💱 TRANSFERS/SAVINGS</span>
+                                    </div>
+                                    {transferGroups.map((group, idx) => renderGroup(group, idx, transferGroups.length, budgetGroups))}
+                                    {standaloneGroups.filter(g => g.type === 'transfer' || g.type === null).map((group, idx) => renderGroup(group, idx, standaloneGroups.filter(g => g.type === 'transfer' || g.type === null).length, budgetGroups))}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })()}
             </div>
+            
+            {/* Manage Categories Modal */}
+            {showManageCategories && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                    <div className="w-full max-w-2xl max-h-[90vh] rounded-lg border border-slate-700 bg-slate-900 flex flex-col">
+                        {/* Header */}
+                        <div className="flex items-center justify-between p-4 border-b border-slate-800">
+                            <h3 className="text-lg font-semibold">Manage Categories</h3>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowManageCategories(false);
+                                    setAddingSubcategoryTo(null);
+                                    setConvertingCategory(null);
+                                    setExpandedCategories(new Set());
+                                }}
+                                className="rounded-md p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        
+                        {/* Content */}
+                        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                            {categoryHierarchy.map(({ category, children, level }) => {
+                                const isExpanded = expandedCategories.has(category.id);
+                                const isGroup = category.kind === 'group';
+                                const hasChildren = children.length > 0;
+                                const isAdding = addingSubcategoryTo === category.id;
+                                const isConverting = convertingCategory === category.id;
+                                
+                                return (
+                                    <div key={category.id} className="space-y-1">
+                                        {/* Category Row */}
+                                        <div className={`flex items-center gap-2 p-2 rounded-md bg-slate-950 hover:bg-slate-900 ${
+                                            level > 0 ? 'ml-6' : ''
+                                        }`}>
+                                            {/* Expand/Collapse */}
+                                            {hasChildren && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => toggleCategoryExpansion(category.id)}
+                                                    className="w-4 h-4 flex items-center justify-center text-slate-400 hover:text-slate-200"
+                                                >
+                                                    {isExpanded ? '▼' : '▶'}
+                                                </button>
+                                            )}
+                                            {!hasChildren && <div className="w-4" />}
+                                            
+                                            {/* Category Name */}
+                                            <div className="flex-1 flex items-center gap-2">
+                                                <span className="text-sm text-slate-200">
+                                                    {category.type === 'income' ? '⬆️' : category.type === 'transfer' ? '💱' : '⬇️'} {category.name}
+                                                </span>
+                                                {isGroup && (
+                                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                                                        Group
+                                                    </span>
+                                                )}
+                                                {category.kind === 'category' && !category.parent_id && (
+                                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                                                        Standalone
+                                                    </span>
+                                                )}
+                                            </div>
+                                            
+                                            {/* Actions */}
+                                            <div className="flex items-center gap-1">
+                                                {isGroup && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setAddingSubcategoryTo(category.id);
+                                                            setNewSubcategoryName('');
+                                                            setNewSubcategoryType(category.type || 'expense');
+                                                        }}
+                                                        className="text-[10px] px-2 py-1 rounded bg-emerald-900 text-emerald-200 hover:bg-emerald-800"
+                                                    >
+                                                        + Subcategory
+                                                    </button>
+                                                )}
+                                                {category.kind === 'category' && !category.parent_id && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setConvertingCategory(category.id);
+                                                            setTargetParentId('');
+                                                        }}
+                                                        className="text-[10px] px-2 py-1 rounded bg-blue-900 text-blue-200 hover:bg-blue-800"
+                                                    >
+                                                        Convert to Subcategory
+                                                    </button>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleStartEditCategoryName(category.id, category.name)}
+                                                    className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700"
+                                                >
+                                                    Rename
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleDeleteCategory(category.id, category.name, isGroup)}
+                                                    className="text-[10px] px-2 py-1 rounded bg-red-900 text-red-200 hover:bg-red-800"
+                                                >
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        </div>
+                                        
+                                        {/* Add Subcategory Form */}
+                                        {isAdding && (
+                                            <div className="ml-8 p-3 rounded-md bg-slate-950 border border-slate-700 space-y-2">
+                                                <input
+                                                    type="text"
+                                                    value={newSubcategoryName}
+                                                    onChange={e => setNewSubcategoryName(e.target.value)}
+                                                    placeholder="Subcategory name"
+                                                    className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100"
+                                                    autoFocus
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter') {
+                                                            handleAddSubcategory(category.id, newSubcategoryName, newSubcategoryType);
+                                                        } else if (e.key === 'Escape') {
+                                                            setAddingSubcategoryTo(null);
+                                                            setNewSubcategoryName('');
+                                                        }
+                                                    }}
+                                                />
+                                                <div className="flex items-center gap-2">
+                                                    <select
+                                                        value={newSubcategoryType}
+                                                        onChange={e => setNewSubcategoryType(e.target.value as 'income' | 'expense' | 'transfer')}
+                                                        className="flex-1 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100"
+                                                    >
+                                                        <option value="expense">Expense</option>
+                                                        <option value="income">Income</option>
+                                                        <option value="transfer">Transfer</option>
+                                                    </select>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleAddSubcategory(category.id, newSubcategoryName, newSubcategoryType)}
+                                                        className="px-3 py-1 rounded-md bg-emerald-600 text-white text-sm hover:bg-emerald-500"
+                                                    >
+                                                        Add
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setAddingSubcategoryTo(null);
+                                                            setNewSubcategoryName('');
+                                                        }}
+                                                        className="px-3 py-1 rounded-md bg-slate-700 text-slate-200 text-sm hover:bg-slate-600"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                        
+                                        {/* Convert to Subcategory Form */}
+                                        {isConverting && (
+                                            <div className="ml-8 p-3 rounded-md bg-slate-950 border border-slate-700 space-y-2">
+                                                <select
+                                                    value={targetParentId}
+                                                    onChange={e => setTargetParentId(e.target.value)}
+                                                    className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100"
+                                                >
+                                                    <option value="">Select parent category...</option>
+                                                    {potentialParents
+                                                        .filter(p => p.id !== category.id && (p.kind === 'group' || !p.parent_id))
+                                                        .map(p => (
+                                                            <option key={p.id} value={p.id}>
+                                                                {p.type === 'income' ? '⬆️' : p.type === 'transfer' ? '💱' : '⬇️'} {p.name}
+                                                            </option>
+                                                        ))}
+                                                </select>
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleConvertToSubcategory(category.id, targetParentId)}
+                                                        className="flex-1 px-3 py-1 rounded-md bg-blue-600 text-white text-sm hover:bg-blue-500"
+                                                    >
+                                                        Convert
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setConvertingCategory(null);
+                                                            setTargetParentId('');
+                                                        }}
+                                                        className="flex-1 px-3 py-1 rounded-md bg-slate-700 text-slate-200 text-sm hover:bg-slate-600"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                        
+                                        {/* Editing Name */}
+                                        {editingCategoryNames[category.id] !== undefined && (
+                                            <div className="ml-8 p-2 rounded-md bg-slate-950 border border-slate-700">
+                                                <input
+                                                    type="text"
+                                                    value={editingCategoryNames[category.id]}
+                                                    onChange={e => setEditingCategoryNames(prev => ({
+                                                        ...prev,
+                                                        [category.id]: e.target.value
+                                                    }))}
+                                                    className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100"
+                                                    autoFocus
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter') {
+                                                            handleUpdateCategoryName(category.id, editingCategoryNames[category.id]);
+                                                        } else if (e.key === 'Escape') {
+                                                            handleCancelEditCategoryName(category.id);
+                                                        }
+                                                    }}
+                                                    onBlur={() => handleUpdateCategoryName(category.id, editingCategoryNames[category.id])}
+                                                />
+                                            </div>
+                                        )}
+                                        
+                                        {/* Children */}
+                                        {hasChildren && isExpanded && (
+                                            <div className="ml-4 space-y-1">
+                                                {children.map(child => {
+                                                    const isChildRenaming = editingCategoryNames[child.id] !== undefined;
+                                                    const isChildMoving = convertingCategory === child.id;
+                                                    
+                                                    return (
+                                                        <div key={child.id} className="space-y-1">
+                                                            <div className="flex items-center gap-2 p-2 rounded-md bg-slate-950 hover:bg-slate-900 ml-6">
+                                                                <div className="w-4" />
+                                                                <div className="flex-1 flex items-center gap-2">
+                                                                    <span className="text-sm text-slate-300">
+                                                                        └─ {child.name}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleStartEditCategoryName(child.id, child.name)}
+                                                                        className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700"
+                                                                    >
+                                                                        Rename
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setConvertingCategory(child.id);
+                                                                            setTargetParentId(child.parent_id || '');
+                                                                        }}
+                                                                        className="text-[10px] px-2 py-1 rounded bg-blue-900 text-blue-200 hover:bg-blue-800"
+                                                                    >
+                                                                        Move
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleDeleteCategory(child.id, child.name, false)}
+                                                                        className="text-[10px] px-2 py-1 rounded bg-red-900 text-red-200 hover:bg-red-800"
+                                                                    >
+                                                                        Delete
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            {/* Rename input for child */}
+                                                            {isChildRenaming && (
+                                                                <div className="ml-12 p-2 rounded-md bg-slate-950 border border-slate-700">
+                                                                    <input
+                                                                        type="text"
+                                                                        value={editingCategoryNames[child.id]}
+                                                                        onChange={e => setEditingCategoryNames(prev => ({
+                                                                            ...prev,
+                                                                            [child.id]: e.target.value
+                                                                        }))}
+                                                                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100"
+                                                                        autoFocus
+                                                                        onKeyDown={e => {
+                                                                            if (e.key === 'Enter') {
+                                                                                handleUpdateCategoryName(child.id, editingCategoryNames[child.id]);
+                                                                            } else if (e.key === 'Escape') {
+                                                                                handleCancelEditCategoryName(child.id);
+                                                                            }
+                                                                        }}
+                                                                        onBlur={() => handleUpdateCategoryName(child.id, editingCategoryNames[child.id])}
+                                                                    />
+                                                                </div>
+                                                            )}
+                                                            
+                                                            {/* Move form for child */}
+                                                            {isChildMoving && (
+                                                                <div className="ml-12 p-3 rounded-md bg-slate-950 border border-slate-700 space-y-2">
+                                                                    <select
+                                                                        value={targetParentId}
+                                                                        onChange={e => setTargetParentId(e.target.value)}
+                                                                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100"
+                                                                    >
+                                                                        <option value="">Select parent category...</option>
+                                                                        {potentialParents
+                                                                            .filter(p => p.id !== child.id && (p.kind === 'group' || !p.parent_id))
+                                                                            .map(p => (
+                                                                                <option key={p.id} value={p.id}>
+                                                                                    {p.type === 'income' ? '⬆️' : p.type === 'transfer' ? '💱' : '⬇️'} {p.name}
+                                                                                </option>
+                                                                            ))}
+                                                                    </select>
+                                                                    <div className="flex gap-2">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleConvertToSubcategory(child.id, targetParentId)}
+                                                                            className="flex-1 px-3 py-1 rounded-md bg-blue-600 text-white text-sm hover:bg-blue-500"
+                                                                        >
+                                                                            Move
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                setConvertingCategory(null);
+                                                                                setTargetParentId('');
+                                                                            }}
+                                                                            className="flex-1 px-3 py-1 rounded-md bg-slate-700 text-slate-200 text-sm hover:bg-slate-600"
+                                                                        >
+                                                                            Cancel
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+            )}
         </section>
     );
 }

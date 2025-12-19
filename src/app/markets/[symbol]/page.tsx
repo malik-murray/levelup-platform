@@ -105,9 +105,17 @@ export default function TickerAnalysisPage() {
             // Check for both ETH and ETH-USD formats
             const searchTicker = isEth ? ['ETH', 'ETH-USD'] : [ticker];
             
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                window.location.href = '/login';
+                return;
+            }
+
             const { data } = await supabase
                 .from('market_positions')
                 .select('*')
+                .eq('user_id', user.id)
                 .in('ticker', searchTicker)
                 .single();
 
