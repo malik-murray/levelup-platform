@@ -82,6 +82,9 @@ type DailyScore = {
 type CalendarDay = {
     date: Date;
     score: DailyScore | null;
+    prioritiesCount?: number;
+    todosCount?: number;
+    habitsCount?: number;
 };
 
 export default function HabitPage() {
@@ -103,6 +106,8 @@ export default function HabitPage() {
         priorities_weight: 35,
         todos_weight: 25,
     });
+    const [monthPriorities, setMonthPriorities] = useState<any[]>([]);
+    const [monthTodos, setMonthTodos] = useState<any[]>([]);
 
     // Load data
     useEffect(() => {
@@ -154,6 +159,25 @@ export default function HabitPage() {
                 .eq('user_id', user.id)
                 .eq('date', dateStr)
                 .order('created_at');
+
+            // Load priorities for the entire month (for calendar)
+            const { data: monthPrioritiesData } = await supabase
+                .from('habit_daily_priorities')
+                .select('date')
+                .eq('user_id', user.id)
+                .gte('date', monthStartStr)
+                .lte('date', monthEndStr);
+
+            // Load todos for the entire month (for calendar)
+            const { data: monthTodosData } = await supabase
+                .from('habit_daily_todos')
+                .select('date')
+                .eq('user_id', user.id)
+                .gte('date', monthStartStr)
+                .lte('date', monthEndStr);
+
+            setMonthPriorities(monthPrioritiesData || []);
+            setMonthTodos(monthTodosData || []);
 
             // Load daily content for selected date
             const { data: contentData } = await supabase
@@ -235,10 +259,42 @@ export default function HabitPage() {
         }
     };
 
-    const calendarDays = getDatesInMonth(currentMonth).map(date => ({
-        date,
-        score: dailyScores.get(formatDate(date)) || null,
-    }));
+    // Count items per day for calendar
+    const prioritiesByDate = new Map<string, number>();
+    monthPriorities.forEach(p => {
+        const count = prioritiesByDate.get(p.date) || 0;
+        prioritiesByDate.set(p.date, count + 1);
+    });
+
+    const todosByDate = new Map<string, number>();
+    monthTodos.forEach(t => {
+        const count = todosByDate.get(t.date) || 0;
+        todosByDate.set(t.date, count + 1);
+    });
+
+    // Count unique habits per day (unique habit_template_ids)
+    const habitsByDate = new Map<string, Set<string>>();
+    habitEntries.forEach(e => {
+        if (!habitsByDate.has(e.date)) {
+            habitsByDate.set(e.date, new Set());
+        }
+        habitsByDate.get(e.date)!.add(e.habit_template_id);
+    });
+    const habitsCountByDate = new Map<string, number>();
+    habitsByDate.forEach((habitSet, date) => {
+        habitsCountByDate.set(date, habitSet.size);
+    });
+
+    const calendarDays = getDatesInMonth(currentMonth).map(date => {
+        const dateStr = formatDate(date);
+        return {
+            date,
+            score: dailyScores.get(dateStr) || null,
+            prioritiesCount: prioritiesByDate.get(dateStr) || 0,
+            todosCount: todosByDate.get(dateStr) || 0,
+            habitsCount: habitsCountByDate.get(dateStr) || 0,
+        };
+    });
 
     const navigateMonth = (direction: 'prev' | 'next') => {
         setCurrentMonth(prev => {
@@ -399,32 +455,45 @@ function CalendarView({
                     ))}
 
                     {/* Actual days */}
-                    {calendarDays.map(({ date, score }) => {
+                    {calendarDays.map(({ date, score, prioritiesCount = 0, todosCount = 0, habitsCount = 0 }) => {
                         const isSelected = isSameDay(date, selectedDate);
                         const isToday = isSameDay(date, new Date());
-                        const visualScore = score ? getVisualScore(score.score_overall) : '⬜⬜⬜⬜⬜';
+                        const hasData = score || prioritiesCount > 0 || todosCount > 0 || habitsCount > 0;
 
                         return (
-                                        <button
+                            <button
                                 key={formatDate(date)}
                                 onClick={() => onDateSelect(date)}
-                                className={`aspect-square border border-slate-200 dark:border-slate-800 p-2 text-left transition-colors ${
+                                className={`aspect-square border border-slate-200 dark:border-slate-800 p-1.5 text-left transition-colors ${
                                     isSelected
                                         ? 'bg-amber-100 dark:bg-amber-900/30 border-amber-400'
                                         : 'hover:bg-slate-50 dark:hover:bg-slate-900'
                                 } ${isToday ? 'ring-2 ring-amber-400' : ''}`}
                             >
-                                <div className="text-xs font-medium mb-1">{date.getDate()}</div>
-                                {score && (
-                                    <>
-                                        <div className="text-xs font-semibold text-amber-600 dark:text-amber-400 mb-0.5">
-                                            {score.score_overall}
-                                        </div>
-                                        <div className="text-xs mb-0.5">{score.grade}</div>
-                                        <div className="text-[10px] leading-tight">{visualScore}</div>
-                                    </>
+                                <div className="text-xs font-medium mb-0.5">{date.getDate()}</div>
+                                {hasData && (
+                                    <div className="space-y-0.5">
+                                        {score && (
+                                            <div className="inline-flex items-center gap-1 px-1 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-600 dark:text-amber-400">
+                                                {score.grade}
+                                            </div>
+                                        )}
+                                        {(prioritiesCount > 0 || todosCount > 0 || habitsCount > 0) && (
+                                            <div className="flex flex-wrap gap-0.5 text-[9px] text-slate-500 dark:text-slate-400">
+                                                {habitsCount > 0 && (
+                                                    <span className="text-blue-500 dark:text-blue-400">H:{habitsCount}</span>
+                                                )}
+                                                {prioritiesCount > 0 && (
+                                                    <span className="text-purple-500 dark:text-purple-400">P:{prioritiesCount}</span>
+                                                )}
+                                                {todosCount > 0 && (
+                                                    <span className="text-green-500 dark:text-green-400">T:{todosCount}</span>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
                                 )}
-                                        </button>
+                            </button>
                         );
                     })}
                 </div>
