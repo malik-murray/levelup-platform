@@ -17,8 +17,9 @@ import {
     type TimeOfDay,
     type HabitStatus,
 } from '@/lib/habitHelpers';
+import LifeTrackerHome from './components/LifeTrackerHome';
 
-type Tab = 'calendar' | 'daily' | 'statistics' | 'goals' | 'habits';
+type Tab = 'home' | 'calendar' | 'daily' | 'statistics' | 'goals' | 'habits';
 
 type HabitTemplate = {
     id: string;
@@ -82,7 +83,7 @@ type CalendarDay = {
 };
 
 export default function HabitPage() {
-    const [activeTab, setActiveTab] = useState<Tab>('calendar');
+    const [activeTab, setActiveTab] = useState<Tab>('home');
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [loading, setLoading] = useState(true);
@@ -229,7 +230,7 @@ export default function HabitPage() {
             <div className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-black">
                 <div className="mx-auto max-w-7xl px-6">
                     <div className="flex gap-1">
-                        {(['calendar', 'daily', 'statistics', 'goals', 'habits'] as Tab[]).map(tab => (
+                        {(['home', 'calendar', 'daily', 'statistics', 'goals', 'habits'] as Tab[]).map(tab => (
                                 <button
                                 key={tab}
                                 onClick={() => setActiveTab(tab)}
@@ -239,7 +240,7 @@ export default function HabitPage() {
                                         : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
                                 }`}
                             >
-                                {tab === 'calendar' ? 'Calendar' : tab === 'daily' ? 'Daily' : tab === 'statistics' ? 'Statistics/Streaks' : tab === 'goals' ? 'Goals & Milestones' : 'Habits/Bad Habits'}
+                                {tab === 'home' ? 'Home' : tab === 'calendar' ? 'Calendar' : tab === 'daily' ? 'Daily' : tab === 'statistics' ? 'Statistics/Streaks' : tab === 'goals' ? 'Goals & Milestones' : 'Habits/Bad Habits'}
                                 </button>
                         ))}
                     </div>
@@ -250,6 +251,8 @@ export default function HabitPage() {
             <div className="mx-auto max-w-7xl px-6 py-6">
                 {loading ? (
                     <div className="text-center py-12 text-slate-400">Loading...</div>
+                ) : activeTab === 'home' ? (
+                    <LifeTrackerHome />
                 ) : activeTab === 'calendar' ? (
                     <CalendarView
                         currentMonth={currentMonth}

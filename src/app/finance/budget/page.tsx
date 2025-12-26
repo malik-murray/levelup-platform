@@ -31,6 +31,9 @@ export default function BudgetPage() {
     // Track editing state for category names (categoryId -> value string)
     const [editingCategoryNames, setEditingCategoryNames] = useState<Record<string, string>>({});
     
+    // Track editing state for category types (categoryId -> type)
+    const [editingCategoryTypes, setEditingCategoryTypes] = useState<Record<string, 'income' | 'expense' | 'transfer'>>({});
+    
     // Budget duplication state
     const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
     const [duplicateTargetMonth, setDuplicateTargetMonth] = useState<string>('');
@@ -185,8 +188,12 @@ export default function BudgetPage() {
             } else if (categoryType === 'income') {
                 // Income should be positive
                 finalAmount = Math.abs(numAmount);
+            } else if (categoryType === 'transfer') {
+                // Savings/investing: treat as positive amount to save
+                // User enters positive amount (e.g., 500), we store as positive
+                finalAmount = Math.abs(numAmount);
             } else {
-                // Transfer/savings: use as-is (could be either direction)
+                // Unknown: use as-is
                 finalAmount = numAmount;
             }
         }
@@ -216,8 +223,11 @@ export default function BudgetPage() {
                     } else if (group.type === 'income') {
                         // For income: assigned is positive
                         newAvailable = newAssigned - category.activity;
+                    } else if (group.type === 'transfer') {
+                        // For savings/investing: assigned is positive, activity is positive
+                        newAvailable = Math.abs(newAssigned) - category.activity;
                     } else {
-                        // For transfers or unknown
+                        // For unknown
                         newAvailable = Math.abs(newAssigned) - category.activity;
                     }
                     
@@ -230,8 +240,11 @@ export default function BudgetPage() {
                     // Recalculate group totals
                     // For expenses, assigned is negative but we sum absolute values for display
                     // For income, assigned is positive
+                    // For savings/investing, use absolute values
                     const totalAssigned = updatedCategories.reduce((sum, c) => {
                         if (group.type === 'expense') {
+                            return sum + Math.abs(c.assigned);
+                        } else if (group.type === 'transfer') {
                             return sum + Math.abs(c.assigned);
                         } else {
                             return sum + c.assigned;
@@ -666,6 +679,46 @@ export default function BudgetPage() {
         }
     };
 
+    const handleUpdateCategoryType = async (categoryId: string, newType: 'income' | 'expense' | 'transfer') => {
+        setNotification(null);
+
+        try {
+            const { error } = await supabase
+                .from('categories')
+                .update({ type: newType })
+                .eq('id', categoryId);
+
+            if (error) {
+                throw new Error(error.message);
+            }
+
+            // Reload categories and budget data
+            const { data: categoriesData } = await supabase
+                .from('categories')
+                .select('id, name, kind, parent_id, type')
+                .order('name');
+            
+            setAllCategories((categoriesData as Category[]) ?? []);
+            await loadBudgetData();
+            
+            // Reload categories in manage modal if open
+            if (showManageCategories) {
+                const { data: updatedCategories } = await supabase
+                    .from('categories')
+                    .select('id, name, kind, parent_id, type')
+                    .order('name');
+                setAllCategories((updatedCategories as Category[]) ?? []);
+            }
+
+            setNotification('Category type updated successfully.');
+        } catch (error) {
+            console.error('Error updating category type:', error);
+            setNotification(
+                error instanceof Error ? error.message : 'Failed to update category type'
+            );
+        }
+    };
+
     const handleStartEditCategoryName = (categoryId: string, currentName: string) => {
         setEditingCategoryNames(prev => ({
             ...prev,
@@ -1016,14 +1069,19 @@ export default function BudgetPage() {
                 const expenseActivity = expenseGroups.reduce((sum, g) => sum + Math.abs(g.totalActivity), 0);
                 const expenseAvailable = expenseAssigned - expenseActivity;
                 
-                const netIncome = incomeAvailable - expenseAvailable;
+                const savingsAssigned = transferGroups.reduce((sum, g) => sum + Math.abs(g.totalAssigned), 0);
+                const savingsActivity = transferGroups.reduce((sum, g) => sum + Math.abs(g.totalActivity), 0);
+                const savingsAvailable = savingsAssigned - savingsActivity;
+                
+                // Net available = Income - Expenses - Savings
+                const netIncome = incomeAvailable - expenseAvailable - savingsActivity;
                 
                 return (
                     <div className="space-y-3">
                         {/* Income vs Expenses Summary */}
                         <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
                             <h3 className="mb-3 text-sm font-semibold">Budget Overview</h3>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs mb-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs mb-4">
                                 <div className="rounded-md border border-emerald-700/50 bg-emerald-950/30 p-3">
                                     <div className="text-emerald-400 text-[10px] font-semibold uppercase mb-1">⬆️ Income</div>
                                     <div className="text-lg font-semibold text-emerald-300 mb-1">
@@ -1052,6 +1110,20 @@ export default function BudgetPage() {
                                         Available: {formatCurrency(expenseAvailable)}
                                     </div>
                                 </div>
+                                <div className="rounded-md border border-blue-700/50 bg-blue-950/30 p-3">
+                                    <div className="text-blue-400 text-[10px] font-semibold uppercase mb-1">💰 Savings/Investing</div>
+                                    <div className="text-lg font-semibold text-blue-300 mb-1">
+                                        {formatCurrency(savingsAssigned)}
+                                    </div>
+                                    <div className="text-[10px] text-slate-400">
+                                        Saved This Month: {formatCurrency(savingsActivity)}
+                                    </div>
+                                    <div className={`text-[10px] font-medium mt-1 ${
+                                        savingsAvailable >= 0 ? 'text-blue-300' : 'text-red-400'
+                                    }`}>
+                                        Remaining: {formatCurrency(savingsAvailable)}
+                                    </div>
+                                </div>
                             </div>
                             <div className="border-t border-slate-700 pt-3">
                                 <div className="flex items-center justify-between">
@@ -1063,7 +1135,9 @@ export default function BudgetPage() {
                                     </div>
                                 </div>
                                 <div className="text-[10px] text-slate-500 mt-1">
-                                    {netIncome >= 0 ? 'You have money left to assign' : 'You\'ve overspent your income'}
+                                    {netIncome >= 0 
+                                        ? `You have ${formatCurrency(netIncome)} left to assign (after savings)` 
+                                        : `You've overspent by ${formatCurrency(Math.abs(netIncome))} (including savings)`}
                                 </div>
                             </div>
                         </div>
@@ -1209,7 +1283,7 @@ export default function BudgetPage() {
                             >
                                 <option value="expense">⬇️ Expense</option>
                                 <option value="income">⬆️ Income</option>
-                                <option value="transfer">💱 Transfer/Savings</option>
+                                <option value="transfer">💰 Savings/Investing</option>
                             </select>
                         </div>
 
@@ -1237,7 +1311,7 @@ export default function BudgetPage() {
                                     <option value="">Select a group</option>
                                     {groupCategories.map(group => (
                                         <option key={group.id} value={group.id}>
-                                            {group.type === 'income' ? '⬆️' : group.type === 'transfer' ? '💱' : '⬇️'} {group.name}
+                                                    {group.type === 'income' ? '⬆️' : group.type === 'transfer' ? '💰' : '⬇️'} {group.name}
                                         </option>
                                     ))}
                                 </select>
@@ -1353,7 +1427,7 @@ export default function BudgetPage() {
                                                             }}
                                                             className={editMode ? 'cursor-pointer hover:text-amber-400' : ''}
                                                         >
-                                                            {group.type === 'income' ? '⬆️' : group.type === 'transfer' ? '💱' : '⬇️'} {group.name}
+                                                            {group.type === 'income' ? '⬆️' : group.type === 'transfer' ? '💰' : '⬇️'} {group.name}
                                                         </span>
                                                     )}
                                                     {editMode && editingCategoryNames[group.id] === undefined && (
@@ -1790,12 +1864,12 @@ export default function BudgetPage() {
                                 </div>
                             )}
                             
-                            {/* Transfer Section */}
+                            {/* Savings/Investing Section */}
                             {transferGroups.length > 0 && (
                                 <div className="space-y-1">
                                     {(incomeGroups.length > 0 || expenseGroups.length > 0) && <div className="h-4" />}
                                     <div className="flex items-center gap-2 mb-2 pb-1 border-b border-slate-700/50">
-                                        <span className="text-slate-400 text-[11px] font-semibold">💱 TRANSFERS/SAVINGS</span>
+                                        <span className="text-slate-400 text-[11px] font-semibold">💰 SAVINGS/INVESTING</span>
                                     </div>
                                     {transferGroups.map((group, idx) => renderGroup(group, idx, transferGroups.length, budgetGroups))}
                                     {standaloneGroups.filter(g => g.type === 'transfer' || g.type === null).map((group, idx) => renderGroup(group, idx, standaloneGroups.filter(g => g.type === 'transfer' || g.type === null).length, budgetGroups))}
@@ -1835,6 +1909,7 @@ export default function BudgetPage() {
                                 const hasChildren = children.length > 0;
                                 const isAdding = addingSubcategoryTo === category.id;
                                 const isConverting = convertingCategory === category.id;
+                                const isChangingType = editingCategoryTypes[category.id] !== undefined;
                                 
                                 return (
                                     <div key={category.id} className="space-y-1">
@@ -1857,7 +1932,7 @@ export default function BudgetPage() {
                                             {/* Category Name */}
                                             <div className="flex-1 flex items-center gap-2">
                                                 <span className="text-sm text-slate-200">
-                                                    {category.type === 'income' ? '⬆️' : category.type === 'transfer' ? '💱' : '⬇️'} {category.name}
+                                                    {category.type === 'income' ? '⬆️' : category.type === 'transfer' ? '💰' : '⬇️'} {category.name}
                                                 </span>
                                                 {isGroup && (
                                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
@@ -1907,6 +1982,18 @@ export default function BudgetPage() {
                                                 </button>
                                                 <button
                                                     type="button"
+                                                    onClick={() => {
+                                                        setEditingCategoryTypes(prev => ({
+                                                            ...prev,
+                                                            [category.id]: (category.type || 'expense') as 'income' | 'expense' | 'transfer'
+                                                        }));
+                                                    }}
+                                                    className="text-[10px] px-2 py-1 rounded bg-purple-900 text-purple-200 hover:bg-purple-800"
+                                                >
+                                                    Change Type
+                                                </button>
+                                                <button
+                                                    type="button"
                                                     onClick={() => handleDeleteCategory(category.id, category.name, isGroup)}
                                                     className="text-[10px] px-2 py-1 rounded bg-red-900 text-red-200 hover:bg-red-800"
                                                 >
@@ -1942,7 +2029,7 @@ export default function BudgetPage() {
                                                     >
                                                         <option value="expense">Expense</option>
                                                         <option value="income">Income</option>
-                                                        <option value="transfer">Transfer</option>
+                                                        <option value="transfer">Savings/Investing</option>
                                                     </select>
                                                     <button
                                                         type="button"
@@ -1978,7 +2065,7 @@ export default function BudgetPage() {
                                                         .filter(p => p.id !== category.id && (p.kind === 'group' || !p.parent_id))
                                                         .map(p => (
                                                             <option key={p.id} value={p.id}>
-                                                                {p.type === 'income' ? '⬆️' : p.type === 'transfer' ? '💱' : '⬇️'} {p.name}
+                                                                {p.type === 'income' ? '⬆️' : p.type === 'transfer' ? '💰' : '⬇️'} {p.name}
                                                             </option>
                                                         ))}
                                                 </select>
@@ -1995,6 +2082,55 @@ export default function BudgetPage() {
                                                         onClick={() => {
                                                             setConvertingCategory(null);
                                                             setTargetParentId('');
+                                                        }}
+                                                        className="flex-1 px-3 py-1 rounded-md bg-slate-700 text-slate-200 text-sm hover:bg-slate-600"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                        
+                                        {/* Change Type Form */}
+                                        {editingCategoryTypes[category.id] !== undefined && (
+                                            <div className="ml-8 p-3 rounded-md bg-slate-950 border border-slate-700 space-y-2">
+                                                <label className="text-xs text-slate-400">Category Type</label>
+                                                <select
+                                                    value={editingCategoryTypes[category.id]}
+                                                    onChange={e => setEditingCategoryTypes(prev => ({
+                                                        ...prev,
+                                                        [category.id]: e.target.value as 'income' | 'expense' | 'transfer'
+                                                    }))}
+                                                    className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100"
+                                                >
+                                                    <option value="expense">⬇️ Expense</option>
+                                                    <option value="income">⬆️ Income</option>
+                                                    <option value="transfer">💰 Savings/Investing</option>
+                                                </select>
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const newType = editingCategoryTypes[category.id];
+                                                            handleUpdateCategoryType(category.id, newType);
+                                                            setEditingCategoryTypes(prev => {
+                                                                const next = { ...prev };
+                                                                delete next[category.id];
+                                                                return next;
+                                                            });
+                                                        }}
+                                                        className="flex-1 px-3 py-1 rounded-md bg-purple-600 text-white text-sm hover:bg-purple-500"
+                                                    >
+                                                        Update
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setEditingCategoryTypes(prev => {
+                                                                const next = { ...prev };
+                                                                delete next[category.id];
+                                                                return next;
+                                                            });
                                                         }}
                                                         className="flex-1 px-3 py-1 rounded-md bg-slate-700 text-slate-200 text-sm hover:bg-slate-600"
                                                     >
@@ -2109,7 +2245,7 @@ export default function BudgetPage() {
                                                                             .filter(p => p.id !== child.id && (p.kind === 'group' || !p.parent_id))
                                                                             .map(p => (
                                                                                 <option key={p.id} value={p.id}>
-                                                                                    {p.type === 'income' ? '⬆️' : p.type === 'transfer' ? '💱' : '⬇️'} {p.name}
+                                                                                    {p.type === 'income' ? '⬆️' : p.type === 'transfer' ? '💰' : '⬇️'} {p.name}
                                                                                 </option>
                                                                             ))}
                                                                     </select>

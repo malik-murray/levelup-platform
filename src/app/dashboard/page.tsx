@@ -6,347 +6,178 @@ import Image from "next/image";
 import { supabase } from "@auth/supabaseClient";
 import logo from "../logo.png";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import {
-    formatDate,
-    getDatesInMonth,
-    getMonthRange,
-    isSameDay,
-    getVisualScore,
-    getGrade,
-    type Category,
-    type TimeOfDay,
-    type HabitStatus,
-    calculateItemScore,
-} from '@/lib/habitHelpers';
 
-type Goal = {
-    id: string;
+type App = {
     name: string;
-    description: string | null;
-    category: string | null;
-    priority_score: number;
-    deadline: string | null;
-    is_completed: boolean;
+    href: string;
+    description: string;
+    status: "open" | "coming";
+    icon?: string;
 };
 
-type HabitTemplate = {
-    id: string;
-    name: string;
-    icon: string;
-    category: Category;
-    time_of_day: TimeOfDay | null;
-    goal_id: string | null;
-    is_active: boolean;
-};
+function AppCard({ app }: { app: App }) {
+    const isOpen = app.status === "open";
+    
+    const cardContent = (
+        <div
+            className={`
+                group relative rounded-xl sm:rounded-2xl border bg-slate-950 p-4 sm:p-6
+                transition-all duration-300 ease-out
+                ${isOpen 
+                    ? 'border-amber-500/30 hover:border-amber-500/60 hover:shadow-2xl hover:shadow-amber-500/10 hover:-translate-y-1 cursor-pointer active:scale-[0.98]' 
+                    : 'border-slate-800 hover:border-slate-700 cursor-not-allowed opacity-75'
+                }
+            `}
+        >
+            {/* Subtle gradient overlay on hover */}
+            <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-amber-500/0 via-amber-500/0 to-amber-500/0 group-hover:from-amber-500/5 group-hover:via-amber-500/0 group-hover:to-amber-500/0 transition-all duration-300 pointer-events-none" />
+            
+            <div className="relative z-10">
+                {/* App Icon/Initials */}
+                <div className="mb-3 sm:mb-4 flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-lg sm:rounded-xl bg-gradient-to-br from-amber-500/20 to-amber-600/10 border border-amber-500/30">
+                    <span className="text-lg sm:text-xl font-bold text-amber-400">
+                        {app.icon || app.name.charAt(0)}
+                    </span>
+                </div>
 
-type HabitEntry = {
-    id: string;
-    habit_template_id: string;
-    date: string;
-    status: HabitStatus;
-};
+                {/* App Name */}
+                <h3 className="mb-1.5 sm:mb-2 text-base sm:text-lg font-semibold text-white">
+                    {app.name}
+                </h3>
 
-type Priority = {
-    id: string;
-    text: string;
-    category: Category | null;
-    time_of_day: TimeOfDay | null;
-    completed: boolean;
-    goal_id: string | null;
-    date: string;
-};
+                {/* Description */}
+                <p className="mb-3 sm:mb-4 text-xs sm:text-sm text-slate-400 leading-relaxed">
+                    {app.description}
+                </p>
 
-type Todo = {
-    id: string;
-    title: string;
-    category: Category | null;
-    time_of_day: TimeOfDay | null;
-    is_done: boolean;
-    goal_id: string | null;
-    date: string;
-};
+                {/* Status Badge */}
+                {isOpen ? (
+                    <span className="inline-flex items-center rounded-full bg-amber-400 px-3 py-1.5 sm:px-4 text-xs font-semibold text-black shadow-lg shadow-amber-500/25">
+                        Open
+                    </span>
+                ) : (
+                    <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 sm:px-4 text-xs font-medium text-slate-400">
+                        Coming soon
+                    </span>
+                )}
+            </div>
+        </div>
+    );
 
-type DailyContent = {
-    lessons: string | null;
-    ideas: string | null;
-    notes: string | null;
-    distractions: string | null;
-    reflection: string | null;
-    news_updates: string | null;
-};
+    if (isOpen) {
+        return (
+            <Link href={app.href} className="block">
+                {cardContent}
+            </Link>
+        );
+    }
 
-type DailyScore = {
-    score_overall: number;
-    grade: string;
-    score_habits: number;
-    score_priorities: number;
-    score_todos: number;
-};
+    return cardContent;
+}
 
 export default function DashboardPage() {
     const [email, setEmail] = useState<string | null>(null);
     const [userId, setUserId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
-    
-    // Goals data
-    const [goals, setGoals] = useState<Goal[]>([]);
-    const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
-    
-    // Calendar data
-    const [currentWeek, setCurrentWeek] = useState(new Date());
-    const [selectedDate, setSelectedDate] = useState(new Date());
-    const [dailyScores, setDailyScores] = useState<Map<string, DailyScore>>(new Map());
-    const [weekPriorities, setWeekPriorities] = useState<Map<string, Priority[]>>(new Map());
-    const [weekTodos, setWeekTodos] = useState<Map<string, Todo[]>>(new Map());
-    
-    // Daily Plan data
-    const [habitTemplates, setHabitTemplates] = useState<HabitTemplate[]>([]);
-    const [habitEntries, setHabitEntries] = useState<HabitEntry[]>([]);
-    const [priorities, setPriorities] = useState<Priority[]>([]);
-    const [todos, setTodos] = useState<Todo[]>([]);
-    const [dailyContent, setDailyContent] = useState<DailyContent | null>(null);
-    
-    // Scoring settings
-    const [scoringSettings, setScoringSettings] = useState({
-        habits_weight: 40,
-        priorities_weight: 35,
-        todos_weight: 25,
-    });
 
     useEffect(() => {
+        const checkAuth = async () => {
+            try {
+                // CRITICAL SECURITY: Enforce user authentication and user_id context
+                // All database queries across all apps MUST filter by user_id to prevent data leakage
+                const { data: { user }, error } = await supabase.auth.getUser();
+                
+                if (error || !user) {
+                    console.error('Authentication error:', error);
+                    window.location.href = "/login";
+                    return;
+                }
+
+                // CRITICAL: Store user ID - this ensures all subsequent database operations
+                // in child apps (finance, fitness, habit, etc.) are properly scoped to this user
+                // All queries MUST include .eq('user_id', user.id) to prevent cross-user data access
+                setUserId(user.id);
+                setEmail(user.email ?? null);
+                
+                // Verify session is still valid
+                const { data: { session } } = await supabase.auth.getSession();
+                if (!session) {
+                    console.error('No active session found');
+                    window.location.href = "/login";
+                    return;
+                }
+
+                // Log for debugging (remove in production if desired)
+                console.log('✅ User authenticated:', { userId: user.id, email: user.email });
+            } catch (err) {
+                console.error('Error checking authentication:', err);
+                window.location.href = "/login";
+            } finally {
+                setLoading(false);
+            }
+        };
+
         checkAuth();
     }, []);
 
-    useEffect(() => {
-        if (userId) {
-            loadAllData();
-        }
-    }, [userId, selectedDate, currentWeek]);
-
-    const checkAuth = async () => {
-        try {
-            const { data: { user }, error } = await supabase.auth.getUser();
-            
-            if (error || !user) {
-                console.error('Authentication error:', error);
-                window.location.href = "/login";
-                return;
-            }
-
-            setUserId(user.id);
-            setEmail(user.email ?? null);
-            
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                console.error('No active session found');
-                window.location.href = "/login";
-                return;
-            }
-        } catch (err) {
-            console.error('Error checking authentication:', err);
-            window.location.href = "/login";
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const loadAllData = async () => {
-        if (!userId) return;
-        
-        await Promise.all([
-            loadGoals(),
-            loadScoringSettings(),
-            loadCalendarData(),
-            loadDailyPlanData(),
-        ]);
-    };
-
-    const loadGoals = async () => {
-        try {
-            const { data } = await supabase
-                .from('habit_goals')
-                .select('*')
-                .eq('user_id', userId)
-                .eq('is_completed', false)
-                .order('priority_score', { ascending: false });
-
-            setGoals(data || []);
-        } catch (error) {
-            console.error('Error loading goals:', error);
-        }
-    };
-
-    const loadScoringSettings = async () => {
-        try {
-            const { data, error } = await supabase
-                .from('habit_scoring_settings')
-                .select('*')
-                .eq('user_id', userId)
-                .single();
-
-            if (error && error.code === 'PGRST116') {
-                // No settings found, create defaults
-                const { data: newSettings } = await supabase
-                    .from('habit_scoring_settings')
-                    .insert({
-                        user_id: userId,
-                        habits_weight: 40,
-                        priorities_weight: 35,
-                        todos_weight: 25,
-                    })
-                    .select()
-                    .single();
-
-                if (newSettings) {
-                    setScoringSettings({
-                        habits_weight: newSettings.habits_weight,
-                        priorities_weight: newSettings.priorities_weight,
-                        todos_weight: newSettings.todos_weight,
-                    });
-                }
-            } else if (data) {
-                setScoringSettings({
-                    habits_weight: data.habits_weight,
-                    priorities_weight: data.priorities_weight,
-                    todos_weight: data.todos_weight,
-                });
-            }
-        } catch (error) {
-            console.error('Error loading scoring settings:', error);
-        }
-    };
-
-    const loadCalendarData = async () => {
-        try {
-            const weekStart = getWeekStart(currentWeek);
-            const weekEnd = new Date(weekStart);
-            weekEnd.setDate(weekEnd.getDate() + 6);
-            const weekStartStr = formatDate(weekStart);
-            const weekEndStr = formatDate(weekEnd);
-
-            // Load scores
-            const { data: scoresData } = await supabase
-                .from('habit_daily_scores')
-                .select('*')
-                .eq('user_id', userId)
-                .gte('date', weekStartStr)
-                .lte('date', weekEndStr);
-
-            const scoresMap = new Map<string, DailyScore>();
-            scoresData?.forEach(score => {
-                scoresMap.set(score.date, {
-                    score_overall: score.score_overall,
-                    grade: score.grade,
-                    score_habits: score.score_habits,
-                    score_priorities: score.score_priorities,
-                    score_todos: score.score_todos,
-                });
-            });
-            setDailyScores(scoresMap);
-
-            // Load priorities and todos for the week
-            const { data: prioritiesData } = await supabase
-                .from('habit_daily_priorities')
-                .select('*')
-                .eq('user_id', userId)
-                .gte('date', weekStartStr)
-                .lte('date', weekEndStr);
-
-            const { data: todosData } = await supabase
-                .from('habit_daily_todos')
-                .select('*')
-                .eq('user_id', userId)
-                .gte('date', weekStartStr)
-                .lte('date', weekEndStr);
-
-            const prioritiesMap = new Map<string, Priority[]>();
-            prioritiesData?.forEach(p => {
-                const existing = prioritiesMap.get(p.date) || [];
-                prioritiesMap.set(p.date, [...existing, p]);
-            });
-            setWeekPriorities(prioritiesMap);
-
-            const todosMap = new Map<string, Todo[]>();
-            todosData?.forEach(t => {
-                const existing = todosMap.get(t.date) || [];
-                todosMap.set(t.date, [...existing, t]);
-            });
-            setWeekTodos(todosMap);
-        } catch (error) {
-            console.error('Error loading calendar data:', error);
-        }
-    };
-
-    const loadDailyPlanData = async () => {
-        try {
-            const dateStr = formatDate(selectedDate);
-
-            // Load habit templates
-            const { data: templates } = await supabase
-                .from('habit_templates')
-                .select('*')
-                .eq('user_id', userId)
-                .eq('is_active', true)
-                .order('sort_order');
-
-            // Load habit entries for selected date
-            const { data: entries } = await supabase
-                .from('habit_daily_entries')
-                .select('*')
-                .eq('user_id', userId)
-                .eq('date', dateStr);
-
-            // Load priorities
-            const { data: prioritiesData } = await supabase
-                .from('habit_daily_priorities')
-                .select('*')
-                .eq('user_id', userId)
-                .eq('date', dateStr)
-                .order('sort_order');
-
-            // Load todos
-            const { data: todosData } = await supabase
-                .from('habit_daily_todos')
-                .select('*')
-                .eq('user_id', userId)
-                .eq('date', dateStr)
-                .order('created_at');
-
-            // Load daily content
-            const { data: contentData } = await supabase
-                .from('habit_daily_content')
-                .select('*')
-                .eq('user_id', userId)
-                .eq('date', dateStr)
-                .single();
-
-            setHabitTemplates(templates || []);
-            setHabitEntries(entries || []);
-            setPriorities(prioritiesData || []);
-            setTodos(todosData || []);
-            setDailyContent(contentData || null);
-        } catch (error) {
-            console.error('Error loading daily plan data:', error);
-        }
-    };
-
-    const getWeekStart = (date: Date): Date => {
-        const d = new Date(date);
-        const day = d.getDay();
-        const diff = d.getDate() - day;
-        return new Date(d.setDate(diff));
-    };
-
-    const getWeekDays = (): Date[] => {
-        const start = getWeekStart(currentWeek);
-        const days: Date[] = [];
-        for (let i = 0; i < 7; i++) {
-            const day = new Date(start);
-            day.setDate(start.getDate() + i);
-            days.push(day);
-        }
-        return days;
-    };
+    const apps: App[] = [
+        {
+            name: "Habit Tracker",
+            href: "/habit",
+            description: "Track daily habits, XP, streaks, and life scores.",
+            status: "open",
+            icon: "📈",
+        },
+        {
+            name: "Finance Tracker",
+            href: "/finance",
+            description: "Visualize your cashflow, savings, and long-term goals.",
+            status: "open",
+            icon: "💰",
+        },
+        {
+            name: "Fitness Tracker",
+            href: "/fitness",
+            description: "Track workouts, meals, and metrics. PeakMode.",
+            status: "open",
+            icon: "💪",
+        },
+        {
+            name: "Resume Generator",
+            href: "/resume",
+            description: "Upload your resume + job description → Get tailored resume & cover letter.",
+            status: "open",
+            icon: "📄",
+        },
+        {
+            name: "Emotional Tracker",
+            href: "/emotions",
+            description: "Log emotions, triggers, and coping strategies.",
+            status: "open",
+            icon: "💭",
+        },
+        {
+            name: "Stock & Crypto Analyzer",
+            href: "/markets",
+            description: "Monitor portfolios, track watchlists, and analyze moves.",
+            status: "open",
+            icon: "📊",
+        },
+        {
+            name: "Newsfeed Summarizer",
+            href: "/newsfeed",
+            description: "Turn information overload into short daily briefs.",
+            status: "open",
+            icon: "📰",
+        },
+        {
+            name: "Reflection to Lesson",
+            href: "/reflection",
+            description: "Convert journal entries into lessons and action steps.",
+            status: "open",
+            icon: "✨",
+        },
+    ];
 
     if (loading) {
         return (
@@ -361,10 +192,68 @@ export default function DashboardPage() {
 
     return (
         <main className="min-h-screen bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
-            {/* Header */}
+            {/* Hero Section */}
             <header className="relative overflow-hidden border-b border-slate-800 bg-gradient-to-b from-black via-slate-950 to-black transition-colors">
+                {/* Outerspace Background */}
+                <div className="absolute inset-0 bg-gradient-to-b from-black via-slate-950 to-black" />
+                
+                {/* Stars Layer 1 - Large Stars */}
+                <div className="absolute inset-0 opacity-60">
+                    <div className="absolute top-[20%] left-[15%] w-1 h-1 bg-amber-400 rounded-full animate-pulse" />
+                    <div className="absolute top-[35%] left-[45%] w-1.5 h-1.5 bg-amber-300 rounded-full animate-pulse" style={{ animationDelay: '1s' }} />
+                    <div className="absolute top-[50%] left-[70%] w-1 h-1 bg-amber-400 rounded-full animate-pulse" style={{ animationDelay: '2s' }} />
+                    <div className="absolute top-[65%] left-[25%] w-1 h-1 bg-amber-300 rounded-full animate-pulse" style={{ animationDelay: '0.5s' }} />
+                    <div className="absolute top-[80%] left-[60%] w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse" style={{ animationDelay: '1.5s' }} />
+                </div>
+                
+                {/* Stars Layer 2 - Small Stars */}
+                <div className="absolute inset-0 opacity-40">
+                    <div className="absolute top-[10%] left-[30%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[15%] left-[60%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[25%] left-[80%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[30%] left-[10%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[40%] left-[55%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[45%] left-[85%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[55%] left-[20%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[60%] left-[50%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[70%] left-[75%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[75%] left-[40%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[85%] left-[15%] w-0.5 h-0.5 bg-white rounded-full" />
+                    <div className="absolute top-[90%] left-[65%] w-0.5 h-0.5 bg-white rounded-full" />
+                </div>
+                
+                {/* Nebula 1 - Amber/Gold */}
+                <div className="absolute inset-0 opacity-30">
+                    <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_20%_30%,rgba(245,158,11,0.4),transparent_60%)] pointer-events-none" />
+                </div>
+                
+                {/* Nebula 2 - Amber/Gold */}
+                <div className="absolute inset-0 opacity-20">
+                    <div className="absolute top-0 right-0 w-full h-full bg-[radial-gradient(circle_at_80%_70%,rgba(245,196,81,0.35),transparent_65%)] pointer-events-none" />
+                </div>
+                
+                {/* Additional Stars - Scattered */}
+                <div className="absolute inset-0 opacity-30" style={{
+                    backgroundImage: `radial-gradient(2px 2px at 20% 30%, white, transparent),
+                                     radial-gradient(2px 2px at 60% 70%, white, transparent),
+                                     radial-gradient(1px 1px at 50% 50%, white, transparent),
+                                     radial-gradient(1px 1px at 80% 10%, white, transparent),
+                                     radial-gradient(2px 2px at 90% 60%, white, transparent),
+                                     radial-gradient(1px 1px at 30% 80%, white, transparent),
+                                     radial-gradient(2px 2px at 70% 40%, white, transparent),
+                                     radial-gradient(1px 1px at 10% 50%, white, transparent),
+                                     radial-gradient(1px 1px at 40% 20%, white, transparent),
+                                     radial-gradient(2px 2px at 85% 90%, white, transparent)`,
+                    backgroundSize: '100% 100%',
+                    backgroundRepeat: 'no-repeat',
+                }} />
+                
+                {/* Subtle cosmic glow */}
+                <div className="absolute inset-0 bg-gradient-to-b from-transparent via-amber-950/5 to-transparent pointer-events-none" />
+                
                 <div className="relative mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-12 lg:px-8 lg:py-16 z-10">
                     <div className="flex flex-col items-start justify-between gap-4 sm:gap-6 sm:flex-row sm:items-center">
+                        {/* Brand Section */}
                         <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
                             <div className="relative h-10 w-10 sm:h-12 sm:w-12 lg:h-14 lg:w-14 flex-shrink-0">
                                 <Image
@@ -377,14 +266,15 @@ export default function DashboardPage() {
                             </div>
                             <div className="min-w-0 flex-1">
                                 <h1 className="text-xl font-bold text-white dark:text-white sm:text-2xl lg:text-3xl xl:text-4xl drop-shadow-lg truncate">
-                                    Life Tracker
+                                    LevelUpSolutions
                                 </h1>
                                 <p className="mt-1 text-xs text-slate-200 dark:text-slate-300 sm:text-sm lg:text-base drop-shadow-md line-clamp-2">
-                                    Your daily decision + execution system
+                                    Your personal operating system for habits, money, mindset, and more.
                                 </p>
                             </div>
                         </div>
 
+                        {/* User Actions */}
                         {email && userId && (
                             <div className="flex flex-col w-full sm:w-auto items-stretch sm:items-end gap-2 sm:gap-3 sm:flex-row sm:items-center">
                                 <div className="flex items-center gap-2 rounded-full border border-slate-300 bg-white/50 px-3 py-2 sm:px-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/50">
@@ -395,12 +285,6 @@ export default function DashboardPage() {
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <ThemeToggle />
-                                    <Link
-                                        href="/habit"
-                                        className="rounded-full border border-slate-300 bg-white/50 px-4 py-2 text-xs font-medium text-slate-700 backdrop-blur-sm transition-all hover:border-amber-500/50 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-amber-300 flex-shrink-0"
-                                    >
-                                        Habit Management
-                                    </Link>
                                     <button
                                         onClick={async () => {
                                             await supabase.auth.signOut();
@@ -417,1099 +301,27 @@ export default function DashboardPage() {
                 </div>
             </header>
 
-            {/* Scrollable Content */}
-            <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-12">
-                {/* 1. GOALS SECTION */}
-                <GoalsSection
-                    goals={goals}
-                    onGoalClick={(goalId) => setSelectedGoalId(goalId)}
-                    onRefresh={loadGoals}
-                />
+            {/* App Grid Section */}
+            <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-12 lg:px-8">
+                <div className="mb-6 text-center sm:mb-8 lg:mb-12">
+                    <h2 className="text-xl font-bold text-white sm:text-2xl lg:text-3xl">
+                        Your Apps
+                    </h2>
+                    <p className="mt-2 text-xs text-slate-400 sm:text-sm lg:text-base">
+                        Choose an app to get started. We'll build each one out step by step.
+                    </p>
+                </div>
 
-                {/* 2. CALENDAR OVERVIEW SECTION */}
-                <CalendarOverviewSection
-                    currentWeek={currentWeek}
-                    selectedDate={selectedDate}
-                    dailyScores={dailyScores}
-                    weekPriorities={weekPriorities}
-                    weekTodos={weekTodos}
-                    onDateSelect={setSelectedDate}
-                    onWeekChange={(direction) => {
-                        const newWeek = new Date(currentWeek);
-                        newWeek.setDate(newWeek.getDate() + (direction === 'next' ? 7 : -7));
-                        setCurrentWeek(newWeek);
-                    }}
-                />
+                {/* App Grid */}
+                <div className="grid grid-cols-1 gap-4 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                    {apps.map((app) => (
+                        <AppCard key={app.name} app={app} />
+                    ))}
+                </div>
+            </section>
 
-                {/* 3. DAILY PLAN SECTION */}
-                <DailyPlanSection
-                    date={selectedDate}
-                    habitTemplates={habitTemplates}
-                    habitEntries={habitEntries}
-                    priorities={priorities}
-                    todos={todos}
-                    dailyContent={dailyContent}
-                    goals={goals}
-                    scoringSettings={scoringSettings}
-                    onDataChange={loadDailyPlanData}
-                />
-
-                {/* 4. SCORING SETTINGS SECTION */}
-                <ScoringSettingsSection
-                    scoringSettings={scoringSettings}
-                    onSettingsChange={(settings) => {
-                        setScoringSettings(settings);
-                        loadAllData();
-                    }}
-                />
-            </div>
-
-            {/* Goal Detail Modal */}
-            {selectedGoalId && (
-                <GoalDetailModal
-                    goalId={selectedGoalId}
-                    goals={goals}
-                    onClose={() => setSelectedGoalId(null)}
-                    onRefresh={loadGoals}
-                />
-            )}
+            {/* Footer spacing */}
+            <div className="h-16" />
         </main>
-    );
-}
-
-// Goals Section Component
-function GoalsSection({
-    goals,
-    onGoalClick,
-    onRefresh,
-}: {
-    goals: Goal[];
-    onGoalClick: (goalId: string) => void;
-    onRefresh: () => void;
-}) {
-    const [showAddForm, setShowAddForm] = useState(false);
-    const [newGoal, setNewGoal] = useState({
-        name: '',
-        description: '',
-        category: '',
-        priority_score: 0,
-        deadline: '',
-    });
-
-    const handleAddGoal = async () => {
-        if (!newGoal.name.trim()) return;
-
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            await supabase
-                .from('habit_goals')
-                .insert({
-                    user_id: user.id,
-                    name: newGoal.name,
-                    description: newGoal.description || null,
-                    category: newGoal.category || null,
-                    priority_score: newGoal.priority_score,
-                    deadline: newGoal.deadline || null,
-                    is_completed: false,
-                });
-
-            setNewGoal({
-                name: '',
-                description: '',
-                category: '',
-                priority_score: 0,
-                deadline: '',
-            });
-            setShowAddForm(false);
-            onRefresh();
-        } catch (error) {
-            console.error('Error adding goal:', error);
-        }
-    };
-
-    const categoryColors: Record<string, string> = {
-        career: 'border-blue-500/30 bg-blue-950/20',
-        financial: 'border-green-500/30 bg-green-950/20',
-        spiritual: 'border-amber-500/30 bg-amber-950/20',
-        physical: 'border-red-500/30 bg-red-950/20',
-        mental: 'border-purple-500/30 bg-purple-950/20',
-        health: 'border-pink-500/30 bg-pink-950/20',
-        personal: 'border-cyan-500/30 bg-cyan-950/20',
-        relationships: 'border-rose-500/30 bg-rose-950/20',
-        education: 'border-indigo-500/30 bg-indigo-950/20',
-        other: 'border-slate-500/30 bg-slate-950/20',
-    };
-
-    return (
-        <section className="space-y-4">
-            <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold">Goals</h2>
-                <button
-                    onClick={() => setShowAddForm(!showAddForm)}
-                    className="rounded-md border border-amber-500/30 bg-amber-950/20 px-4 py-2 text-sm font-medium text-amber-400 hover:bg-amber-950/30 transition-colors"
-                >
-                    {showAddForm ? 'Cancel' : '+ Add Goal'}
-                </button>
-            </div>
-
-            {showAddForm && (
-                <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-3">
-                    <input
-                        type="text"
-                        placeholder="Goal title"
-                        value={newGoal.name}
-                        onChange={(e) => setNewGoal({ ...newGoal, name: e.target.value })}
-                        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
-                    />
-                    <textarea
-                        placeholder="Description (optional)"
-                        value={newGoal.description}
-                        onChange={(e) => setNewGoal({ ...newGoal, description: e.target.value })}
-                        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
-                        rows={2}
-                    />
-                    <div className="grid grid-cols-2 gap-3">
-                        <select
-                            value={newGoal.category}
-                            onChange={(e) => setNewGoal({ ...newGoal, category: e.target.value })}
-                            className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-                        >
-                            <option value="">Category</option>
-                            <option value="career">Career</option>
-                            <option value="financial">Financial</option>
-                            <option value="spiritual">Spiritual</option>
-                            <option value="physical">Physical</option>
-                            <option value="mental">Mental</option>
-                            <option value="health">Health</option>
-                            <option value="personal">Personal</option>
-                            <option value="relationships">Relationships</option>
-                            <option value="education">Education</option>
-                            <option value="other">Other</option>
-                        </select>
-                        <input
-                            type="number"
-                            placeholder="Priority score"
-                            value={newGoal.priority_score}
-                            onChange={(e) => setNewGoal({ ...newGoal, priority_score: parseInt(e.target.value) || 0 })}
-                            className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
-                        />
-                    </div>
-                    <input
-                        type="date"
-                        placeholder="Deadline"
-                        value={newGoal.deadline}
-                        onChange={(e) => setNewGoal({ ...newGoal, deadline: e.target.value })}
-                        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
-                    />
-                    <button
-                        onClick={handleAddGoal}
-                        className="w-full rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-black hover:bg-amber-400 transition-colors"
-                    >
-                        Add Goal
-                    </button>
-                </div>
-            )}
-
-            <div className="space-y-2">
-                {goals.length === 0 ? (
-                    <p className="text-center py-8 text-slate-400">No goals yet. Add your first goal above!</p>
-                ) : (
-                    goals.map((goal) => (
-                        <button
-                            key={goal.id}
-                            onClick={() => onGoalClick(goal.id)}
-                            className={`w-full rounded-lg border p-4 text-left transition-colors hover:border-amber-500/50 ${
-                                categoryColors[goal.category || 'other'] || categoryColors.other
-                            } border-slate-700`}
-                        >
-                            <div className="flex items-start justify-between">
-                                <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <h3 className="font-semibold text-white">{goal.name}</h3>
-                                        <span className="text-xs text-slate-400">Priority: {goal.priority_score}</span>
-                                    </div>
-                                    {goal.description && (
-                                        <p className="text-sm text-slate-300 mb-2">{goal.description}</p>
-                                    )}
-                                    <div className="flex items-center gap-4 text-xs text-slate-400">
-                                        {goal.category && (
-                                            <span className="capitalize">{goal.category}</span>
-                                        )}
-                                        {goal.deadline && (
-                                            <span>Deadline: {new Date(goal.deadline).toLocaleDateString()}</span>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        </button>
-                    ))
-                )}
-            </div>
-        </section>
-    );
-}
-
-// Calendar Overview Section Component
-function CalendarOverviewSection({
-    currentWeek,
-    selectedDate,
-    dailyScores,
-    weekPriorities,
-    weekTodos,
-    onDateSelect,
-    onWeekChange,
-}: {
-    currentWeek: Date;
-    selectedDate: Date;
-    dailyScores: Map<string, DailyScore>;
-    weekPriorities: Map<string, Priority[]>;
-    weekTodos: Map<string, Todo[]>;
-    onDateSelect: (date: Date) => void;
-    onWeekChange: (direction: 'prev' | 'next') => void;
-}) {
-    const getWeekStart = (date: Date): Date => {
-        const d = new Date(date);
-        const day = d.getDay();
-        const diff = d.getDate() - day;
-        return new Date(d.setDate(diff));
-    };
-
-    const getWeekDays = (): Date[] => {
-        const start = getWeekStart(currentWeek);
-        const days: Date[] = [];
-        for (let i = 0; i < 7; i++) {
-            const day = new Date(start);
-            day.setDate(start.getDate() + i);
-            days.push(day);
-        }
-        return days;
-    };
-
-    const weekDays = getWeekDays();
-
-    return (
-        <section className="space-y-4">
-            <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold">Calendar Overview</h2>
-                <div className="flex gap-2">
-                    <button
-                        onClick={() => onWeekChange('prev')}
-                        className="rounded-md border border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-800 transition-colors"
-                    >
-                        ← Prev
-                    </button>
-                    <button
-                        onClick={() => onWeekChange('next')}
-                        className="rounded-md border border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-800 transition-colors"
-                    >
-                        Next →
-                    </button>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-7 gap-2">
-                {weekDays.map((day) => {
-                    const dateStr = formatDate(day);
-                    const score = dailyScores.get(dateStr);
-                    const dayPriorities = weekPriorities.get(dateStr) || [];
-                    const dayTodos = weekTodos.get(dateStr) || [];
-                    const isSelected = isSameDay(day, selectedDate);
-                    const isToday = isSameDay(day, new Date());
-
-                    return (
-                        <button
-                            key={dateStr}
-                            onClick={() => onDateSelect(day)}
-                            className={`rounded-lg border p-3 text-left transition-colors ${
-                                isSelected
-                                    ? 'border-amber-500 bg-amber-950/30'
-                                    : 'border-slate-700 hover:border-slate-600'
-                            } ${isToday ? 'ring-2 ring-amber-400' : ''}`}
-                        >
-                            <div className="text-xs font-medium mb-1 text-slate-400">
-                                {day.toLocaleDateString('en-US', { weekday: 'short' })}
-                            </div>
-                            <div className="text-lg font-bold mb-2">{day.getDate()}</div>
-                            {score && (
-                                <>
-                                    <div className="text-sm font-semibold text-amber-400 mb-1">
-                                        {score.score_overall} ({score.grade})
-                                    </div>
-                                    <div className="text-xs text-slate-400 mb-2">
-                                        {getVisualScore(score.score_overall)}
-                                    </div>
-                                </>
-                            )}
-                            {dayPriorities.length > 0 && (
-                                <div className="text-xs text-slate-300 mb-1">
-                                    {dayPriorities.length} priority{dayPriorities.length !== 1 ? 'ies' : 'y'}
-                                </div>
-                            )}
-                            {dayTodos.length > 0 && (
-                                <div className="text-xs text-slate-300">
-                                    {dayTodos.length} todo{dayTodos.length !== 1 ? 's' : ''}
-                                </div>
-                            )}
-                        </button>
-                    );
-                })}
-            </div>
-        </section>
-    );
-}
-
-// Daily Plan Section Component
-function DailyPlanSection({
-    date,
-    habitTemplates,
-    habitEntries,
-    priorities,
-    todos,
-    dailyContent,
-    goals,
-    scoringSettings,
-    onDataChange,
-}: {
-    date: Date;
-    habitTemplates: HabitTemplate[];
-    habitEntries: HabitEntry[];
-    priorities: Priority[];
-    todos: Todo[];
-    dailyContent: DailyContent | null;
-    goals: Goal[];
-    scoringSettings: { habits_weight: number; priorities_weight: number; todos_weight: number };
-    onDataChange: () => void;
-}) {
-    const [newPriority, setNewPriority] = useState('');
-    const [newPriorityGoalId, setNewPriorityGoalId] = useState<string | null>(null);
-    const [newTodo, setNewTodo] = useState('');
-    const [newTodoGoalId, setNewTodoGoalId] = useState<string | null>(null);
-    const [editingContent, setEditingContent] = useState<DailyContent>({
-        lessons: dailyContent?.lessons || '',
-        ideas: dailyContent?.ideas || '',
-        notes: dailyContent?.notes || '',
-        distractions: dailyContent?.distractions || '',
-        reflection: dailyContent?.reflection || '',
-        news_updates: dailyContent?.news_updates || '',
-    });
-
-    const dateStr = formatDate(date);
-    const dateEntries = habitEntries.filter(e => e.date === dateStr);
-    const habitsWithEntries = habitTemplates.map(template => {
-        const entry = dateEntries.find(e => e.habit_template_id === template.id);
-        return {
-            ...template,
-            entry: entry || null,
-            status: (entry?.status || 'missed') as HabitStatus,
-        };
-    });
-
-    // Calculate scores
-    const habitsScore = calculateItemScore(
-        habitsWithEntries.map(h => ({ status: h.status })),
-        habitsWithEntries.length
-    );
-    const prioritiesScore = calculateItemScore(
-        priorities.map(p => ({ completed: p.completed })),
-        priorities.length
-    );
-    const todosScore = calculateItemScore(
-        todos.map(t => ({ is_done: t.is_done })),
-        todos.length
-    );
-
-    const overallScore = Math.round(
-        (habitsScore * scoringSettings.habits_weight +
-         prioritiesScore * scoringSettings.priorities_weight +
-         todosScore * scoringSettings.todos_weight) / 100
-    );
-    const grade = getGrade(overallScore);
-
-    const handleHabitToggle = async (templateId: string, currentStatus: HabitStatus) => {
-        const nextStatus: HabitStatus = currentStatus === 'missed' ? 'half' : currentStatus === 'half' ? 'checked' : 'missed';
-        
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            const existingEntry = dateEntries.find(e => e.habit_template_id === templateId);
-            
-            if (existingEntry) {
-                await supabase
-                    .from('habit_daily_entries')
-                    .update({ status: nextStatus })
-                    .eq('id', existingEntry.id);
-            } else {
-                await supabase
-                    .from('habit_daily_entries')
-                    .insert({
-                        user_id: user.id,
-                        date: dateStr,
-                        habit_template_id: templateId,
-                        status: nextStatus,
-                    });
-            }
-            
-            await saveDailyScore();
-            onDataChange();
-        } catch (error) {
-            console.error('Error updating habit:', error);
-        }
-    };
-
-    const handleAddPriority = async () => {
-        if (!newPriority.trim()) return;
-        if (priorities.length >= 5) {
-            alert('Maximum 5 priorities per day');
-            return;
-        }
-
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            await supabase
-                .from('habit_daily_priorities')
-                .insert({
-                    user_id: user.id,
-                    date: dateStr,
-                    text: newPriority,
-                    completed: false,
-                    goal_id: newPriorityGoalId,
-                });
-
-            setNewPriority('');
-            setNewPriorityGoalId(null);
-            await saveDailyScore();
-            onDataChange();
-        } catch (error) {
-            console.error('Error adding priority:', error);
-        }
-    };
-
-    const handleTogglePriority = async (id: string, completed: boolean) => {
-        try {
-            await supabase
-                .from('habit_daily_priorities')
-                .update({ completed: !completed })
-                .eq('id', id);
-            
-            await saveDailyScore();
-            onDataChange();
-        } catch (error) {
-            console.error('Error updating priority:', error);
-        }
-    };
-
-    const handleAddTodo = async () => {
-        if (!newTodo.trim()) return;
-
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            await supabase
-                .from('habit_daily_todos')
-                .insert({
-                    user_id: user.id,
-                    date: dateStr,
-                    title: newTodo,
-                    is_done: false,
-                    goal_id: newTodoGoalId,
-                });
-
-            setNewTodo('');
-            setNewTodoGoalId(null);
-            await saveDailyScore();
-            onDataChange();
-        } catch (error) {
-            console.error('Error adding todo:', error);
-        }
-    };
-
-    const handleToggleTodo = async (id: string, isDone: boolean) => {
-        try {
-            await supabase
-                .from('habit_daily_todos')
-                .update({ is_done: !isDone })
-                .eq('id', id);
-            
-            await saveDailyScore();
-            onDataChange();
-        } catch (error) {
-            console.error('Error updating todo:', error);
-        }
-    };
-
-    const handleSaveContent = async () => {
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            await supabase
-                .from('habit_daily_content')
-                .upsert({
-                    user_id: user.id,
-                    date: dateStr,
-                    ...editingContent,
-                });
-            
-            onDataChange();
-        } catch (error) {
-            console.error('Error saving content:', error);
-        }
-    };
-
-    const saveDailyScore = async () => {
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            await supabase
-                .from('habit_daily_scores')
-                .upsert({
-                    user_id: user.id,
-                    date: dateStr,
-                    score_overall: overallScore,
-                    grade: grade,
-                    score_habits: habitsScore,
-                    score_priorities: prioritiesScore,
-                    score_todos: todosScore,
-                    score_physical: 0,
-                    score_mental: 0,
-                    score_spiritual: 0,
-                    score_morning: 0,
-                    score_afternoon: 0,
-                    score_evening: 0,
-                });
-        } catch (error) {
-            console.error('Error saving score:', error);
-        }
-    };
-
-    return (
-        <section className="space-y-6">
-            <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold">
-                    Daily Plan - {date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
-                </h2>
-                <div className="text-right">
-                    <div className="text-3xl font-bold text-amber-400">{overallScore}</div>
-                    <div className="text-lg font-semibold text-amber-300">Grade: {grade}</div>
-                </div>
-            </div>
-
-            {/* Score Breakdown */}
-            <div className="grid grid-cols-3 gap-4 rounded-lg border border-slate-700 bg-slate-900 p-4">
-                <div className="text-center">
-                    <div className="text-xs text-slate-400 mb-1">Habits ({scoringSettings.habits_weight}%)</div>
-                    <div className="text-2xl font-bold text-blue-400">{habitsScore}</div>
-                </div>
-                <div className="text-center">
-                    <div className="text-xs text-slate-400 mb-1">Priorities ({scoringSettings.priorities_weight}%)</div>
-                    <div className="text-2xl font-bold text-purple-400">{prioritiesScore}</div>
-                </div>
-                <div className="text-center">
-                    <div className="text-xs text-slate-400 mb-1">Todos ({scoringSettings.todos_weight}%)</div>
-                    <div className="text-2xl font-bold text-green-400">{todosScore}</div>
-                </div>
-            </div>
-
-            {/* Habits */}
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-2">
-                <h3 className="font-semibold mb-3">Habits</h3>
-                {habitsWithEntries.map((habit) => (
-                    <label key={habit.id} className="flex items-center gap-3 cursor-pointer">
-                        <input
-                            type="checkbox"
-                            checked={habit.status === 'checked'}
-                            onChange={() => handleHabitToggle(habit.id, habit.status)}
-                            className="h-5 w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500"
-                        />
-                        <span className="text-lg mr-2">{habit.icon}</span>
-                        <span className="flex-1 text-white">{habit.name}</span>
-                    </label>
-                ))}
-            </div>
-
-            {/* Priorities (Max 5) */}
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-2">
-                <h3 className="font-semibold mb-3">Priorities (Max 5)</h3>
-                {priorities.map((priority) => {
-                    const linkedGoal = goals.find(g => g.id === priority.goal_id);
-                    return (
-                        <label key={priority.id} className="flex items-center gap-3 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={priority.completed}
-                                onChange={() => handleTogglePriority(priority.id, priority.completed)}
-                                className="h-5 w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500"
-                            />
-                            <span className="flex-1 text-white">{priority.text}</span>
-                            {linkedGoal && (
-                                <span className="text-xs text-slate-400">→ {linkedGoal.name}</span>
-                            )}
-                        </label>
-                    );
-                })}
-                {priorities.length < 5 && (
-                    <div className="flex gap-2 mt-3">
-                        <input
-                            type="text"
-                            placeholder="Add priority"
-                            value={newPriority}
-                            onChange={(e) => setNewPriority(e.target.value)}
-                            onKeyPress={(e) => e.key === 'Enter' && handleAddPriority()}
-                            className="flex-1 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
-                        />
-                        <select
-                            value={newPriorityGoalId || ''}
-                            onChange={(e) => setNewPriorityGoalId(e.target.value || null)}
-                            className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-                        >
-                            <option value="">Link to goal (optional)</option>
-                            {goals.map(goal => (
-                                <option key={goal.id} value={goal.id}>{goal.name}</option>
-                            ))}
-                        </select>
-                        <button
-                            onClick={handleAddPriority}
-                            className="rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-black hover:bg-amber-400 transition-colors"
-                        >
-                            Add
-                        </button>
-                    </div>
-                )}
-            </div>
-
-            {/* To-Do List */}
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-2">
-                <h3 className="font-semibold mb-3">To-Do List</h3>
-                {todos.map((todo) => {
-                    const linkedGoal = goals.find(g => g.id === todo.goal_id);
-                    return (
-                        <label key={todo.id} className="flex items-center gap-3 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={todo.is_done}
-                                onChange={() => handleToggleTodo(todo.id, todo.is_done)}
-                                className="h-5 w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500"
-                            />
-                            <span className="flex-1 text-white">{todo.title}</span>
-                            {linkedGoal && (
-                                <span className="text-xs text-slate-400">→ {linkedGoal.name}</span>
-                            )}
-                        </label>
-                    );
-                })}
-                <div className="flex gap-2 mt-3">
-                    <input
-                        type="text"
-                        placeholder="Add todo"
-                        value={newTodo}
-                        onChange={(e) => setNewTodo(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && handleAddTodo()}
-                        className="flex-1 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
-                    />
-                    <select
-                        value={newTodoGoalId || ''}
-                        onChange={(e) => setNewTodoGoalId(e.target.value || null)}
-                        className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-                    >
-                        <option value="">Link to goal (optional)</option>
-                        {goals.map(goal => (
-                            <option key={goal.id} value={goal.id}>{goal.name}</option>
-                        ))}
-                    </select>
-                    <button
-                        onClick={handleAddTodo}
-                        className="rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-black hover:bg-amber-400 transition-colors"
-                    >
-                        Add
-                    </button>
-                </div>
-            </div>
-
-            {/* Daily Content Fields */}
-            <div className="space-y-4">
-                <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-                    <h3 className="font-semibold mb-2">Notes</h3>
-                    <textarea
-                        value={editingContent.notes || ''}
-                        onChange={(e) => setEditingContent({ ...editingContent, notes: e.target.value })}
-                        onBlur={handleSaveContent}
-                        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
-                        rows={3}
-                        placeholder="Free text notes..."
-                    />
-                </div>
-
-                <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-                    <h3 className="font-semibold mb-2">Lessons</h3>
-                    <textarea
-                        value={editingContent.lessons || ''}
-                        onChange={(e) => setEditingContent({ ...editingContent, lessons: e.target.value })}
-                        onBlur={handleSaveContent}
-                        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
-                        rows={3}
-                        placeholder="Lessons learned today..."
-                    />
-                </div>
-
-                <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-                    <h3 className="font-semibold mb-2">News Updates</h3>
-                    <textarea
-                        value={editingContent.news_updates || ''}
-                        onChange={(e) => setEditingContent({ ...editingContent, news_updates: e.target.value })}
-                        onBlur={handleSaveContent}
-                        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
-                        rows={3}
-                        placeholder="News updates or short bullets..."
-                    />
-                </div>
-
-                <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-                    <h3 className="font-semibold mb-2">Reflection</h3>
-                    <textarea
-                        value={editingContent.reflection || ''}
-                        onChange={(e) => setEditingContent({ ...editingContent, reflection: e.target.value })}
-                        onBlur={handleSaveContent}
-                        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
-                        rows={4}
-                        placeholder="Daily reflection..."
-                    />
-                </div>
-            </div>
-        </section>
-    );
-}
-
-// Goal Detail Modal Component
-function GoalDetailModal({
-    goalId,
-    goals,
-    onClose,
-    onRefresh,
-}: {
-    goalId: string;
-    goals: Goal[];
-    onClose: () => void;
-    onRefresh: () => void;
-}) {
-    const goal = goals.find(g => g.id === goalId);
-    const [milestones, setMilestones] = useState<any[]>([]);
-    const [linkedHabits, setLinkedHabits] = useState<HabitTemplate[]>([]);
-    const [linkedPriorities, setLinkedPriorities] = useState<Priority[]>([]);
-    const [linkedTodos, setLinkedTodos] = useState<Todo[]>([]);
-
-    useEffect(() => {
-        if (goal) {
-            loadGoalDetails();
-        }
-    }, [goal]);
-
-    const loadGoalDetails = async () => {
-        if (!goal) return;
-
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            // Load milestones
-            const { data: milestonesData } = await supabase
-                .from('habit_milestones')
-                .select('*')
-                .eq('user_id', user.id)
-                .eq('goal_id', goal.id);
-
-            // Load linked habits
-            const { data: habitsData } = await supabase
-                .from('habit_templates')
-                .select('*')
-                .eq('user_id', user.id)
-                .eq('goal_id', goal.id)
-                .eq('is_active', true);
-
-            // Load recent linked priorities and todos (last 30 days)
-            const thirtyDaysAgo = new Date();
-            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-            const thirtyDaysAgoStr = formatDate(thirtyDaysAgo);
-            
-            const { data: prioritiesData } = await supabase
-                .from('habit_daily_priorities')
-                .select('*')
-                .eq('user_id', user.id)
-                .eq('goal_id', goal.id)
-                .gte('date', thirtyDaysAgoStr)
-                .order('date', { ascending: false })
-                .limit(20);
-
-            const { data: todosData } = await supabase
-                .from('habit_daily_todos')
-                .select('*')
-                .eq('user_id', user.id)
-                .eq('goal_id', goal.id)
-                .gte('date', thirtyDaysAgoStr)
-                .order('date', { ascending: false })
-                .limit(20);
-
-            setMilestones(milestonesData || []);
-            setLinkedHabits(habitsData || []);
-            setLinkedPriorities(prioritiesData || []);
-            setLinkedTodos(todosData || []);
-        } catch (error) {
-            console.error('Error loading goal details:', error);
-        }
-    };
-
-    if (!goal) return null;
-
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="max-w-2xl w-full max-h-[90vh] overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 p-6 space-y-6">
-                <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                        <h2 className="text-2xl font-bold text-white mb-2">{goal.name}</h2>
-                        {goal.description && (
-                            <p className="text-slate-300 mb-4">{goal.description}</p>
-                        )}
-                        <div className="flex items-center gap-4 text-sm text-slate-400">
-                            {goal.category && <span className="capitalize">{goal.category}</span>}
-                            <span>Priority: {goal.priority_score}</span>
-                            {goal.deadline && (
-                                <span>Deadline: {new Date(goal.deadline).toLocaleDateString()}</span>
-                            )}
-                        </div>
-                    </div>
-                    <button
-                        onClick={onClose}
-                        className="rounded-md border border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-800 transition-colors"
-                    >
-                        Close
-                    </button>
-                </div>
-
-                {/* Milestones */}
-                <div>
-                    <h3 className="font-semibold mb-3">Milestones</h3>
-                    {milestones.length === 0 ? (
-                        <p className="text-sm text-slate-400">No milestones yet</p>
-                    ) : (
-                        <div className="space-y-2">
-                            {milestones.map((milestone) => (
-                                <div key={milestone.id} className="rounded-md border border-slate-700 bg-slate-800 p-3">
-                                    <div className="font-medium text-white">{milestone.name}</div>
-                                    <div className="text-sm text-slate-400">
-                                        Current: {milestone.current_value} / {JSON.parse(milestone.values).join(', ')}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-
-                {/* Linked Habits */}
-                <div>
-                    <h3 className="font-semibold mb-3">Linked Habits</h3>
-                    {linkedHabits.length === 0 ? (
-                        <p className="text-sm text-slate-400">No habits linked to this goal</p>
-                    ) : (
-                        <div className="space-y-2">
-                            {linkedHabits.map((habit) => (
-                                <div key={habit.id} className="flex items-center gap-2 text-sm text-white">
-                                    <span>{habit.icon}</span>
-                                    <span>{habit.name}</span>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-
-                {/* Recent Linked Priorities */}
-                <div>
-                    <h3 className="font-semibold mb-3">Recent Priorities</h3>
-                    {linkedPriorities.length === 0 ? (
-                        <p className="text-sm text-slate-400">No priorities linked to this goal</p>
-                    ) : (
-                        <div className="space-y-2">
-                            {linkedPriorities.map((priority) => (
-                                <div key={priority.id} className="text-sm text-white">
-                                    {priority.text} <span className="text-slate-400">({priority.date})</span>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-
-                {/* Recent Linked Todos */}
-                <div>
-                    <h3 className="font-semibold mb-3">Recent Todos</h3>
-                    {linkedTodos.length === 0 ? (
-                        <p className="text-sm text-slate-400">No todos linked to this goal</p>
-                    ) : (
-                        <div className="space-y-2">
-                            {linkedTodos.map((todo) => (
-                                <div key={todo.id} className="text-sm text-white">
-                                    {todo.title} <span className="text-slate-400">({todo.date})</span>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-}
-
-// Scoring Settings Section Component
-function ScoringSettingsSection({
-    scoringSettings,
-    onSettingsChange,
-}: {
-    scoringSettings: { habits_weight: number; priorities_weight: number; todos_weight: number };
-    onSettingsChange: (settings: { habits_weight: number; priorities_weight: number; todos_weight: number }) => void;
-}) {
-    const [editingSettings, setEditingSettings] = useState(scoringSettings);
-    const [saving, setSaving] = useState(false);
-    const [showSettings, setShowSettings] = useState(false);
-
-    const handleSave = async () => {
-        // Validate that weights sum to 100
-        const total = editingSettings.habits_weight + editingSettings.priorities_weight + editingSettings.todos_weight;
-        if (Math.abs(total - 100) > 0.01) {
-            alert(`Weights must sum to 100. Current total: ${total.toFixed(2)}`);
-            return;
-        }
-
-        setSaving(true);
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            await supabase
-                .from('habit_scoring_settings')
-                .upsert({
-                    user_id: user.id,
-                    habits_weight: editingSettings.habits_weight,
-                    priorities_weight: editingSettings.priorities_weight,
-                    todos_weight: editingSettings.todos_weight,
-                });
-
-            onSettingsChange(editingSettings);
-            setShowSettings(false);
-        } catch (error) {
-            console.error('Error saving scoring settings:', error);
-            alert('Error saving settings');
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    return (
-        <section className="space-y-4">
-            <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold">Scoring Settings</h2>
-                <button
-                    onClick={() => setShowSettings(!showSettings)}
-                    className="rounded-md border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800 transition-colors"
-                >
-                    {showSettings ? 'Hide' : 'Edit'}
-                </button>
-            </div>
-
-            {showSettings ? (
-                <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-4">
-                    <div className="grid grid-cols-3 gap-4">
-                        <div>
-                            <label className="block text-sm text-slate-400 mb-2">Habits Weight (%)</label>
-                            <input
-                                type="number"
-                                min="0"
-                                max="100"
-                                step="0.01"
-                                value={editingSettings.habits_weight}
-                                onChange={(e) => setEditingSettings({
-                                    ...editingSettings,
-                                    habits_weight: parseFloat(e.target.value) || 0,
-                                })}
-                                className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm text-slate-400 mb-2">Priorities Weight (%)</label>
-                            <input
-                                type="number"
-                                min="0"
-                                max="100"
-                                step="0.01"
-                                value={editingSettings.priorities_weight}
-                                onChange={(e) => setEditingSettings({
-                                    ...editingSettings,
-                                    priorities_weight: parseFloat(e.target.value) || 0,
-                                })}
-                                className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm text-slate-400 mb-2">Todos Weight (%)</label>
-                            <input
-                                type="number"
-                                min="0"
-                                max="100"
-                                step="0.01"
-                                value={editingSettings.todos_weight}
-                                onChange={(e) => setEditingSettings({
-                                    ...editingSettings,
-                                    todos_weight: parseFloat(e.target.value) || 0,
-                                })}
-                                className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-                            />
-                        </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                        <div className="text-sm text-slate-400">
-                            Total: {(editingSettings.habits_weight + editingSettings.priorities_weight + editingSettings.todos_weight).toFixed(2)}%
-                        </div>
-                        <div className="flex gap-2">
-                            <button
-                                onClick={() => {
-                                    setEditingSettings(scoringSettings);
-                                    setShowSettings(false);
-                                }}
-                                className="rounded-md border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800 transition-colors"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={handleSave}
-                                disabled={saving}
-                                className="rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-black hover:bg-amber-400 transition-colors disabled:opacity-50"
-                            >
-                                {saving ? 'Saving...' : 'Save'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            ) : (
-                <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-                    <div className="grid grid-cols-3 gap-4 text-center">
-                        <div>
-                            <div className="text-sm text-slate-400 mb-1">Habits</div>
-                            <div className="text-2xl font-bold text-blue-400">{scoringSettings.habits_weight}%</div>
-                        </div>
-                        <div>
-                            <div className="text-sm text-slate-400 mb-1">Priorities</div>
-                            <div className="text-2xl font-bold text-purple-400">{scoringSettings.priorities_weight}%</div>
-                        </div>
-                        <div>
-                            <div className="text-sm text-slate-400 mb-1">Todos</div>
-                            <div className="text-2xl font-bold text-green-400">{scoringSettings.todos_weight}%</div>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </section>
     );
 }

@@ -158,8 +158,12 @@ export async function getBudgetGroupsForMonth(
                 // For income, positive amounts represent earnings
                 // Activity = positive amounts (money earned)
                 activityByCategoryId.set(tx.category_id, current + Math.max(0, tx.amount));
+            } else if (category.type === 'transfer') {
+                // For savings/investing: use absolute value (positive amount saved)
+                // Transfers to savings accounts are typically negative (money leaving), but we want positive "saved"
+                activityByCategoryId.set(tx.category_id, current + Math.abs(tx.amount));
             } else {
-                // For transfers or unknown, use absolute value
+                // For unknown, use absolute value
                 activityByCategoryId.set(tx.category_id, current + Math.abs(tx.amount));
             }
         } else {
@@ -208,8 +212,13 @@ export async function getBudgetGroupsForMonth(
                 // Example: budget $1000, earned $500 → available = 1000 - 500 = 500
                 assigned = rawAssigned;
                 available = assigned - activity;
+            } else if (group.type === 'transfer') {
+                // For savings/investing: assigned can be positive or negative, but we treat as positive savings
+                // Activity is positive (amount saved this month)
+                assigned = Math.abs(rawAssigned); // Always positive for savings
+                available = assigned - activity;
             } else {
-                // For transfers or unknown: use absolute values
+                // For unknown: use absolute values
                 assigned = rawAssigned;
                 available = Math.abs(assigned) - activity;
             }
@@ -226,9 +235,13 @@ export async function getBudgetGroupsForMonth(
         // Calculate group totals
         // For expenses, we need to sum absolute values of assigned for totals
         // For income, we sum positive values
+        // For transfers/savings, we sum absolute values (savings are positive)
         const totalAssigned = categoryRows.reduce((sum, row) => {
             if (group.type === 'expense') {
                 // For expenses, assigned is negative, but we want to show positive total
+                return sum + Math.abs(row.assigned);
+            } else if (group.type === 'transfer') {
+                // For savings/investing, use absolute values
                 return sum + Math.abs(row.assigned);
             } else {
                 // For income, assigned is positive

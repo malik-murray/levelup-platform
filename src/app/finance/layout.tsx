@@ -14,6 +14,7 @@ const financeTabs = [
     { href: '/finance/transactions', label: 'Transactions' },
     { href: '/finance/budget', label: 'Budget' },
     { href: '/finance/reports', label: 'Reports' },
+    { href: '/finance/concierge', label: 'Concierge' },
     { href: '/finance/settings/integrations', label: 'Settings' },
 ];
 
@@ -63,7 +64,9 @@ export default function FinanceLayout({
                 <nav className="mx-auto max-w-6xl overflow-x-auto px-4 pb-3 sm:px-6 scrollbar-hide">
                     <div className="flex gap-2 min-w-max sm:min-w-0">
                         {financeTabs.map(tab => {
-                            const isActive = pathname === tab.href || (tab.href === '/finance/settings/integrations' && pathname?.startsWith('/finance/settings'));
+                            const isActive = pathname === tab.href || 
+                                (tab.href === '/finance/settings/integrations' && pathname?.startsWith('/finance/settings')) ||
+                                (tab.href === '/finance/concierge' && pathname?.startsWith('/finance/concierge'));
 
                             return (
                                 <Link

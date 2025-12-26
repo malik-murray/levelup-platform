@@ -1,0 +1,13 @@
+{
+  "crons": [
+    {
+      "path": "/api/financial-concierge/jobs/monthly-refresh",
+      "schedule": "0 2 1 * *"
+    },
+    {
+      "path": "/api/financial-concierge/jobs/weekly-insights",
+      "schedule": "0 3 * * 1"
+    }
+  ]
+}
+
