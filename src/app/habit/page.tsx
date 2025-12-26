@@ -2819,6 +2819,7 @@ function HabitsManagementView({
                 .from('habit_goals')
                 .select('*')
                 .eq('user_id', user.id)
+                .eq('is_completed', false)
                 .order('name');
 
             setGoals(goalsData || []);
@@ -3056,16 +3057,19 @@ function HabitsManagementView({
                             This is a bad habit (to avoid)
                         </label>
                     </div>
-                    <select
-                        value={formData.goal_id || ''}
-                        onChange={e => setFormData({ ...formData, goal_id: e.target.value || null })}
-                        className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
-                    >
-                        <option value="">No associated goal</option>
-                        {goals.map(goal => (
-                            <option key={goal.id} value={goal.id}>{goal.name}</option>
-                        ))}
-                    </select>
+                    <div className="flex flex-col gap-1">
+                        <label className="text-xs text-slate-400">Link to goal</label>
+                        <select
+                            value={formData.goal_id || ''}
+                            onChange={e => setFormData({ ...formData, goal_id: e.target.value || null })}
+                            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
+                        >
+                            <option value="">No goal</option>
+                            {goals.map(goal => (
+                                <option key={goal.id} value={goal.id}>{goal.name}</option>
+                            ))}
+                        </select>
+                    </div>
                     <div className="flex gap-2">
                         <button
                             onClick={handleSubmit}
