@@ -1751,6 +1751,26 @@ function GoalsView() {
     });
     
     const [categoryFilter, setCategoryFilter] = useState<string>('all');
+    const [selectedGoals, setSelectedGoals] = useState<Set<string>>(new Set());
+    const [showBulkEditModal, setShowBulkEditModal] = useState(false);
+    const [bulkEditData, setBulkEditData] = useState<{
+        category: string | null;
+        priority_score: number | null;
+        deadline: string | null | '__clear__';
+        is_completed: boolean | null;
+    }>({
+        category: null,
+        priority_score: null,
+        deadline: null,
+        is_completed: null,
+    });
+    const [selectedMilestones, setSelectedMilestones] = useState<Set<string>>(new Set());
+    const [showBulkEditMilestoneModal, setShowBulkEditMilestoneModal] = useState(false);
+    const [bulkEditMilestoneData, setBulkEditMilestoneData] = useState<{
+        is_completed: boolean | null;
+    }>({
+        is_completed: null,
+    });
     
     const [goalMilestones, setGoalMilestones] = useState<Array<{
         id?: string;
@@ -2139,6 +2159,184 @@ function GoalsView() {
         }
     };
 
+    const handleToggleSelect = (goalId: string) => {
+        const newSelected = new Set(selectedGoals);
+        if (newSelected.has(goalId)) {
+            newSelected.delete(goalId);
+        } else {
+            newSelected.add(goalId);
+        }
+        setSelectedGoals(newSelected);
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedGoals.size === 0) return;
+        
+        const count = selectedGoals.size;
+        if (!confirm(`Are you sure you want to delete ${count} goal${count !== 1 ? 's' : ''}? This will also delete all milestones and linked habits for these goals.`)) {
+            return;
+        }
+
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const goalIds = Array.from(selectedGoals);
+            
+            // Delete milestones for these goals
+            await supabase
+                .from('habit_milestones')
+                .delete()
+                .in('goal_id', goalIds)
+                .eq('user_id', user.id);
+
+            // Delete the goals
+            await supabase
+                .from('habit_goals')
+                .delete()
+                .in('id', goalIds)
+                .eq('user_id', user.id);
+            
+            setSelectedGoals(new Set());
+            loadGoals();
+        } catch (error) {
+            console.error('Error deleting goals:', error);
+            alert('Error deleting goals. Please try again.');
+        }
+    };
+
+    const handleBulkEdit = async () => {
+        if (selectedGoals.size === 0) return;
+
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const goalIds = Array.from(selectedGoals);
+            const updates: any = {};
+
+            // Only update fields that have been changed (not null)
+            if (bulkEditData.category !== null) {
+                if (bulkEditData.category === '__clear__') {
+                    updates.category = null;
+                } else {
+                    updates.category = bulkEditData.category || null;
+                }
+            }
+            if (bulkEditData.priority_score !== null) {
+                updates.priority_score = bulkEditData.priority_score;
+            }
+            if (bulkEditData.deadline !== null) {
+                if (bulkEditData.deadline === '__clear__') {
+                    updates.deadline = null;
+                } else {
+                    updates.deadline = bulkEditData.deadline || null;
+                }
+            }
+            if (bulkEditData.is_completed !== null) {
+                updates.is_completed = bulkEditData.is_completed;
+            }
+
+            if (Object.keys(updates).length === 0) {
+                alert('Please select at least one field to update.');
+                return;
+            }
+
+            await supabase
+                .from('habit_goals')
+                .update(updates)
+                .in('id', goalIds)
+                .eq('user_id', user.id);
+
+            setShowBulkEditModal(false);
+            setBulkEditData({
+                category: null,
+                priority_score: null,
+                deadline: null,
+                is_completed: null,
+            });
+            setSelectedGoals(new Set());
+            loadGoals();
+        } catch (error) {
+            console.error('Error updating goals:', error);
+            alert('Error updating goals. Please try again.');
+        }
+    };
+
+    const handleToggleSelectMilestone = (milestoneId: string) => {
+        const newSelected = new Set(selectedMilestones);
+        if (newSelected.has(milestoneId)) {
+            newSelected.delete(milestoneId);
+        } else {
+            newSelected.add(milestoneId);
+        }
+        setSelectedMilestones(newSelected);
+    };
+
+    const handleBulkDeleteMilestones = async () => {
+        if (selectedMilestones.size === 0) return;
+        
+        const count = selectedMilestones.size;
+        if (!confirm(`Are you sure you want to delete ${count} milestone${count !== 1 ? 's' : ''}?`)) {
+            return;
+        }
+
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const milestoneIds = Array.from(selectedMilestones);
+            await supabase
+                .from('habit_milestones')
+                .delete()
+                .in('id', milestoneIds)
+                .eq('user_id', user.id);
+            
+            setSelectedMilestones(new Set());
+            loadGoals();
+        } catch (error) {
+            console.error('Error deleting milestones:', error);
+            alert('Error deleting milestones. Please try again.');
+        }
+    };
+
+    const handleBulkEditMilestones = async () => {
+        if (selectedMilestones.size === 0) return;
+
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const milestoneIds = Array.from(selectedMilestones);
+            const updates: any = {};
+
+            if (bulkEditMilestoneData.is_completed !== null) {
+                updates.is_completed = bulkEditMilestoneData.is_completed;
+            }
+
+            if (Object.keys(updates).length === 0) {
+                alert('Please select at least one field to update.');
+                return;
+            }
+
+            await supabase
+                .from('habit_milestones')
+                .update(updates)
+                .in('id', milestoneIds)
+                .eq('user_id', user.id);
+
+            setShowBulkEditMilestoneModal(false);
+            setBulkEditMilestoneData({
+                is_completed: null,
+            });
+            setSelectedMilestones(new Set());
+            loadGoals();
+        } catch (error) {
+            console.error('Error updating milestones:', error);
+            alert('Error updating milestones. Please try again.');
+        }
+    };
+
     const addMilestoneToForm = () => {
         setGoalMilestones([...goalMilestones, { name: '', values: '' }]);
     };
@@ -2208,13 +2406,40 @@ function GoalsView() {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <h2 className="text-2xl font-bold">Goals & Milestones</h2>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
+                    {selectedGoals.size > 0 && (
+                        <>
+                            <span className="text-sm text-slate-400">{selectedGoals.size} selected</span>
+                            <button
+                                onClick={() => {
+                                    setBulkEditData({
+                                        category: null,
+                                        priority_score: null,
+                                        deadline: null,
+                                        is_completed: null,
+                                    });
+                                    setShowBulkEditModal(true);
+                                }}
+                                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                            >
+                                Bulk Edit
+                            </button>
+                            <button
+                                onClick={handleBulkDelete}
+                                className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+                            >
+                                Delete Selected
+                            </button>
+                        </>
+                    )}
                     <button
                         onClick={() => {
                             setShowArchived(!showArchived);
                             setEditingGoal(null);
                             setShowGoalForm(false);
                             setGoalMilestones([]);
+                            setSelectedGoals(new Set());
+                            setSelectedMilestones(new Set());
                         }}
                         className={`rounded-md border px-4 py-2 text-sm font-semibold ${
                             showArchived 
@@ -2584,11 +2809,40 @@ function GoalsView() {
                             const categoryGoals = goalsByCategory[category];
                             if (categoryGoals.length === 0) return null;
                             
+                            const categorySelectedCount = categoryGoals.filter(g => selectedGoals.has(g.id)).length;
+                            const allCategorySelected = categoryGoals.length > 0 && categorySelectedCount === categoryGoals.length;
+                            const someCategorySelected = categorySelectedCount > 0 && categorySelectedCount < categoryGoals.length;
+                            
                             return (
                                 <div key={category}>
-                                    <h3 className="text-lg font-semibold mb-3 capitalize text-slate-300">
-                                        {category.charAt(0).toUpperCase() + category.slice(1)} Goals
-                                    </h3>
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h3 className="text-lg font-semibold capitalize text-slate-300">
+                                            {category.charAt(0).toUpperCase() + category.slice(1)} Goals
+                                        </h3>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={allCategorySelected}
+                                                onChange={(e) => {
+                                                    e.target.indeterminate = false;
+                                                    if (allCategorySelected) {
+                                                        const newSelected = new Set(selectedGoals);
+                                                        categoryGoals.forEach(g => newSelected.delete(g.id));
+                                                        setSelectedGoals(newSelected);
+                                                    } else {
+                                                        const newSelected = new Set(selectedGoals);
+                                                        categoryGoals.forEach(g => newSelected.add(g.id));
+                                                        setSelectedGoals(newSelected);
+                                                    }
+                                                }}
+                                                ref={(input) => {
+                                                    if (input) input.indeterminate = someCategorySelected;
+                                                }}
+                                                className="rounded border-slate-600"
+                                            />
+                                            <span className="text-xs text-slate-400">Select All</span>
+                                        </div>
+                                    </div>
                                     <div className="space-y-4">
                                         {categoryGoals.map(goal => {
                                             const goalSubGoals = subGoals.filter(sg => sg.parent_goal_id === goal.id);
@@ -2598,9 +2852,17 @@ function GoalsView() {
                                             return (
                                                 <div key={goal.id} className="rounded-lg border border-slate-800 bg-slate-950 p-4">
                                                     <div className="flex items-start justify-between mb-2">
-                                                        <div className="flex-1">
-                                                            <div className="flex items-center gap-2">
-                                                                <h3 className="text-lg font-semibold">{goal.name}</h3>
+                                                        <div className="flex items-center gap-2 flex-1">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={selectedGoals.has(goal.id)}
+                                                                onChange={() => handleToggleSelect(goal.id)}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                                className="rounded border-slate-600"
+                                                            />
+                                                            <div className="flex-1">
+                                                                <div className="flex items-center gap-2">
+                                                                    <h3 className="text-lg font-semibold">{goal.name}</h3>
                                                                 {goal.category && (
                                                                     <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded capitalize">
                                                                         {goal.category}
@@ -2609,10 +2871,11 @@ function GoalsView() {
                                                                 {goal.is_completed && (
                                                                     <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">Completed</span>
                                                                 )}
+                                                                </div>
+                                                                {goal.description && (
+                                                                    <p className="text-sm text-slate-400 mt-1">{goal.description}</p>
+                                                                )}
                                                             </div>
-                                                            {goal.description && (
-                                                                <p className="text-sm text-slate-400 mt-1">{goal.description}</p>
-                                                            )}
                                                         </div>
                                                         <div className="flex gap-2">
                                                             <button
@@ -2667,10 +2930,40 @@ function GoalsView() {
 
                                                     {goalMilestones.length > 0 && (
                                                         <div className="mt-3 space-y-2">
-                                                            <div className="text-xs text-slate-400 mb-1">Milestones:</div>
+                                                            <div className="flex items-center justify-between mb-1">
+                                                                <div className="text-xs text-slate-400">Milestones:</div>
+                                                                {!showArchived && selectedMilestones.size > 0 && (
+                                                                    <div className="flex gap-1">
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                setBulkEditMilestoneData({ is_completed: null });
+                                                                                setShowBulkEditMilestoneModal(true);
+                                                                            }}
+                                                                            className="text-xs text-blue-400 hover:text-blue-300"
+                                                                        >
+                                                                            Bulk Edit ({selectedMilestones.size})
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={handleBulkDeleteMilestones}
+                                                                            className="text-xs text-red-400 hover:text-red-300"
+                                                                        >
+                                                                            Delete ({selectedMilestones.size})
+                                                                        </button>
+                                                                    </div>
+                                                                )}
+                                                            </div>
                                                             {goalMilestones.map(milestone => (
                                                                 <div key={milestone.id} className="flex items-center justify-between text-sm text-slate-300">
-                                                                    <div className="flex items-center gap-2">
+                                                                    <div className="flex items-center gap-2 flex-1">
+                                                                        {!showArchived && (
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={selectedMilestones.has(milestone.id)}
+                                                                                onChange={() => handleToggleSelectMilestone(milestone.id)}
+                                                                                onClick={(e) => e.stopPropagation()}
+                                                                                className="rounded border-slate-600"
+                                                                            />
+                                                                        )}
                                                                         {milestone.is_completed && (
                                                                             <span className="text-xs text-green-400">✓</span>
                                                                         )}
@@ -2714,16 +3007,25 @@ function GoalsView() {
                                         return (
                                             <div key={goal.id} className="rounded-lg border border-slate-800 bg-slate-950 p-4">
                                                 <div className="flex items-start justify-between mb-2">
-                                                    <div className="flex-1">
-                                                        <div className="flex items-center gap-2">
-                                                            <h3 className="text-lg font-semibold">{goal.name}</h3>
-                                                            {goal.is_completed && (
-                                                                <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">Completed</span>
+                                                    <div className="flex items-center gap-2 flex-1">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={selectedGoals.has(goal.id)}
+                                                            onChange={() => handleToggleSelect(goal.id)}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            className="rounded border-slate-600"
+                                                        />
+                                                        <div className="flex-1">
+                                                            <div className="flex items-center gap-2">
+                                                                <h3 className="text-lg font-semibold">{goal.name}</h3>
+                                                                {goal.is_completed && (
+                                                                    <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">Completed</span>
+                                                                )}
+                                                            </div>
+                                                            {goal.description && (
+                                                                <p className="text-sm text-slate-400 mt-1">{goal.description}</p>
                                                             )}
                                                         </div>
-                                                        {goal.description && (
-                                                            <p className="text-sm text-slate-400 mt-1">{goal.description}</p>
-                                                        )}
                                                     </div>
                                                     <div className="flex gap-2">
                                                         <button
@@ -2778,10 +3080,40 @@ function GoalsView() {
 
                                                 {goalMilestones.length > 0 && (
                                                     <div className="mt-3 space-y-2">
-                                                        <div className="text-xs text-slate-400 mb-1">Milestones:</div>
+                                                        <div className="flex items-center justify-between mb-1">
+                                                            <div className="text-xs text-slate-400">Milestones:</div>
+                                                            {!showArchived && selectedMilestones.size > 0 && (
+                                                                <div className="flex gap-1">
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            setBulkEditMilestoneData({ is_completed: null });
+                                                                            setShowBulkEditMilestoneModal(true);
+                                                                        }}
+                                                                        className="text-xs text-blue-400 hover:text-blue-300"
+                                                                    >
+                                                                        Bulk Edit ({selectedMilestones.size})
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={handleBulkDeleteMilestones}
+                                                                        className="text-xs text-red-400 hover:text-red-300"
+                                                                    >
+                                                                        Delete ({selectedMilestones.size})
+                                                                    </button>
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                         {goalMilestones.map(milestone => (
                                                             <div key={milestone.id} className="flex items-center justify-between text-sm text-slate-300">
-                                                                <div className="flex items-center gap-2">
+                                                                <div className="flex items-center gap-2 flex-1">
+                                                                    {!showArchived && (
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={selectedMilestones.has(milestone.id)}
+                                                                            onChange={() => handleToggleSelectMilestone(milestone.id)}
+                                                                            onClick={(e) => e.stopPropagation()}
+                                                                            className="rounded border-slate-600"
+                                                                        />
+                                                                    )}
                                                                     {milestone.is_completed && (
                                                                         <span className="text-xs text-green-400">✓</span>
                                                                     )}
@@ -2892,10 +3224,40 @@ function GoalsView() {
 
                             {goalMilestones.length > 0 && (
                                 <div className="mt-3 space-y-2">
-                                    <div className="text-xs text-slate-400 mb-1">Milestones:</div>
+                                    <div className="flex items-center justify-between mb-1">
+                                        <div className="text-xs text-slate-400">Milestones:</div>
+                                        {!showArchived && selectedMilestones.size > 0 && (
+                                            <div className="flex gap-1">
+                                                <button
+                                                    onClick={() => {
+                                                        setBulkEditMilestoneData({ is_completed: null });
+                                                        setShowBulkEditMilestoneModal(true);
+                                                    }}
+                                                    className="text-xs text-blue-400 hover:text-blue-300"
+                                                >
+                                                    Bulk Edit ({selectedMilestones.size})
+                                                </button>
+                                                <button
+                                                    onClick={handleBulkDeleteMilestones}
+                                                    className="text-xs text-red-400 hover:text-red-300"
+                                                >
+                                                    Delete ({selectedMilestones.size})
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
                                     {goalMilestones.map(milestone => (
                                         <div key={milestone.id} className="flex items-center justify-between text-sm text-slate-300">
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2 flex-1">
+                                                {!showArchived && (
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedMilestones.has(milestone.id)}
+                                                        onChange={() => handleToggleSelectMilestone(milestone.id)}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        className="rounded border-slate-600"
+                                                    />
+                                                )}
                                                 {milestone.is_completed && (
                                                     <span className="text-xs text-green-400">✓</span>
                                                 )}
@@ -2937,6 +3299,164 @@ function GoalsView() {
                 )}
 
             </div>
+
+            {/* Bulk Edit Modal for Goals */}
+            {showBulkEditModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowBulkEditModal(false)}>
+                    <div className="bg-slate-900 rounded-lg border border-slate-800 p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-semibold">Bulk Edit Goals</h3>
+                            <button
+                                onClick={() => setShowBulkEditModal(false)}
+                                className="text-slate-400 hover:text-slate-200"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <p className="text-sm text-slate-400 mb-4">
+                            Update {selectedGoals.size} selected goal{selectedGoals.size !== 1 ? 's' : ''}. Leave fields unchanged to keep current values.
+                        </p>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs text-slate-400 mb-1 block">Category</label>
+                                <select
+                                    value={bulkEditData.category || ''}
+                                    onChange={(e) => setBulkEditData({ ...bulkEditData, category: e.target.value || null })}
+                                    className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                                >
+                                    <option value="">-- Keep current / No change --</option>
+                                    <option value="__clear__">-- Remove category --</option>
+                                    {goalCategories.map(cat => (
+                                        <option key={cat} value={cat}>{cat.charAt(0).toUpperCase() + cat.slice(1)}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="text-xs text-slate-400 mb-1 block">Priority Score</label>
+                                <input
+                                    type="number"
+                                    value={bulkEditData.priority_score !== null ? bulkEditData.priority_score : ''}
+                                    onChange={(e) => setBulkEditData({ ...bulkEditData, priority_score: e.target.value === '' ? null : parseInt(e.target.value) || 0 })}
+                                    placeholder="-- Keep current / No change --"
+                                    className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="text-xs text-slate-400 mb-1 block">Deadline</label>
+                                <input
+                                    type="date"
+                                    value={bulkEditData.deadline === '__clear__' ? '' : (bulkEditData.deadline || '')}
+                                    onChange={(e) => setBulkEditData({ ...bulkEditData, deadline: e.target.value || null })}
+                                    className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                                />
+                                {bulkEditData.deadline !== null && (
+                                    <button
+                                        onClick={() => setBulkEditData({ ...bulkEditData, deadline: '__clear__' as any })}
+                                        className="mt-2 text-xs text-slate-400 hover:text-slate-300"
+                                    >
+                                        Clear deadline
+                                    </button>
+                                )}
+                            </div>
+
+                            <div>
+                                <label className="text-xs text-slate-400 mb-1 block">Completion Status</label>
+                                <select
+                                    value={bulkEditData.is_completed === null ? '' : bulkEditData.is_completed ? 'true' : 'false'}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        setBulkEditData({
+                                            ...bulkEditData,
+                                            is_completed: value === '' ? null : value === 'true'
+                                        });
+                                    }}
+                                    className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                                >
+                                    <option value="">-- Keep current / No change --</option>
+                                    <option value="false">Not Completed</option>
+                                    <option value="true">Completed</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2 mt-6">
+                            <button
+                                onClick={handleBulkEdit}
+                                className="flex-1 rounded-md bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300"
+                            >
+                                Apply Changes
+                            </button>
+                            <button
+                                onClick={() => setShowBulkEditModal(false)}
+                                className="rounded-md border border-slate-700 px-4 py-2 text-sm font-semibold hover:bg-slate-800"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Bulk Edit Modal for Milestones */}
+            {showBulkEditMilestoneModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowBulkEditMilestoneModal(false)}>
+                    <div className="bg-slate-900 rounded-lg border border-slate-800 p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-semibold">Bulk Edit Milestones</h3>
+                            <button
+                                onClick={() => setShowBulkEditMilestoneModal(false)}
+                                className="text-slate-400 hover:text-slate-200"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <p className="text-sm text-slate-400 mb-4">
+                            Update {selectedMilestones.size} selected milestone{selectedMilestones.size !== 1 ? 's' : ''}. Leave fields unchanged to keep current values.
+                        </p>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs text-slate-400 mb-1 block">Completion Status</label>
+                                <select
+                                    value={bulkEditMilestoneData.is_completed === null ? '' : bulkEditMilestoneData.is_completed ? 'true' : 'false'}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        setBulkEditMilestoneData({
+                                            ...bulkEditMilestoneData,
+                                            is_completed: value === '' ? null : value === 'true'
+                                        });
+                                    }}
+                                    className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                                >
+                                    <option value="">-- Keep current / No change --</option>
+                                    <option value="false">Not Completed</option>
+                                    <option value="true">Completed</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2 mt-6">
+                            <button
+                                onClick={handleBulkEditMilestones}
+                                className="flex-1 rounded-md bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300"
+                            >
+                                Apply Changes
+                            </button>
+                            <button
+                                onClick={() => setShowBulkEditMilestoneModal(false)}
+                                className="rounded-md border border-slate-700 px-4 py-2 text-sm font-semibold hover:bg-slate-800"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

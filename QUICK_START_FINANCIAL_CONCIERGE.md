@@ -102,3 +102,4 @@ openssl rand -hex 32
 - **Setup Checklist**: `FINANCIAL_CONCIERGE_SETUP_CHECKLIST.md`
 
 
+

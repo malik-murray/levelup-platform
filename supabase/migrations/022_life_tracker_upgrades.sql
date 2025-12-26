@@ -47,3 +47,4 @@ CREATE POLICY "Users can manage their own scoring settings"
     ON habit_scoring_settings FOR ALL
     USING (auth.uid() = user_id);
 
+

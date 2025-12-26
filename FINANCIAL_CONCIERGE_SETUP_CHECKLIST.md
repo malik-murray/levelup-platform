@@ -208,3 +208,4 @@ ML categorization is implemented as a placeholder. To enable:
 - **Setup Guide**: `docs/financial-concierge-setup.md`
 
 
+
