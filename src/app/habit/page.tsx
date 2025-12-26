@@ -2965,6 +2965,13 @@ function HabitsManagementView({
 
     const [goals, setGoals] = useState<any[]>([]);
     const [selectedHabits, setSelectedHabits] = useState<Set<string>>(new Set());
+    const [showBulkEditModal, setShowBulkEditModal] = useState(false);
+    const [bulkEditData, setBulkEditData] = useState({
+        goal_id: null as string | null,
+        category: null as Category | null,
+        time_of_day: null as TimeOfDay | null,
+        is_bad_habit: null as boolean | null,
+    });
 
     useEffect(() => {
         loadGoals();
@@ -3038,6 +3045,63 @@ function HabitsManagementView({
         } catch (error) {
             console.error('Error deleting habits:', error);
             alert('Error deleting habits. Please try again.');
+        }
+    };
+
+    const handleBulkEdit = async () => {
+        if (selectedHabits.size === 0) return;
+
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const habitIds = Array.from(selectedHabits);
+            const updates: any = {};
+
+            // Only update fields that have been changed (not null)
+            if (bulkEditData.goal_id !== null) {
+                if (bulkEditData.goal_id === '__clear__') {
+                    updates.goal_id = null;
+                } else {
+                    updates.goal_id = bulkEditData.goal_id || null;
+                }
+            }
+            if (bulkEditData.category !== null) {
+                updates.category = bulkEditData.category;
+            }
+            if (bulkEditData.time_of_day !== null) {
+                if (bulkEditData.time_of_day === '__clear__' as any) {
+                    updates.time_of_day = null;
+                } else {
+                    updates.time_of_day = bulkEditData.time_of_day as TimeOfDay;
+                }
+            }
+            if (bulkEditData.is_bad_habit !== null) {
+                updates.is_bad_habit = bulkEditData.is_bad_habit;
+            }
+
+            if (Object.keys(updates).length === 0) {
+                alert('Please select at least one field to update.');
+                return;
+            }
+
+            await supabase
+                .from('habit_templates')
+                .update(updates)
+                .in('id', habitIds);
+
+            setShowBulkEditModal(false);
+            setBulkEditData({
+                goal_id: null,
+                category: null,
+                time_of_day: null,
+                is_bad_habit: null,
+            });
+            setSelectedHabits(new Set());
+            onDataChange();
+        } catch (error) {
+            console.error('Error updating habits:', error);
+            alert('Error updating habits. Please try again.');
         }
     };
 
@@ -3212,6 +3276,20 @@ function HabitsManagementView({
                 {selectedHabits.size > 0 && (
                     <div className="flex gap-2 items-center">
                         <span className="text-sm text-slate-400">{selectedHabits.size} selected</span>
+                        <button
+                            onClick={() => {
+                                setBulkEditData({
+                                    goal_id: null,
+                                    category: null,
+                                    time_of_day: null,
+                                    is_bad_habit: null,
+                                });
+                                setShowBulkEditModal(true);
+                            }}
+                            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                        >
+                            Bulk Edit
+                        </button>
                         <button
                             onClick={handleBulkDelete}
                             className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
