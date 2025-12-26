@@ -3169,44 +3169,57 @@ function HabitsManagementView({
                 </button>
             </div>
 
-            {/* Filters */}
-            <div className="flex gap-2 items-center">
-                <div className="flex gap-1 rounded-md border border-slate-700 bg-slate-900 p-1">
-                    <button
-                        onClick={() => setFilter('all')}
-                        className={`px-3 py-1 text-xs rounded ${
-                            filter === 'all' ? 'bg-amber-400 text-black' : 'text-slate-300'
-                        }`}
+            {/* Filters and Bulk Actions */}
+            <div className="flex gap-2 items-center justify-between">
+                <div className="flex gap-2 items-center">
+                    <div className="flex gap-1 rounded-md border border-slate-700 bg-slate-900 p-1">
+                        <button
+                            onClick={() => setFilter('all')}
+                            className={`px-3 py-1 text-xs rounded ${
+                                filter === 'all' ? 'bg-amber-400 text-black' : 'text-slate-300'
+                            }`}
+                        >
+                            All
+                        </button>
+                        <button
+                            onClick={() => setFilter('good')}
+                            className={`px-3 py-1 text-xs rounded ${
+                                filter === 'good' ? 'bg-amber-400 text-black' : 'text-slate-300'
+                            }`}
+                        >
+                            Good Habits
+                        </button>
+                        <button
+                            onClick={() => setFilter('bad')}
+                            className={`px-3 py-1 text-xs rounded ${
+                                filter === 'bad' ? 'bg-amber-400 text-black' : 'text-slate-300'
+                            }`}
+                        >
+                            Bad Habits
+                        </button>
+                    </div>
+                    <select
+                        value={categoryFilter}
+                        onChange={e => setCategoryFilter(e.target.value as Category | 'all')}
+                        className="rounded border border-slate-700 bg-slate-900 px-3 py-1 text-sm"
                     >
-                        All
-                    </button>
-                    <button
-                        onClick={() => setFilter('good')}
-                        className={`px-3 py-1 text-xs rounded ${
-                            filter === 'good' ? 'bg-amber-400 text-black' : 'text-slate-300'
-                        }`}
-                    >
-                        Good Habits
-                    </button>
-                    <button
-                        onClick={() => setFilter('bad')}
-                        className={`px-3 py-1 text-xs rounded ${
-                            filter === 'bad' ? 'bg-amber-400 text-black' : 'text-slate-300'
-                        }`}
-                    >
-                        Bad Habits
-                    </button>
+                        <option value="all">All Categories</option>
+                        <option value="physical">Physical</option>
+                        <option value="mental">Mental</option>
+                        <option value="spiritual">Spiritual</option>
+                    </select>
                 </div>
-                <select
-                    value={categoryFilter}
-                    onChange={e => setCategoryFilter(e.target.value as Category | 'all')}
-                    className="rounded border border-slate-700 bg-slate-900 px-3 py-1 text-sm"
-                >
-                    <option value="all">All Categories</option>
-                    <option value="physical">Physical</option>
-                    <option value="mental">Mental</option>
-                    <option value="spiritual">Spiritual</option>
-                </select>
+                {selectedHabits.size > 0 && (
+                    <div className="flex gap-2 items-center">
+                        <span className="text-sm text-slate-400">{selectedHabits.size} selected</span>
+                        <button
+                            onClick={handleBulkDelete}
+                            className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+                        >
+                            Delete Selected
+                        </button>
+                    </div>
+                )}
             </div>
 
             {/* Add/Edit Form */}
