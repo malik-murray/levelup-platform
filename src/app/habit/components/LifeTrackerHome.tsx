@@ -915,7 +915,7 @@ function DailyPlanSection({
 
             {/* Habits */}
             <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-2">
-                <h3 className="font-semibold mb-3">Habits</h3>
+                <h3 className="text-base font-semibold mb-3 text-blue-400">Habits</h3>
                 {habitsWithEntries.map((habit) => (
                     <label key={habit.id} className="flex items-center gap-3 cursor-pointer">
                         <input
@@ -932,7 +932,7 @@ function DailyPlanSection({
 
             {/* Priorities (Max 5) */}
             <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-2">
-                <h3 className="font-semibold mb-3">Priorities (Max 5)</h3>
+                <h3 className="text-base font-semibold mb-3 text-purple-400">Priorities (Max 5)</h3>
                 {priorities.map((priority) => {
                     const linkedGoal = goals.find(g => g.id === priority.goal_id);
                     return (
@@ -982,7 +982,7 @@ function DailyPlanSection({
 
             {/* To-Do List */}
             <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-2">
-                <h3 className="font-semibold mb-3">To-Do List</h3>
+                <h3 className="text-base font-semibold mb-3 text-green-400">To-Do List</h3>
                 {todos.map((todo) => {
                     const linkedGoal = goals.find(g => g.id === todo.goal_id);
                     return (
@@ -1031,7 +1031,7 @@ function DailyPlanSection({
             {/* Daily Content Fields */}
             <div className="space-y-4">
                 <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-                    <h3 className="font-semibold mb-2">Notes</h3>
+                    <h3 className="text-base font-semibold mb-2 text-amber-400">Notes</h3>
                     <textarea
                         value={editingContent.notes || ''}
                         onChange={(e) => setEditingContent({ ...editingContent, notes: e.target.value })}
@@ -1055,7 +1055,7 @@ function DailyPlanSection({
                 </div>
 
                 <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-                    <h3 className="font-semibold mb-2">News Updates</h3>
+                    <h3 className="text-base font-semibold mb-2 text-cyan-400">News Updates</h3>
                     <textarea
                         value={editingContent.news_updates || ''}
                         onChange={(e) => setEditingContent({ ...editingContent, news_updates: e.target.value })}
@@ -1067,7 +1067,7 @@ function DailyPlanSection({
                 </div>
 
                 <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-                    <h3 className="font-semibold mb-2">Reflection</h3>
+                    <h3 className="text-base font-semibold mb-2 text-orange-400">Reflection</h3>
                     <textarea
                         value={editingContent.reflection || ''}
                         onChange={(e) => setEditingContent({ ...editingContent, reflection: e.target.value })}

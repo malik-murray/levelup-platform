@@ -889,7 +889,7 @@ function HabitsSection({
 
     return (
         <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-            <h3 className="text-sm font-semibold mb-3">Habits</h3>
+            <h3 className="text-base font-semibold mb-3 text-blue-400">Habits</h3>
             
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
                 {(['physical', 'mental', 'spiritual'] as Category[]).map(category => (
@@ -955,7 +955,8 @@ function HabitsSection({
             )}
 
             {/* Add New Habit */}
-            <div className="border-t border-slate-800 pt-4 space-y-2">
+            <div className="mt-4 space-y-2">
+                <h4 className="text-sm font-medium text-blue-300 mb-2">Add New Habit</h4>
                 <div className="flex gap-2 items-center">
                     <input
                         type="text"
@@ -1020,7 +1021,7 @@ function PrioritiesSection({
 }: any) {
     return (
         <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-            <h3 className="text-sm font-semibold mb-3">Top Priorities</h3>
+            <h3 className="text-base font-semibold mb-3 text-purple-400">Priorities</h3>
             <div className="space-y-2 mb-3">
                 {priorities.map((priority: Priority) => {
                     const linkedGoal = goals.find((g: any) => g.id === priority.goal_id);
@@ -1052,10 +1053,12 @@ function PrioritiesSection({
                     );
                 })}
             </div>
-            <div className="flex gap-2 items-center border-t border-slate-800 pt-3">
-                <input
-                    type="text"
-                    placeholder="Add priority..."
+            <div className="mt-4">
+                <h4 className="text-sm font-medium text-purple-300 mb-2">Add Priority</h4>
+                <div className="flex gap-2 items-center">
+                    <input
+                        type="text"
+                        placeholder="Add priority..."
                     value={newPriority}
                     onChange={e => setNewPriority(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && onAdd()}
@@ -1098,6 +1101,7 @@ function PrioritiesSection({
                 >
                     Add
                 </button>
+                </div>
             </div>
         </div>
     );
@@ -1119,7 +1123,7 @@ function TodosSection({
 }: any) {
     return (
         <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-            <h3 className="text-sm font-semibold mb-3">To-Do List</h3>
+            <h3 className="text-base font-semibold mb-3 text-green-400">To-Do List</h3>
             <div className="space-y-2 mb-3">
                 {todos.map((todo: Todo) => {
                     const linkedGoal = goals.find((g: any) => g.id === todo.goal_id);
@@ -1149,10 +1153,12 @@ function TodosSection({
                     );
                 })}
             </div>
-            <div className="flex gap-2 items-center border-t border-slate-800 pt-3">
-                <input
-                    type="text"
-                    placeholder="Add task..."
+            <div className="mt-4">
+                <h4 className="text-sm font-medium text-green-300 mb-2">Add Todo</h4>
+                <div className="flex gap-2 items-center">
+                    <input
+                        type="text"
+                        placeholder="Add task..."
                     value={newTodo}
                     onChange={e => setNewTodo(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && onAdd()}
@@ -1195,6 +1201,7 @@ function TodosSection({
                 >
                     Add
                 </button>
+                </div>
             </div>
         </div>
     );
