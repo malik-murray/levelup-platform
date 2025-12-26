@@ -32,3 +32,4 @@ CREATE POLICY "Users can view their own category_budgets"
 -- DELETE FROM transactions WHERE user_id IS NULL;
 -- DELETE FROM accounts WHERE user_id IS NULL;
 -- DELETE FROM categories WHERE user_id IS NULL;
+

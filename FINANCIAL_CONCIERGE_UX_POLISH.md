@@ -257,3 +257,4 @@ This allows easy tier management without code changes.
 - Tooltips work on both desktop (hover) and mobile (tap)
 - All pages are accessible and keyboard navigable
 
+

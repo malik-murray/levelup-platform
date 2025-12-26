@@ -207,3 +207,4 @@ ML categorization is implemented as a placeholder. To enable:
 - **UX Polish Guide**: `FINANCIAL_CONCIERGE_UX_POLISH.md`
 - **Setup Guide**: `docs/financial-concierge-setup.md`
 
+

@@ -233,3 +233,4 @@ See `src/lib/financial-concierge/categoryEngine.ts` for the placeholder implemen
 - Enhance categorization rules based on usage patterns
 - Add more insight types as needed
 
+

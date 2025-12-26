@@ -82,3 +82,4 @@ ON CONFLICT DO NOTHING;
 -- If categories need to be user-specific, you would need to run this migration
 -- for each user or copy these categories to user-specific ones
 
+

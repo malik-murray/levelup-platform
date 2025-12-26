@@ -10,3 +10,4 @@ export default function ResumeLayout({ children }: { children: ReactNode }) {
   );
 }
 
+

@@ -146,3 +146,4 @@ CREATE POLICY "Users can delete their own category_budgets"
 -- DELETE FROM accounts WHERE user_id IS NULL;
 -- DELETE FROM categories WHERE user_id IS NULL;
 
+

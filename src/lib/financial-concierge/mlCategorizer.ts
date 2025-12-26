@@ -10,7 +10,8 @@
  * 5. Set confidence threshold (e.g., 0.7)
  */
 
-import { TransactionToCategorize, CategorizationResult } from './types';
+import { CategorizationResult } from './types';
+import { TransactionToCategorize } from './categoryEngine';
 
 export interface MLCategorizationOptions {
     userId: string;
@@ -117,4 +118,5 @@ export async function updateCategoryEmbeddings(
     // 3. Store in a cache (Redis) or database table
     console.log('Category embedding update not yet implemented');
 }
+
 

@@ -76,3 +76,4 @@ echo "1. Apply storage policies from migration 021_create_statement_files_bucket
 echo "2. Test file upload at /finance/concierge/upload"
 echo "3. Verify files appear in Supabase Storage dashboard"
 
+

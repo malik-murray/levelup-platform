@@ -366,7 +366,7 @@ export async function processStatementFile(
             action_type: 'statement_process',
             action_details: {
                 statement_file_id: statementFileId,
-                transactions_imported,
+                transactions_imported: transactionsImported,
                 errors_count: errors.length,
             },
             resource_type: 'statement_file',
@@ -375,7 +375,7 @@ export async function processStatementFile(
 
         return {
             success: errors.length === 0,
-            transactions_imported,
+            transactions_imported: transactionsImported,
             statement_period_id: statementPeriodId,
             errors: errors.length > 0 ? errors : undefined,
         };
@@ -421,4 +421,5 @@ export async function getStatementFiles(userId: string): Promise<StatementFile[]
 
     return (data || []) as StatementFile[];
 }
+
 

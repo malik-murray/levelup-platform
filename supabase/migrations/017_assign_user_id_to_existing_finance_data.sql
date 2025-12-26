@@ -74,3 +74,4 @@ END $$;
 --
 -- DROP POLICY IF EXISTS "Users can view their own category_budgets" ON category_budgets;
 -- CREATE POLICY "Users can view their own category_budgets" ON category_budgets FOR SELECT USING (auth.uid() = user_id);
+
