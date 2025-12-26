@@ -131,7 +131,9 @@ export default function LifeTrackerHome() {
                 .select('*')
                 .eq('user_id', user.id)
                 .eq('is_completed', false)
-                .order('priority_score', { ascending: false });
+                .eq('is_archived', false)
+                .order('priority_score', { ascending: false })
+                .limit(5);
 
             setGoals(data || []);
         } catch (error) {
