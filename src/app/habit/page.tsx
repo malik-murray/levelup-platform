@@ -98,6 +98,11 @@ export default function HabitPage() {
     const [dailyContent, setDailyContent] = useState<DailyContent | null>(null);
     const [dailyScores, setDailyScores] = useState<Map<string, DailyScore>>(new Map());
     const [goals, setGoals] = useState<any[]>([]);
+    const [scoringSettings, setScoringSettings] = useState({
+        habits_weight: 40,
+        priorities_weight: 35,
+        todos_weight: 25,
+    });
 
     // Load data
     useEffect(() => {
@@ -165,6 +170,41 @@ export default function HabitPage() {
                 .eq('user_id', user.id)
                 .eq('is_completed', false)
                 .order('name');
+
+            // Load scoring settings
+            const { data: scoringData, error: scoringError } = await supabase
+                .from('habit_scoring_settings')
+                .select('*')
+                .eq('user_id', user.id)
+                .single();
+
+            if (scoringError && scoringError.code === 'PGRST116') {
+                // No settings found, create defaults
+                const { data: newSettings } = await supabase
+                    .from('habit_scoring_settings')
+                    .insert({
+                        user_id: user.id,
+                        habits_weight: 40,
+                        priorities_weight: 35,
+                        todos_weight: 25,
+                    })
+                    .select()
+                    .single();
+
+                if (newSettings) {
+                    setScoringSettings({
+                        habits_weight: newSettings.habits_weight,
+                        priorities_weight: newSettings.priorities_weight,
+                        todos_weight: newSettings.todos_weight,
+                    });
+                }
+            } else if (scoringData) {
+                setScoringSettings({
+                    habits_weight: scoringData.habits_weight,
+                    priorities_weight: scoringData.priorities_weight,
+                    todos_weight: scoringData.todos_weight,
+                });
+            }
 
             // Load daily scores for the month
             const { data: scoresData } = await supabase
@@ -282,6 +322,7 @@ export default function HabitPage() {
                         todos={todos}
                         dailyContent={dailyContent}
                         goals={goals}
+                        scoringSettings={scoringSettings}
                         onDataChange={loadData}
                     />
                 ) : activeTab === 'statistics' ? (
@@ -401,6 +442,7 @@ function DailyView({
     todos,
     dailyContent,
     goals,
+    scoringSettings,
     onDataChange,
 }: {
     date: Date;
@@ -410,6 +452,7 @@ function DailyView({
     todos: Todo[];
     dailyContent: DailyContent | null;
     goals: any[];
+    scoringSettings: { habits_weight: number; priorities_weight: number; todos_weight: number };
     onDataChange: () => void;
 }) {
     const [newHabitName, setNewHabitName] = useState('');
@@ -446,11 +489,12 @@ function DailyView({
         };
     });
 
-    // Calculate scores
-    const habitsScore = calculateHabitsScore(habitsWithEntries);
-    const prioritiesScore = calculatePrioritiesScore(priorities);
-    const todosScore = calculateTodosScore(todos);
-    const overallScore = Math.round(habitsScore * 0.40 + prioritiesScore * 0.35 + todosScore * 0.25);
+    // Calculate weighted scores: (completed/total) * weight
+    const habitsScore = calculateHabitsScore(habitsWithEntries, scoringSettings.habits_weight);
+    const prioritiesScore = calculatePrioritiesScore(priorities, scoringSettings.priorities_weight);
+    const todosScore = calculateTodosScore(todos, scoringSettings.todos_weight);
+    // Overall score is the sum of weighted scores (0-100)
+    const overallScore = habitsScore + prioritiesScore + todosScore;
     const grade = getGrade(overallScore);
     
     // Import getGrade from helpers instead of defining locally
@@ -670,10 +714,17 @@ function DailyView({
                         </h2>
                         <p className="text-sm text-slate-400 mt-1">Daily Progress</p>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right relative group">
                         <div className="text-5xl font-bold text-amber-400">{overallScore}</div>
                         <div className="text-2xl font-semibold text-amber-300 mt-1">Grade: {grade}</div>
                         <div className="text-lg mt-2">{getVisualScore(overallScore)}</div>
+                        <span className="absolute top-0 right-0 text-amber-400 cursor-help" title="Total Score = Habits Score + Priorities Score + Todos Score (0-100)">ℹ️</span>
+                        <div className="absolute right-0 top-full mt-2 hidden group-hover:block bg-slate-800 text-xs text-slate-200 p-3 rounded shadow-lg z-10 max-w-xs">
+                            <div className="font-semibold mb-2">Scoring Formula:</div>
+                            <div className="mb-1">Each category: (completed / total) × weight</div>
+                            <div className="mb-1">Total Score = Habits + Priorities + Todos</div>
+                            <div className="text-slate-400 mt-2">Example: 1/4 habits × 40% = 10 points</div>
+                        </div>
                     </div>
                 </div>
                 
@@ -784,7 +835,8 @@ function DailyView({
 }
 
 // Helper functions for score calculations
-function calculateHabitsScore(habits: Array<{ status: HabitStatus; is_bad_habit?: boolean }>): number {
+// Returns weighted score: (completed/total) * weight
+function calculateHabitsScore(habits: Array<{ status: HabitStatus; is_bad_habit?: boolean }>, weight: number): number {
     if (habits.length === 0) return 0;
     let points = 0;
     habits.forEach(h => {
@@ -799,19 +851,22 @@ function calculateHabitsScore(habits: Array<{ status: HabitStatus; is_bad_habit?
             else if (h.status === 'half') points += 0.5;
         }
     });
-    return Math.round((points / habits.length) * 100);
+    const completionRatio = points / habits.length;
+    return Math.round(completionRatio * weight);
 }
 
-function calculatePrioritiesScore(priorities: Priority[]): number {
+function calculatePrioritiesScore(priorities: Priority[], weight: number): number {
     if (priorities.length === 0) return 0;
     const completed = priorities.filter(p => p.completed).length;
-    return Math.round((completed / priorities.length) * 100);
+    const completionRatio = completed / priorities.length;
+    return Math.round(completionRatio * weight);
 }
 
-function calculateTodosScore(todos: Todo[]): number {
+function calculateTodosScore(todos: Todo[], weight: number): number {
     if (todos.length === 0) return 0;
     const completed = todos.filter(t => t.is_done).length;
-    return Math.round((completed / todos.length) * 100);
+    const completionRatio = completed / todos.length;
+    return Math.round(completionRatio * weight);
 }
 
 function calculateCategoryScore(

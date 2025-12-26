@@ -702,25 +702,21 @@ function DailyPlanSection({
         };
     });
 
-    // Calculate scores
-    const habitsScore = calculateItemScore(
-        habitsWithEntries.map(h => ({ status: h.status })),
-        habitsWithEntries.length
-    );
-    const prioritiesScore = calculateItemScore(
-        priorities.map(p => ({ completed: p.completed })),
-        priorities.length
-    );
-    const todosScore = calculateItemScore(
-        todos.map(t => ({ is_done: t.is_done })),
-        todos.length
-    );
+    // Calculate weighted scores: (completed/total) * weight
+    const habitsCompleted = habitsWithEntries.filter(h => h.status === 'checked').length;
+    const habitsTotal = habitsWithEntries.length;
+    const habitsScore = habitsTotal === 0 ? 0 : Math.round((habitsCompleted / habitsTotal) * scoringSettings.habits_weight);
+    
+    const prioritiesCompleted = priorities.filter(p => p.completed).length;
+    const prioritiesTotal = priorities.length;
+    const prioritiesScore = prioritiesTotal === 0 ? 0 : Math.round((prioritiesCompleted / prioritiesTotal) * scoringSettings.priorities_weight);
+    
+    const todosCompleted = todos.filter(t => t.is_done).length;
+    const todosTotal = todos.length;
+    const todosScore = todosTotal === 0 ? 0 : Math.round((todosCompleted / todosTotal) * scoringSettings.todos_weight);
 
-    const overallScore = Math.round(
-        (habitsScore * scoringSettings.habits_weight +
-         prioritiesScore * scoringSettings.priorities_weight +
-         todosScore * scoringSettings.todos_weight) / 100
-    );
+    // Overall score is the sum of weighted scores (0-100)
+    const overallScore = habitsScore + prioritiesScore + todosScore;
     const grade = getGrade(overallScore);
 
     const handleHabitToggle = async (templateId: string, currentStatus: HabitStatus) => {
@@ -891,9 +887,16 @@ function DailyPlanSection({
                 <h2 className="text-2xl font-bold">
                     Daily Plan - {date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                 </h2>
-                <div className="text-right">
+                <div className="text-right relative group">
                     <div className="text-3xl font-bold text-amber-400">{overallScore}</div>
                     <div className="text-lg font-semibold text-amber-300">Grade: {grade}</div>
+                    <span className="absolute top-0 right-0 text-amber-400 cursor-help" title="Total Score = Habits Score + Priorities Score + Todos Score (0-100)">ℹ️</span>
+                    <div className="absolute right-0 top-full mt-2 hidden group-hover:block bg-slate-800 text-xs text-slate-200 p-3 rounded shadow-lg z-10 max-w-xs">
+                        <div className="font-semibold mb-2">Scoring Formula:</div>
+                        <div className="mb-1">Each category: (completed / total) × weight</div>
+                        <div className="mb-1">Total Score = Habits + Priorities + Todos</div>
+                        <div className="text-slate-400 mt-2">Example: 1/4 habits × 40% = 10 points</div>
+                    </div>
                 </div>
             </div>
 
