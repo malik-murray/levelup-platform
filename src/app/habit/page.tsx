@@ -730,17 +730,35 @@ function DailyView({
                 
                 {/* Component Scores */}
                 <div className="grid grid-cols-3 gap-4 mt-4 mb-4">
-                    <div className="rounded-md border border-blue-500/30 bg-blue-950/20 p-3 text-center">
-                        <div className="text-xs text-blue-300 mb-1">Habits (40%)</div>
+                    <div className="rounded-md border border-blue-500/30 bg-blue-950/20 p-3 text-center relative group">
+                        <div className="text-xs text-blue-300 mb-1">
+                            Habits ({scoringSettings.habits_weight}%)
+                            <span className="ml-1 text-blue-400 cursor-help" title="Score = (completed habits / total habits) × weight">ℹ️</span>
+                        </div>
                         <div className="text-2xl font-bold text-blue-400">{habitsScore}</div>
+                        <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block bg-slate-800 text-xs text-slate-200 p-2 rounded shadow-lg z-10 whitespace-nowrap">
+                            Formula: (completed / total) × {scoringSettings.habits_weight}%
+                        </div>
                     </div>
-                    <div className="rounded-md border border-purple-500/30 bg-purple-950/20 p-3 text-center">
-                        <div className="text-xs text-purple-300 mb-1">Priorities (35%)</div>
+                    <div className="rounded-md border border-purple-500/30 bg-purple-950/20 p-3 text-center relative group">
+                        <div className="text-xs text-purple-300 mb-1">
+                            Priorities ({scoringSettings.priorities_weight}%)
+                            <span className="ml-1 text-purple-400 cursor-help" title="Score = (completed priorities / total priorities) × weight">ℹ️</span>
+                        </div>
                         <div className="text-2xl font-bold text-purple-400">{prioritiesScore}</div>
+                        <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block bg-slate-800 text-xs text-slate-200 p-2 rounded shadow-lg z-10 whitespace-nowrap">
+                            Formula: (completed / total) × {scoringSettings.priorities_weight}%
+                        </div>
                     </div>
-                    <div className="rounded-md border border-green-500/30 bg-green-950/20 p-3 text-center">
-                        <div className="text-xs text-green-300 mb-1">Todos (25%)</div>
+                    <div className="rounded-md border border-green-500/30 bg-green-950/20 p-3 text-center relative group">
+                        <div className="text-xs text-green-300 mb-1">
+                            Todos ({scoringSettings.todos_weight}%)
+                            <span className="ml-1 text-green-400 cursor-help" title="Score = (completed todos / total todos) × weight">ℹ️</span>
+                        </div>
                         <div className="text-2xl font-bold text-green-400">{todosScore}</div>
+                        <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block bg-slate-800 text-xs text-slate-200 p-2 rounded shadow-lg z-10 whitespace-nowrap">
+                            Formula: (completed / total) × {scoringSettings.todos_weight}%
+                        </div>
                     </div>
                 </div>
 
