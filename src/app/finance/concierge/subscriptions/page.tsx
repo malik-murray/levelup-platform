@@ -33,7 +33,7 @@ export default function SubscriptionsPage() {
                     categories(name)
                 `)
                 .eq('user_id', user.id)
-                .order('expected_amount', { ascending: false, nullsLast: true });
+                .order('expected_amount', { ascending: false, nullsFirst: false });
 
             if (fetchError) throw fetchError;
             setRecurringItems((data || []) as RecurringItem[]);
@@ -150,7 +150,7 @@ export default function SubscriptionsPage() {
                     <h2 className="text-xl font-semibold mb-4">Pending Confirmation</h2>
                     <div className="space-y-3">
                         {unconfirmedItems.map((item) => {
-                            const category = (item.categories as any)?.[0] || item.categories;
+                            const category = (item as any).categories?.[0] || (item as any).categories;
                             const categoryName = category?.name || 'Uncategorized';
 
                             return (
@@ -208,7 +208,7 @@ export default function SubscriptionsPage() {
                     <h2 className="text-xl font-semibold mb-4">Confirmed Subscriptions</h2>
                     <div className="space-y-3">
                         {confirmedItems.map((item) => {
-                            const category = (item.categories as any)?.[0] || item.categories;
+                            const category = (item as any).categories?.[0] || (item as any).categories;
                             const categoryName = category?.name || 'Uncategorized';
 
                             return (
@@ -256,4 +256,5 @@ export default function SubscriptionsPage() {
         </div>
     );
 }
+
 

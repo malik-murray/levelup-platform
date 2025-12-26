@@ -55,6 +55,21 @@ export async function POST(request: NextRequest) {
                     get(name: string) {
                         return cookieStore.get(name)?.value;
                     },
+                    set(name: string, value: string, options: any) {
+                        try {
+                            cookieStore.set(name, value, options);
+                        } catch (error) {
+                            // The `set` method was called from a Server Component or API route.
+                            // This can be ignored if you have middleware refreshing user sessions.
+                        }
+                    },
+                    remove(name: string, options: any) {
+                        try {
+                            cookieStore.set(name, '', { ...options, maxAge: 0 });
+                        } catch (error) {
+                            // Same as above
+                        }
+                    },
                 },
             }
         );
@@ -229,6 +244,7 @@ If the transaction is clearly a transfer or doesn't match any category well, set
         );
     }
 }
+
 
 
 
