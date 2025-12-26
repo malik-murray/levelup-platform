@@ -2966,11 +2966,16 @@ function HabitsManagementView({
     const [goals, setGoals] = useState<any[]>([]);
     const [selectedHabits, setSelectedHabits] = useState<Set<string>>(new Set());
     const [showBulkEditModal, setShowBulkEditModal] = useState(false);
-    const [bulkEditData, setBulkEditData] = useState({
-        goal_id: null as string | null,
-        category: null as Category | null,
-        time_of_day: null as TimeOfDay | null,
-        is_bad_habit: null as boolean | null,
+    const [bulkEditData, setBulkEditData] = useState<{
+        goal_id: string | null;
+        category: Category | null;
+        time_of_day: TimeOfDay | null | string;
+        is_bad_habit: boolean | null;
+    }>({
+        goal_id: null,
+        category: null,
+        time_of_day: null,
+        is_bad_habit: null,
     });
 
     useEffect(() => {
@@ -3507,6 +3512,113 @@ function HabitsManagementView({
                     </div>
                 )}
             </div>
+
+            {/* Bulk Edit Modal */}
+            {showBulkEditModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowBulkEditModal(false)}>
+                    <div className="bg-slate-900 rounded-lg border border-slate-800 p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-semibold">Bulk Edit Habits</h3>
+                            <button
+                                onClick={() => setShowBulkEditModal(false)}
+                                className="text-slate-400 hover:text-slate-200"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <p className="text-sm text-slate-400 mb-4">
+                            Update {selectedHabits.size} selected habit{selectedHabits.size !== 1 ? 's' : ''}. Leave fields unchanged to keep current values.
+                        </p>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs text-slate-400 mb-1 block">Link to Goal</label>
+                                <select
+                                    value={bulkEditData.goal_id || ''}
+                                    onChange={(e) => setBulkEditData({ ...bulkEditData, goal_id: e.target.value || null })}
+                                    className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                                >
+                                    <option value="">-- Keep current / No change --</option>
+                                    <option value="__clear__">-- Remove goal link --</option>
+                                    {goals.map(goal => (
+                                        <option key={goal.id} value={goal.id}>{goal.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="text-xs text-slate-400 mb-1 block">Category</label>
+                                <select
+                                    value={bulkEditData.category || ''}
+                                    onChange={(e) => setBulkEditData({ ...bulkEditData, category: (e.target.value as Category) || null })}
+                                    className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                                >
+                                    <option value="">-- Keep current / No change --</option>
+                                    <option value="physical">Physical</option>
+                                    <option value="mental">Mental</option>
+                                    <option value="spiritual">Spiritual</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="text-xs text-slate-400 mb-1 block">Time of Day</label>
+                                <select
+                                    value={(bulkEditData.time_of_day as string) === '__clear__' ? '__clear__' : (bulkEditData.time_of_day || '')}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        setBulkEditData({
+                                            ...bulkEditData,
+                                            time_of_day: value === '' ? null : (value === '__clear__' ? '__clear__' as any : (value as TimeOfDay))
+                                        });
+                                    }}
+                                    className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                                >
+                                    <option value="">-- Keep current / No change --</option>
+                                    <option value="__clear__">-- Remove time of day --</option>
+                                    <option value="morning">Morning</option>
+                                    <option value="afternoon">Afternoon</option>
+                                    <option value="evening">Evening</option>
+                                </select>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                                <label className="text-xs text-slate-400">Bad Habit Status</label>
+                                <select
+                                    value={bulkEditData.is_bad_habit === null ? '' : bulkEditData.is_bad_habit ? 'true' : 'false'}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        setBulkEditData({
+                                            ...bulkEditData,
+                                            is_bad_habit: value === '' ? null : value === 'true'
+                                        });
+                                    }}
+                                    className="flex-1 rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                                >
+                                    <option value="">-- Keep current / No change --</option>
+                                    <option value="false">Good Habit</option>
+                                    <option value="true">Bad Habit</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2 mt-6">
+                            <button
+                                onClick={handleBulkEdit}
+                                className="flex-1 rounded-md bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300"
+                            >
+                                Apply Changes
+                            </button>
+                            <button
+                                onClick={() => setShowBulkEditModal(false)}
+                                className="rounded-md border border-slate-700 px-4 py-2 text-sm font-semibold hover:bg-slate-800"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
