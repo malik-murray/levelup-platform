@@ -1366,6 +1366,8 @@ function GoalsView() {
         name: '',
         description: '',
         category: null as string | null,
+        priority_score: 0,
+        deadline: '' as string | null,
         target_value: '',
         target_unit: '',
         current_value: '',
@@ -1468,6 +1470,8 @@ function GoalsView() {
                         name: goalForm.name,
                         description: goalForm.description || null,
                         category: goalForm.category || null,
+                        priority_score: goalForm.priority_score || 0,
+                        deadline: goalForm.deadline || null,
                         target_value: goalForm.target_value ? parseFloat(goalForm.target_value) : null,
                         target_unit: goalForm.target_unit || null,
                         current_value: goalForm.current_value ? parseFloat(goalForm.current_value) : null,
@@ -1488,6 +1492,8 @@ function GoalsView() {
                         name: goalForm.name,
                         description: goalForm.description || null,
                         category: goalForm.category || null,
+                        priority_score: goalForm.priority_score || 0,
+                        deadline: goalForm.deadline || null,
                         target_value: goalForm.target_value ? parseFloat(goalForm.target_value) : null,
                         target_unit: goalForm.target_unit || null,
                         current_value: goalForm.current_value ? parseFloat(goalForm.current_value) : null,
@@ -1631,7 +1637,7 @@ function GoalsView() {
             }
 
             // Reset form
-            setGoalForm({ name: '', description: '', category: null, target_value: '', target_unit: '', current_value: '', parent_goal_id: null, is_completed: false });
+            setGoalForm({ name: '', description: '', category: null, priority_score: 0, deadline: '', target_value: '', target_unit: '', current_value: '', parent_goal_id: null, is_completed: false });
             setGoalMilestones([]);
             setGoalSubGoals([]);
             setGoalHabits([]);
@@ -1650,6 +1656,8 @@ function GoalsView() {
             name: goal.name,
             description: goal.description || '',
             category: goal.category || null,
+            priority_score: goal.priority_score || 0,
+            deadline: goal.deadline || '',
             target_value: goal.target_value?.toString() || '',
             target_unit: goal.target_unit || '',
             current_value: goal.current_value?.toString() || '',
@@ -1845,7 +1853,7 @@ function GoalsView() {
                         onClick={() => {
                             setShowGoalForm(!showGoalForm);
                             setEditingGoal(null);
-                            setGoalForm({ name: '', description: '', category: null, target_value: '', target_unit: '', current_value: '', parent_goal_id: null, is_completed: false });
+                            setGoalForm({ name: '', description: '', category: null, priority_score: 0, deadline: '', target_value: '', target_unit: '', current_value: '', parent_goal_id: null, is_completed: false });
                             setGoalMilestones([]);
                             setGoalSubGoals([]);
                             setGoalHabits([]);
@@ -1905,6 +1913,22 @@ function GoalsView() {
                                 <option key={cat} value={cat}>{cat.charAt(0).toUpperCase() + cat.slice(1)}</option>
                             ))}
                         </select>
+                        <div className="flex gap-2">
+                            <input
+                                type="number"
+                                placeholder="Priority score"
+                                value={goalForm.priority_score}
+                                onChange={e => setGoalForm({ ...goalForm, priority_score: parseInt(e.target.value) || 0 })}
+                                className="flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+                            />
+                            <input
+                                type="date"
+                                placeholder="Deadline"
+                                value={goalForm.deadline || ''}
+                                onChange={e => setGoalForm({ ...goalForm, deadline: e.target.value || null })}
+                                className="flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+                            />
+                        </div>
                         <div className="flex gap-2">
                             <input
                                 type="number"
@@ -2164,7 +2188,7 @@ function GoalsView() {
                             onClick={() => {
                                 setShowGoalForm(false);
                                 setEditingGoal(null);
-                                setGoalForm({ name: '', description: '', category: null, target_value: '', target_unit: '', current_value: '', parent_goal_id: null, is_completed: false });
+                                setGoalForm({ name: '', description: '', category: null, priority_score: 0, deadline: '', target_value: '', target_unit: '', current_value: '', parent_goal_id: null, is_completed: false });
                                 setGoalMilestones([]);
                                 setGoalSubGoals([]);
                                 setGoalHabits([]);
