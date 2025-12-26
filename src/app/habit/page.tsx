@@ -2964,6 +2964,7 @@ function HabitsManagementView({
     });
 
     const [goals, setGoals] = useState<any[]>([]);
+    const [selectedHabits, setSelectedHabits] = useState<Set<string>>(new Set());
 
     useEffect(() => {
         loadGoals();
@@ -3014,6 +3015,47 @@ function HabitsManagementView({
             onDataChange();
         } catch (error) {
             console.error('Error deleting habit:', error);
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedHabits.size === 0) return;
+        
+        const count = selectedHabits.size;
+        if (!confirm(`Are you sure you want to delete ${count} habit${count !== 1 ? 's' : ''}? This will also delete all daily entries for these habits.`)) {
+            return;
+        }
+
+        try {
+            const habitIds = Array.from(selectedHabits);
+            await supabase
+                .from('habit_templates')
+                .delete()
+                .in('id', habitIds);
+            
+            setSelectedHabits(new Set());
+            onDataChange();
+        } catch (error) {
+            console.error('Error deleting habits:', error);
+            alert('Error deleting habits. Please try again.');
+        }
+    };
+
+    const handleToggleSelect = (habitId: string) => {
+        const newSelected = new Set(selectedHabits);
+        if (newSelected.has(habitId)) {
+            newSelected.delete(habitId);
+        } else {
+            newSelected.add(habitId);
+        }
+        setSelectedHabits(newSelected);
+    };
+
+    const handleSelectAll = () => {
+        if (selectedHabits.size === filteredHabits.length) {
+            setSelectedHabits(new Set());
+        } else {
+            setSelectedHabits(new Set(filteredHabits.map(h => h.id)));
         }
     };
 
@@ -3086,6 +3128,11 @@ function HabitsManagementView({
         if (categoryFilter !== 'all' && habit.category !== categoryFilter) return false;
         return true;
     });
+
+    // Clear selection when filters change
+    useEffect(() => {
+        setSelectedHabits(new Set());
+    }, [filter, categoryFilter]);
 
     const habitsByCategory = {
         physical: filteredHabits.filter(h => h.category === 'physical'),
@@ -3255,9 +3302,40 @@ function HabitsManagementView({
                     const categoryHabits = habitsByCategory[category];
                     if (categoryHabits.length === 0) return null;
 
+                    const categorySelectedCount = categoryHabits.filter(h => selectedHabits.has(h.id)).length;
+                    const allCategorySelected = categoryHabits.length > 0 && categorySelectedCount === categoryHabits.length;
+                    const someCategorySelected = categorySelectedCount > 0 && categorySelectedCount < categoryHabits.length;
+
                     return (
                         <div key={category} className={`rounded-lg border ${categoryColors[category]} p-4`}>
-                            <h3 className="text-sm font-semibold mb-3 capitalize">{category} Habits</h3>
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="text-sm font-semibold capitalize">{category} Habits</h3>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={allCategorySelected}
+                                        onChange={(e) => {
+                                            e.target.indeterminate = false;
+                                            if (allCategorySelected) {
+                                                // Deselect all in this category
+                                                const newSelected = new Set(selectedHabits);
+                                                categoryHabits.forEach(h => newSelected.delete(h.id));
+                                                setSelectedHabits(newSelected);
+                                            } else {
+                                                // Select all in this category
+                                                const newSelected = new Set(selectedHabits);
+                                                categoryHabits.forEach(h => newSelected.add(h.id));
+                                                setSelectedHabits(newSelected);
+                                            }
+                                        }}
+                                        ref={(input) => {
+                                            if (input) input.indeterminate = someCategorySelected;
+                                        }}
+                                        className="rounded border-slate-600"
+                                    />
+                                    <span className="text-xs text-slate-400">Select All</span>
+                                </div>
+                            </div>
                             <div className="space-y-2">
                                 {categoryHabits.map(habit => (
                                     <div
@@ -3265,6 +3343,13 @@ function HabitsManagementView({
                                         className="flex items-center justify-between p-2 rounded bg-slate-900/50 hover:bg-slate-900 transition-colors"
                                     >
                                         <div className="flex items-center gap-2 flex-1">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedHabits.has(habit.id)}
+                                                onChange={() => handleToggleSelect(habit.id)}
+                                                onClick={(e) => e.stopPropagation()}
+                                                className="rounded border-slate-600"
+                                            />
                                             <span className="text-lg">{habit.icon}</span>
                                             <div className="flex-1">
                                                 <div className="flex items-center gap-2">
