@@ -90,6 +90,7 @@ export default function LifeTrackerHome() {
     const [dailyScores, setDailyScores] = useState<Map<string, DailyScore>>(new Map());
     const [weekPriorities, setWeekPriorities] = useState<Map<string, Priority[]>>(new Map());
     const [weekTodos, setWeekTodos] = useState<Map<string, Todo[]>>(new Map());
+    const [weekHabits, setWeekHabits] = useState<Map<string, number>>(new Map());
     
     // Daily Plan data
     const [habitTemplates, setHabitTemplates] = useState<HabitTemplate[]>([]);
@@ -227,6 +228,14 @@ export default function LifeTrackerHome() {
                 .gte('date', weekStartStr)
                 .lte('date', weekEndStr);
 
+            // Load habit entries for the week
+            const { data: habitEntriesData } = await supabase
+                .from('habit_daily_entries')
+                .select('date, habit_template_id')
+                .eq('user_id', user.id)
+                .gte('date', weekStartStr)
+                .lte('date', weekEndStr);
+
             const prioritiesMap = new Map<string, Priority[]>();
             prioritiesData?.forEach(p => {
                 const existing = prioritiesMap.get(p.date) || [];
@@ -240,6 +249,20 @@ export default function LifeTrackerHome() {
                 todosMap.set(t.date, [...existing, t]);
             });
             setWeekTodos(todosMap);
+
+            // Count unique habits per day
+            const habitsByDate = new Map<string, Set<string>>();
+            habitEntriesData?.forEach(e => {
+                if (!habitsByDate.has(e.date)) {
+                    habitsByDate.set(e.date, new Set());
+                }
+                habitsByDate.get(e.date)!.add(e.habit_template_id);
+            });
+            const habitsCountMap = new Map<string, number>();
+            habitsByDate.forEach((habitSet, date) => {
+                habitsCountMap.set(date, habitSet.size);
+            });
+            setWeekHabits(habitsCountMap);
         } catch (error) {
             console.error('Error loading calendar data:', error);
         }
@@ -339,6 +362,7 @@ export default function LifeTrackerHome() {
                 dailyScores={dailyScores}
                 weekPriorities={weekPriorities}
                 weekTodos={weekTodos}
+                weekHabits={weekHabits}
                 onDateSelect={setSelectedDate}
                 onWeekChange={(direction) => {
                     const newWeek = new Date(currentWeek);
@@ -554,6 +578,7 @@ function CalendarOverviewSection({
     dailyScores,
     weekPriorities,
     weekTodos,
+    weekHabits,
     onDateSelect,
     onWeekChange,
 }: {
@@ -562,6 +587,7 @@ function CalendarOverviewSection({
     dailyScores: Map<string, DailyScore>;
     weekPriorities: Map<string, Priority[]>;
     weekTodos: Map<string, Todo[]>;
+    weekHabits: Map<string, number>;
     onDateSelect: (date: Date) => void;
     onWeekChange: (direction: 'prev' | 'next') => void;
 }) {
@@ -611,14 +637,16 @@ function CalendarOverviewSection({
                     const score = dailyScores.get(dateStr);
                     const dayPriorities = weekPriorities.get(dateStr) || [];
                     const dayTodos = weekTodos.get(dateStr) || [];
+                    const dayHabitsCount = weekHabits.get(dateStr) || 0;
                     const isSelected = isSameDay(day, selectedDate);
                     const isToday = isSameDay(day, new Date());
+                    const hasData = dayHabitsCount > 0 || dayPriorities.length > 0 || dayTodos.length > 0 || score;
 
                     return (
                         <button
                             key={dateStr}
                             onClick={() => onDateSelect(day)}
-                            className={`rounded-lg border p-3 text-left transition-colors ${
+                            className={`rounded-lg border p-2.5 text-left transition-colors ${
                                 isSelected
                                     ? 'border-amber-500 bg-amber-950/30'
                                     : 'border-slate-700 hover:border-slate-600'
@@ -627,25 +655,27 @@ function CalendarOverviewSection({
                             <div className="text-xs font-medium mb-1 text-slate-400">
                                 {day.toLocaleDateString('en-US', { weekday: 'short' })}
                             </div>
-                            <div className="text-lg font-bold mb-2">{day.getDate()}</div>
-                            {score && (
-                                <>
-                                    <div className="text-sm font-semibold text-amber-400 mb-1">
-                                        {score.score_overall} ({score.grade})
-                                    </div>
-                                    <div className="text-xs text-slate-400 mb-2">
-                                        {getVisualScore(score.score_overall)}
-                                    </div>
-                                </>
-                            )}
-                            {dayPriorities.length > 0 && (
-                                <div className="text-xs text-slate-300 mb-1">
-                                    {dayPriorities.length} priority{dayPriorities.length !== 1 ? 'ies' : 'y'}
-                                </div>
-                            )}
-                            {dayTodos.length > 0 && (
-                                <div className="text-xs text-slate-300">
-                                    {dayTodos.length} todo{dayTodos.length !== 1 ? 's' : ''}
+                            <div className="text-base font-bold mb-1.5">{day.getDate()}</div>
+                            {hasData && (
+                                <div className="space-y-1">
+                                    {score && (
+                                        <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-600 dark:text-amber-400">
+                                            {score.grade}
+                                        </div>
+                                    )}
+                                    {(dayHabitsCount > 0 || dayPriorities.length > 0 || dayTodos.length > 0) && (
+                                        <div className="flex flex-wrap gap-1 text-[10px] text-slate-500 dark:text-slate-400">
+                                            {dayHabitsCount > 0 && (
+                                                <span className="text-blue-500 dark:text-blue-400">H{dayHabitsCount}</span>
+                                            )}
+                                            {dayPriorities.length > 0 && (
+                                                <span className="text-purple-500 dark:text-purple-400">P{dayPriorities.length}</span>
+                                            )}
+                                            {dayTodos.length > 0 && (
+                                                <span className="text-green-500 dark:text-green-400">T{dayTodos.length}</span>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </button>
