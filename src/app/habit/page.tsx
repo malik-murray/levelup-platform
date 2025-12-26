@@ -45,6 +45,7 @@ type Priority = {
     category: Category | null;
     time_of_day: TimeOfDay | null;
     completed: boolean;
+    goal_id: string | null;
 };
 
 type Todo = {
@@ -53,6 +54,7 @@ type Todo = {
     category: Category | null;
     time_of_day: TimeOfDay | null;
     is_done: boolean;
+    goal_id: string | null;
 };
 
 type DailyContent = {
@@ -95,6 +97,7 @@ export default function HabitPage() {
     const [todos, setTodos] = useState<Todo[]>([]);
     const [dailyContent, setDailyContent] = useState<DailyContent | null>(null);
     const [dailyScores, setDailyScores] = useState<Map<string, DailyScore>>(new Map());
+    const [goals, setGoals] = useState<any[]>([]);
 
     // Load data
     useEffect(() => {
@@ -155,6 +158,14 @@ export default function HabitPage() {
                 .eq('date', dateStr)
                 .single();
 
+            // Load goals for linking
+            const { data: goalsData } = await supabase
+                .from('habit_goals')
+                .select('id, name')
+                .eq('user_id', user.id)
+                .eq('is_completed', false)
+                .order('name');
+
             // Load daily scores for the month
             const { data: scoresData } = await supabase
                 .from('habit_daily_scores')
@@ -168,6 +179,7 @@ export default function HabitPage() {
             setPriorities(prioritiesData || []);
             setTodos(todosData || []);
             setDailyContent(contentData || null);
+            setGoals(goalsData || []);
 
             // Map scores by date
             const scoresMap = new Map<string, DailyScore>();
@@ -269,6 +281,7 @@ export default function HabitPage() {
                         priorities={priorities}
                         todos={todos}
                         dailyContent={dailyContent}
+                        goals={goals}
                         onDataChange={loadData}
                     />
                 ) : activeTab === 'statistics' ? (
@@ -387,6 +400,7 @@ function DailyView({
     priorities,
     todos,
     dailyContent,
+    goals,
     onDataChange,
 }: {
     date: Date;
@@ -395,6 +409,7 @@ function DailyView({
     priorities: Priority[];
     todos: Todo[];
     dailyContent: DailyContent | null;
+    goals: any[];
     onDataChange: () => void;
 }) {
     const [newHabitName, setNewHabitName] = useState('');
@@ -404,9 +419,11 @@ function DailyView({
     const [newPriority, setNewPriority] = useState('');
     const [newPriorityCategory, setNewPriorityCategory] = useState<Category | null>(null);
     const [newPriorityTimeOfDay, setNewPriorityTimeOfDay] = useState<TimeOfDay | null>(null);
+    const [newPriorityGoalId, setNewPriorityGoalId] = useState<string | null>(null);
     const [newTodo, setNewTodo] = useState('');
     const [newTodoCategory, setNewTodoCategory] = useState<Category | null>(null);
     const [newTodoTimeOfDay, setNewTodoTimeOfDay] = useState<TimeOfDay | null>(null);
+    const [newTodoGoalId, setNewTodoGoalId] = useState<string | null>(null);
     const [editingContent, setEditingContent] = useState<DailyContent>({
         lessons: dailyContent?.lessons || '',
         ideas: dailyContent?.ideas || '',
@@ -523,12 +540,14 @@ function DailyView({
                     text: newPriority,
                     category: newPriorityCategory,
                     time_of_day: newPriorityTimeOfDay,
+                    goal_id: newPriorityGoalId,
                     completed: false,
                 });
 
             setNewPriority('');
             setNewPriorityCategory(null);
             setNewPriorityTimeOfDay(null);
+            setNewPriorityGoalId(null);
             await saveDailyScore();
             onDataChange();
         } catch (error) {
@@ -565,12 +584,14 @@ function DailyView({
                     title: newTodo,
                     category: newTodoCategory,
                     time_of_day: newTodoTimeOfDay,
+                    goal_id: newTodoGoalId,
                     is_done: false,
                 });
 
             setNewTodo('');
             setNewTodoCategory(null);
             setNewTodoTimeOfDay(null);
+            setNewTodoGoalId(null);
             await saveDailyScore();
             onDataChange();
         } catch (error) {
@@ -723,6 +744,7 @@ function DailyView({
             {/* Priorities Section */}
             <PrioritiesSection
                 priorities={priorities}
+                goals={goals}
                 onToggle={handleTogglePriority}
                 onAdd={handleAddPriority}
                 newPriority={newPriority}
@@ -731,11 +753,14 @@ function DailyView({
                 setNewPriorityCategory={setNewPriorityCategory}
                 newPriorityTimeOfDay={newPriorityTimeOfDay}
                 setNewPriorityTimeOfDay={setNewPriorityTimeOfDay}
+                newPriorityGoalId={newPriorityGoalId}
+                setNewPriorityGoalId={setNewPriorityGoalId}
             />
 
             {/* Todos Section */}
             <TodosSection
                 todos={todos}
+                goals={goals}
                 onToggle={handleToggleTodo}
                 onAdd={handleAddTodo}
                 newTodo={newTodo}
@@ -744,6 +769,8 @@ function DailyView({
                 setNewTodoCategory={setNewTodoCategory}
                 newTodoTimeOfDay={newTodoTimeOfDay}
                 setNewTodoTimeOfDay={setNewTodoTimeOfDay}
+                newTodoGoalId={newTodoGoalId}
+                setNewTodoGoalId={setNewTodoGoalId}
             />
 
             {/* Daily Content Section */}
@@ -979,6 +1006,7 @@ function HabitsSection({
 
 function PrioritiesSection({
     priorities,
+    goals,
     onToggle,
     onAdd,
     newPriority,
@@ -987,34 +1015,42 @@ function PrioritiesSection({
     setNewPriorityCategory,
     newPriorityTimeOfDay,
     setNewPriorityTimeOfDay,
+    newPriorityGoalId,
+    setNewPriorityGoalId,
 }: any) {
     return (
         <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
             <h3 className="text-sm font-semibold mb-3">Top Priorities</h3>
             <div className="space-y-2 mb-3">
-                {priorities.map((priority: Priority) => (
-                    <div key={priority.id} className="flex items-center gap-2">
-                        <button
-                            onClick={() => onToggle(priority.id, priority.completed)}
-                            className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-                                priority.completed
-                                    ? 'bg-amber-400 border-amber-400'
-                                    : 'border-slate-600'
-                            }`}
-                        >
-                            {priority.completed && <span className="text-black text-xs">✓</span>}
-                        </button>
-                        <span className={`flex-1 text-sm ${priority.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
-                            {priority.text}
-                        </span>
-                        {priority.category && (
-                            <span className="text-xs text-slate-400 capitalize">{priority.category}</span>
-                        )}
-                        {priority.time_of_day && (
-                            <span className="text-xs text-slate-400 capitalize">{priority.time_of_day}</span>
-                        )}
-                    </div>
-                ))}
+                {priorities.map((priority: Priority) => {
+                    const linkedGoal = goals.find((g: any) => g.id === priority.goal_id);
+                    return (
+                        <div key={priority.id} className="flex items-center gap-2">
+                            <button
+                                onClick={() => onToggle(priority.id, priority.completed)}
+                                className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                                    priority.completed
+                                        ? 'bg-amber-400 border-amber-400'
+                                        : 'border-slate-600'
+                                }`}
+                            >
+                                {priority.completed && <span className="text-black text-xs">✓</span>}
+                            </button>
+                            <span className={`flex-1 text-sm ${priority.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                                {priority.text}
+                                {linkedGoal && (
+                                    <span className="ml-2 text-xs text-slate-400">→ {linkedGoal.name}</span>
+                                )}
+                            </span>
+                            {priority.category && (
+                                <span className="text-xs text-slate-400 capitalize">{priority.category}</span>
+                            )}
+                            {priority.time_of_day && (
+                                <span className="text-xs text-slate-400 capitalize">{priority.time_of_day}</span>
+                            )}
+                        </div>
+                    );
+                })}
             </div>
             <div className="flex gap-2 items-center border-t border-slate-800 pt-3">
                 <input
@@ -1045,6 +1081,17 @@ function PrioritiesSection({
                     <option value="afternoon">Afternoon</option>
                     <option value="evening">Evening</option>
                 </select>
+                <select
+                    value={newPriorityGoalId || ''}
+                    onChange={e => setNewPriorityGoalId(e.target.value || null)}
+                    className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
+                    title="Link to goal"
+                >
+                    <option value="">No Goal</option>
+                    {goals.map((goal: any) => (
+                        <option key={goal.id} value={goal.id}>{goal.name}</option>
+                    ))}
+                </select>
                 <button
                     onClick={onAdd}
                     className="rounded-md bg-amber-400 px-3 py-1 text-xs font-semibold text-black hover:bg-amber-300"
@@ -1058,6 +1105,7 @@ function PrioritiesSection({
 
 function TodosSection({
     todos,
+    goals,
     onToggle,
     onAdd,
     newTodo,
@@ -1066,32 +1114,40 @@ function TodosSection({
     setNewTodoCategory,
     newTodoTimeOfDay,
     setNewTodoTimeOfDay,
+    newTodoGoalId,
+    setNewTodoGoalId,
 }: any) {
     return (
         <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
             <h3 className="text-sm font-semibold mb-3">To-Do List</h3>
             <div className="space-y-2 mb-3">
-                {todos.map((todo: Todo) => (
-                    <div key={todo.id} className="flex items-center gap-2">
-                        <button
-                            onClick={() => onToggle(todo.id, todo.is_done)}
-                            className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-                                todo.is_done ? 'bg-amber-400 border-amber-400' : 'border-slate-600'
-                            }`}
-                        >
-                            {todo.is_done && <span className="text-black text-xs">✓</span>}
-                        </button>
-                        <span className={`flex-1 text-sm ${todo.is_done ? 'line-through text-slate-500' : 'text-slate-200'}`}>
-                            {todo.title}
-                        </span>
-                        {todo.category && (
-                            <span className="text-xs text-slate-400 capitalize">{todo.category}</span>
-                        )}
-                        {todo.time_of_day && (
-                            <span className="text-xs text-slate-400 capitalize">{todo.time_of_day}</span>
-                        )}
-                    </div>
-                ))}
+                {todos.map((todo: Todo) => {
+                    const linkedGoal = goals.find((g: any) => g.id === todo.goal_id);
+                    return (
+                        <div key={todo.id} className="flex items-center gap-2">
+                            <button
+                                onClick={() => onToggle(todo.id, todo.is_done)}
+                                className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                                    todo.is_done ? 'bg-amber-400 border-amber-400' : 'border-slate-600'
+                                }`}
+                            >
+                                {todo.is_done && <span className="text-black text-xs">✓</span>}
+                            </button>
+                            <span className={`flex-1 text-sm ${todo.is_done ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                                {todo.title}
+                                {linkedGoal && (
+                                    <span className="ml-2 text-xs text-slate-400">→ {linkedGoal.name}</span>
+                                )}
+                            </span>
+                            {todo.category && (
+                                <span className="text-xs text-slate-400 capitalize">{todo.category}</span>
+                            )}
+                            {todo.time_of_day && (
+                                <span className="text-xs text-slate-400 capitalize">{todo.time_of_day}</span>
+                            )}
+                        </div>
+                    );
+                })}
             </div>
             <div className="flex gap-2 items-center border-t border-slate-800 pt-3">
                 <input
@@ -1121,6 +1177,17 @@ function TodosSection({
                     <option value="morning">Morning</option>
                     <option value="afternoon">Afternoon</option>
                     <option value="evening">Evening</option>
+                </select>
+                <select
+                    value={newTodoGoalId || ''}
+                    onChange={e => setNewTodoGoalId(e.target.value || null)}
+                    className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
+                    title="Link to goal"
+                >
+                    <option value="">No Goal</option>
+                    {goals.map((goal: any) => (
+                        <option key={goal.id} value={goal.id}>{goal.name}</option>
+                    ))}
                 </select>
                 <button
                     onClick={onAdd}
