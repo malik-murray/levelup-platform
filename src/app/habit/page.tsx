@@ -1803,6 +1803,9 @@ function GoalsView() {
         is_bad_habit: boolean;
         auto_streak_milestones: boolean; // Enable automatic streak milestones
     }>>([]);
+    const [linkedPrioritiesCount, setLinkedPrioritiesCount] = useState(0);
+    const [linkedTodosCount, setLinkedTodosCount] = useState(0);
+    const [showSummarySection, setShowSummarySection] = useState(false);
 
     useEffect(() => {
         loadGoals();
@@ -2008,6 +2011,9 @@ function GoalsView() {
             setGoalHabits([]);
             setEditingGoal(null);
             setShowGoalForm(false);
+            setLinkedPrioritiesCount(0);
+            setLinkedTodosCount(0);
+            setShowSummarySection(false);
             loadGoals();
             loadHabitTemplates();
         } catch (error) {
@@ -2015,7 +2021,7 @@ function GoalsView() {
         }
     };
 
-    const handleEditGoal = (goal: any) => {
+    const handleEditGoal = async (goal: any) => {
         setEditingGoal(goal);
         setGoalForm({
             name: goal.name,
@@ -2054,7 +2060,33 @@ function GoalsView() {
             }));
         setGoalHabits(habitsData);
         
+        // Load counts for linked priorities and todos
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const { count: prioritiesCount } = await supabase
+                    .from('habit_daily_priorities')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('user_id', user.id)
+                    .eq('goal_id', goal.id);
+                
+                const { count: todosCount } = await supabase
+                    .from('habit_daily_todos')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('user_id', user.id)
+                    .eq('goal_id', goal.id);
+                
+                setLinkedPrioritiesCount(prioritiesCount || 0);
+                setLinkedTodosCount(todosCount || 0);
+            }
+        } catch (error) {
+            console.error('Error loading linked counts:', error);
+            setLinkedPrioritiesCount(0);
+            setLinkedTodosCount(0);
+        }
+        
         setShowGoalForm(true);
+        setShowSummarySection(false);
     };
 
     const handleArchiveGoal = async (goalId: string) => {
@@ -2397,6 +2429,9 @@ const addHabitToForm = () => {
                             setGoalForm({ name: '', description: '', category: null, priority_score: 0, deadline: '', target_value: '', target_unit: '', current_value: '', is_completed: false });
                             setGoalMilestones([]);
                             setGoalHabits([]);
+                            setLinkedPrioritiesCount(0);
+                            setLinkedTodosCount(0);
+                            setShowSummarySection(false);
                         }}
                         className="rounded-md bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300"
                     >
@@ -2505,8 +2540,65 @@ const addHabitToForm = () => {
                         )}
                     </div>
 
-{/* Habits Section */}
-                    <div className="border-t border-slate-800 pt-4">
+                    {/* Milestones & Links Summary Section */}
+                    {editingGoal && (
+                        <div className="border-t border-slate-800 pt-4">
+                            <div className="w-full flex items-center justify-between p-3 rounded border border-slate-700 bg-slate-900">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const newExpanded = !showSummarySection;
+                                        setShowSummarySection(newExpanded);
+                                        if (newExpanded) {
+                                            // Scroll to the Habits section after a brief delay to allow DOM update
+                                            setTimeout(() => {
+                                                const habitsSection = document.getElementById('goal-form-habits-section');
+                                                if (habitsSection) {
+                                                    habitsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                                }
+                                            }, 100);
+                                        }
+                                    }}
+                                    className="flex-1 flex items-center justify-between text-left"
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-sm font-semibold">Milestones & Links</span>
+                                        <span className="text-xs text-slate-400">
+                                            {goalMilestones.length} milestone{goalMilestones.length !== 1 ? 's' : ''}, {goalHabits.length} habit{goalHabits.length !== 1 ? 's' : ''}
+                                            {linkedPrioritiesCount > 0 && `, ${linkedPrioritiesCount} priorit${linkedPrioritiesCount !== 1 ? 'ies' : 'y'} linked`}
+                                            {linkedTodosCount > 0 && `, ${linkedTodosCount} todo${linkedTodosCount !== 1 ? 's' : ''} linked`}
+                                        </span>
+                                    </div>
+                                    <span className="text-xs text-slate-400 ml-2">{showSummarySection ? '▼' : '▶'}</span>
+                                </button>
+                                <div className="flex items-center gap-1 ml-2">
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            // Scroll to habits section and trigger add
+                                            setTimeout(() => {
+                                                const habitsSection = document.getElementById('goal-form-habits-section');
+                                                if (habitsSection) {
+                                                    habitsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                                    setTimeout(() => {
+                                                        addHabitToForm();
+                                                    }, 300);
+                                                }
+                                            }, 100);
+                                        }}
+                                        className="text-xs text-amber-400 hover:text-amber-300 p-1 rounded hover:bg-slate-800"
+                                        title="Add habit"
+                                    >
+                                        <span className="text-lg leading-none">+</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Habits Section */}
+                    <div id="goal-form-habits-section" className="border-t border-slate-800 pt-4">
                         <div className="flex items-center justify-between mb-3">
                             <h4 className="text-sm font-semibold">Habits</h4>
                             <button
@@ -2588,7 +2680,7 @@ const addHabitToForm = () => {
                     </div>
                     
                     {/* Milestones Section */}
-                    <div className="border-t border-slate-800 pt-4">
+                    <div id="goal-form-milestones-section" className="border-t border-slate-800 pt-4">
                         <div className="flex items-center justify-between mb-3">
                             <h4 className="text-sm font-semibold">Milestones</h4>
                             <button
