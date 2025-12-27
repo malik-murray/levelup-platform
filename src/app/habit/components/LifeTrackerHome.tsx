@@ -1147,19 +1147,19 @@ function DailyPlanSection({
                         </label>
                     );
                 })}
-                <div className="flex gap-2 mt-3">
+                <div className="flex flex-col sm:flex-row gap-2 mt-3">
                     <input
                         type="text"
                         placeholder="Add todo"
                         value={newTodo}
                         onChange={(e) => setNewTodo(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && handleAddTodo()}
-                        className="flex-1 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
+                        className="flex-1 rounded-md border border-slate-700 bg-slate-800 px-3 py-3 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none min-h-[48px]"
                     />
                     <select
                         value={newTodoGoalId || ''}
                         onChange={(e) => setNewTodoGoalId(e.target.value || null)}
-                        className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
+                        className="rounded-md border border-slate-700 bg-slate-800 px-3 py-3 text-sm text-white focus:border-amber-500 focus:outline-none min-h-[48px] sm:min-w-[140px]"
                     >
                         <option value="">Link to goal (optional)</option>
                         {goals.map(goal => (
@@ -1168,7 +1168,7 @@ function DailyPlanSection({
                     </select>
                     <button
                         onClick={handleAddTodo}
-                        className="rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-black hover:bg-amber-400 transition-colors"
+                        className="rounded-md bg-amber-500 px-4 py-3 text-sm font-medium text-black hover:bg-amber-400 active:bg-amber-600 transition-colors min-h-[48px]"
                     >
                         Add
                     </button>
