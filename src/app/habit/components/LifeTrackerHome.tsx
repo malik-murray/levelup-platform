@@ -680,29 +680,29 @@ function CalendarOverviewSection({
                             <div className="text-xs font-medium mb-1 text-slate-400">
                                 {day.toLocaleDateString('en-US', { weekday: 'short' })}
                             </div>
-                            <div className="text-base font-bold mb-1.5">{day.getDate()}</div>
-                            {hasData && (
-                                <div className="space-y-1">
-                                    {score && (
-                                        <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-600 dark:text-amber-400">
-                                            {score.grade}
-                                        </div>
-                                    )}
-                                    {(dayHabitsCount > 0 || dayPriorities.length > 0 || dayTodos.length > 0) && (
-                                        <div className="flex flex-wrap gap-1 text-[10px] text-slate-500 dark:text-slate-400">
-                                            {dayHabitsCount > 0 && (
-                                                <span className="text-blue-500 dark:text-blue-400">H{dayHabitsCount}</span>
-                                            )}
-                                            {dayPriorities.length > 0 && (
-                                                <span className="text-purple-500 dark:text-purple-400">P{dayPriorities.length}</span>
-                                            )}
-                                            {dayTodos.length > 0 && (
-                                                <span className="text-green-500 dark:text-green-400">T{dayTodos.length}</span>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
+                            <div className="text-base font-bold mb-1">{day.getDate()}</div>
+                            <div className="space-y-1 min-h-[2.5rem]">
+                                {/* Grade Badge - Show separately when score exists */}
+                                {score && (
+                                    <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-600 dark:text-amber-400">
+                                        {score.grade}
+                                    </div>
+                                )}
+                                {/* H/P/T Counters - Compact format "H3 P2 T1" */}
+                                {(dayHabitsCount > 0 || dayPriorities.length > 0 || dayTodos.length > 0) && (
+                                    <div className="flex flex-wrap gap-0.5 text-[9px] font-medium leading-tight text-slate-600 dark:text-slate-300">
+                                        {dayHabitsCount > 0 && (
+                                            <span className="text-blue-600 dark:text-blue-400 font-semibold">H{dayHabitsCount}</span>
+                                        )}
+                                        {dayPriorities.length > 0 && (
+                                            <span className="text-purple-600 dark:text-purple-400 font-semibold">P{dayPriorities.length}</span>
+                                        )}
+                                        {dayTodos.length > 0 && (
+                                            <span className="text-green-600 dark:text-green-400 font-semibold">T{dayTodos.length}</span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         </button>
                     );
                 })}
