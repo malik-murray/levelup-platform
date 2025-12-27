@@ -467,10 +467,10 @@ function GoalsSection({
     return (
         <section className="space-y-4">
             <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold">Goals</h2>
+                <h2 className="text-xl sm:text-2xl font-bold">Goals</h2>
                 <button
                     onClick={() => setShowAddForm(!showAddForm)}
-                    className="rounded-md border border-amber-500/30 bg-amber-950/20 px-4 py-2 text-sm font-medium text-amber-400 hover:bg-amber-950/30 transition-colors"
+                    className="rounded-md border border-amber-500/30 bg-amber-950/20 px-4 py-2.5 text-sm font-medium text-amber-400 hover:bg-amber-950/30 active:bg-amber-950/40 transition-colors min-h-[44px]"
                 >
                     {showAddForm ? 'Cancel' : '+ Add Goal'}
                 </button>
@@ -483,20 +483,20 @@ function GoalsSection({
                         placeholder="Goal title"
                         value={newGoal.name}
                         onChange={(e) => setNewGoal({ ...newGoal, name: e.target.value })}
-                        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
+                        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-3 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none min-h-[48px]"
                     />
                     <textarea
                         placeholder="Description (optional)"
                         value={newGoal.description}
                         onChange={(e) => setNewGoal({ ...newGoal, description: e.target.value })}
-                        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
+                        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-3 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none min-h-[80px]"
                         rows={2}
                     />
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <select
                             value={newGoal.category}
                             onChange={(e) => setNewGoal({ ...newGoal, category: e.target.value })}
-                            className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
+                            className="rounded-md border border-slate-700 bg-slate-800 px-3 py-3 text-sm text-white focus:border-amber-500 focus:outline-none min-h-[48px]"
                         >
                             <option value="">Category</option>
                             <option value="career">Career</option>
@@ -523,11 +523,11 @@ function GoalsSection({
                         placeholder="Deadline"
                         value={newGoal.deadline}
                         onChange={(e) => setNewGoal({ ...newGoal, deadline: e.target.value })}
-                        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
+                        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-3 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none min-h-[48px]"
                     />
                     <button
                         onClick={handleAddGoal}
-                        className="w-full rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-black hover:bg-amber-400 transition-colors"
+                        className="w-full rounded-md bg-amber-500 px-4 py-3 text-sm font-medium text-black hover:bg-amber-400 active:bg-amber-600 transition-colors min-h-[48px]"
                     >
                         Add Goal
                     </button>
@@ -639,24 +639,24 @@ function CalendarOverviewSection({
     return (
         <section className="space-y-4">
             <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold">Calendar Overview</h2>
+                <h2 className="text-xl sm:text-2xl font-bold">Calendar Overview</h2>
                 <div className="flex gap-2">
                     <button
                         onClick={() => onWeekChange('prev')}
-                        className="rounded-md border border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-800 transition-colors"
+                        className="rounded-md border border-slate-700 px-4 py-2.5 text-sm hover:bg-slate-800 active:bg-slate-700 transition-colors min-h-[44px] min-w-[60px]"
                     >
                         ← Prev
                     </button>
                     <button
                         onClick={() => onWeekChange('next')}
-                        className="rounded-md border border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-800 transition-colors"
+                        className="rounded-md border border-slate-700 px-4 py-2.5 text-sm hover:bg-slate-800 active:bg-slate-700 transition-colors min-h-[44px] min-w-[60px]"
                     >
                         Next →
                     </button>
                 </div>
             </div>
 
-            <div className="grid grid-cols-7 gap-2">
+            <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
                 {weekDays.map((day) => {
                     const dateStr = formatDate(day);
                     const score = dailyScores.get(dateStr);
@@ -671,10 +671,10 @@ function CalendarOverviewSection({
                         <button
                             key={dateStr}
                             onClick={() => onDateSelect(day)}
-                            className={`rounded-lg border p-2.5 text-left transition-colors ${
+                            className={`rounded-lg border p-2 sm:p-2.5 text-left transition-colors min-h-[60px] sm:min-h-[80px] ${
                                 isSelected
                                     ? 'border-amber-500 bg-amber-950/30'
-                                    : 'border-slate-700 hover:border-slate-600'
+                                    : 'border-slate-700 hover:border-slate-600 active:bg-slate-800'
                             } ${isToday ? 'ring-2 ring-amber-400' : ''}`}
                         >
                             <div className="text-xs font-medium mb-1 text-slate-400">
@@ -941,15 +941,16 @@ function DailyPlanSection({
     };
 
     return (
-        <section className="space-y-6">
-            <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold">
+        <section className="space-y-4 sm:space-y-6">
+            {/* Header - Stack on mobile */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <h2 className="text-xl sm:text-2xl font-bold">
                     Daily Plan - {date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                 </h2>
                 <div className="flex items-center gap-3">
                     <div className="text-right relative group">
-                        <div className="text-3xl font-bold text-amber-400">{overallScore}</div>
-                        <div className="text-lg font-semibold text-amber-300">Grade: {grade}</div>
+                        <div className="text-2xl sm:text-3xl font-bold text-amber-400">{overallScore}</div>
+                        <div className="text-base sm:text-lg font-semibold text-amber-300">Grade: {grade}</div>
                         <span className="absolute top-0 right-0 text-amber-400 cursor-help" title="Total Score = Habits Score + Priorities Score + Todos Score (0-100)">ℹ️</span>
                         <div className="absolute right-0 top-full mt-2 hidden group-hover:block bg-slate-800 text-xs text-slate-200 p-3 rounded shadow-lg z-10 max-w-xs">
                             <div className="font-semibold mb-2">Scoring Formula:</div>
@@ -967,7 +968,7 @@ function DailyPlanSection({
                             });
                             setShowScoringModal(true);
                         }}
-                        className="text-slate-400 hover:text-amber-400 transition-colors p-2"
+                        className="text-slate-400 hover:text-amber-400 transition-colors p-2 min-w-[44px] min-h-[44px] flex items-center justify-center"
                         title="Edit scoring weights"
                     >
                         ⚙️
@@ -975,8 +976,8 @@ function DailyPlanSection({
                 </div>
             </div>
 
-            {/* Score Breakdown */}
-            <div className="grid grid-cols-3 gap-4 rounded-lg border border-slate-700 bg-slate-900 p-4">
+            {/* Score Breakdown - Stack on mobile */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 rounded-lg border border-slate-700 bg-slate-900 p-3 sm:p-4">
                 <div className="text-center">
                     <div className="text-xs text-slate-400 mb-1">Habits ({scoringSettings.habits_weight}%)</div>
                     <div className="text-2xl font-bold text-blue-400">{habitsScore}</div>
@@ -992,7 +993,7 @@ function DailyPlanSection({
             </div>
 
             {/* Habits */}
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-2">
+            <div className="rounded-lg border border-slate-700 bg-slate-900 p-3 sm:p-4 space-y-2">
                 <h3 className="text-base font-semibold mb-3 text-blue-400">Habits</h3>
                 {(['physical', 'mental', 'spiritual'] as Category[]).map(category => {
                     const categoryHabits = habitsWithEntries.filter(h => h.category === category);
@@ -1020,25 +1021,25 @@ function DailyPlanSection({
                                     }
                                     setExpandedCategories(newExpanded);
                                 }}
-                                className="w-full flex items-center justify-between p-3 hover:opacity-80 transition-opacity"
+                                className="w-full flex items-center justify-between p-4 min-h-[48px] hover:opacity-80 transition-opacity"
                             >
                                 <div className="flex items-center gap-3">
                                     <span className="text-sm font-semibold capitalize">{category}</span>
                                     <span className="text-xs text-slate-400">{completed}/{total} completed</span>
                                 </div>
-                                <span className="text-sm">{isExpanded ? '▼' : '▶'}</span>
+                                <span className="text-base">{isExpanded ? '▼' : '▶'}</span>
                             </button>
                             {isExpanded && (
-                                <div className="border-t border-slate-700/50 p-3 space-y-2 bg-slate-900/50">
+                                <div className="border-t border-slate-700/50 p-3 space-y-3 bg-slate-900/50">
                                     {categoryHabits.map((habit) => {
                                         const linkedGoal = goals.find(g => g.id === habit.goal_id);
                                         return (
-                                            <label key={habit.id} className="flex items-center gap-3 cursor-pointer">
+                                            <label key={habit.id} className="flex items-center gap-3 cursor-pointer min-h-[44px] py-1">
                                                 <input
                                                     type="checkbox"
                                                     checked={habit.status === 'checked'}
                                                     onChange={() => handleHabitToggle(habit.id, habit.status)}
-                                                    className="h-5 w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500"
+                                                    className="h-6 w-6 sm:h-5 sm:w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500 flex-shrink-0"
                                                 />
                                                 <span className="text-lg mr-2">{habit.icon}</span>
                                                 <div className="flex-1 flex items-center gap-2">
@@ -1061,17 +1062,17 @@ function DailyPlanSection({
             </div>
 
             {/* Priorities (Max 5) */}
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-2">
+            <div className="rounded-lg border border-slate-700 bg-slate-900 p-3 sm:p-4 space-y-2">
                 <h3 className="text-base font-semibold mb-3 text-purple-400">Priorities (Max 5)</h3>
                 {priorities.map((priority) => {
                     const linkedGoal = goals.find(g => g.id === priority.goal_id);
                     return (
-                        <label key={priority.id} className="flex items-center gap-3 cursor-pointer">
+                        <label key={priority.id} className="flex items-center gap-3 cursor-pointer min-h-[44px] py-1">
                             <input
                                 type="checkbox"
                                 checked={priority.completed}
                                 onChange={() => handleTogglePriority(priority.id, priority.completed)}
-                                className="h-5 w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500"
+                                className="h-6 w-6 sm:h-5 sm:w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500 flex-shrink-0"
                             />
                             <span className="flex-1 text-white">{priority.text}</span>
                             {linkedGoal && (
@@ -1080,7 +1081,7 @@ function DailyPlanSection({
                         </label>
                     );
                 })}
-                <div className="flex gap-2 mt-3">
+                <div className="flex flex-col sm:flex-row gap-2 mt-3">
                     <input
                         type="text"
                         placeholder="Add priority"
@@ -1088,7 +1089,7 @@ function DailyPlanSection({
                         onChange={(e) => setNewPriority(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && priorities.length < 5 && handleAddPriority()}
                         disabled={priorities.length >= 5}
-                        className={`flex-1 rounded-md border border-slate-700 px-3 py-2 text-sm placeholder-slate-400 focus:outline-none ${
+                        className={`flex-1 rounded-md border border-slate-700 px-3 py-3 text-sm placeholder-slate-400 focus:outline-none min-h-[48px] ${
                             priorities.length >= 5
                                 ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
                                 : 'bg-slate-800 text-white focus:border-amber-500'
@@ -1098,7 +1099,7 @@ function DailyPlanSection({
                         value={newPriorityGoalId || ''}
                         onChange={(e) => setNewPriorityGoalId(e.target.value || null)}
                         disabled={priorities.length >= 5}
-                        className={`rounded-md border border-slate-700 px-3 py-2 text-sm focus:outline-none ${
+                        className={`rounded-md border border-slate-700 px-3 py-3 text-sm focus:outline-none min-h-[48px] sm:min-w-[140px] ${
                             priorities.length >= 5
                                 ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
                                 : 'bg-slate-800 text-white focus:border-amber-500'
@@ -1112,10 +1113,10 @@ function DailyPlanSection({
                     <button
                         onClick={handleAddPriority}
                         disabled={priorities.length >= 5}
-                        className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                        className={`rounded-md px-4 py-3 text-sm font-medium transition-colors min-h-[48px] ${
                             priorities.length >= 5
                                 ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
-                                : 'bg-amber-500 text-black hover:bg-amber-400'
+                                : 'bg-amber-500 text-black hover:bg-amber-400 active:bg-amber-600'
                         }`}
                     >
                         Add
@@ -1127,17 +1128,17 @@ function DailyPlanSection({
             </div>
 
             {/* To-Do List */}
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-2">
+            <div className="rounded-lg border border-slate-700 bg-slate-900 p-3 sm:p-4 space-y-2">
                 <h3 className="text-base font-semibold mb-3 text-green-400">To-Do List</h3>
                 {todos.map((todo) => {
                     const linkedGoal = goals.find(g => g.id === todo.goal_id);
                     return (
-                        <label key={todo.id} className="flex items-center gap-3 cursor-pointer">
+                        <label key={todo.id} className="flex items-center gap-3 cursor-pointer min-h-[44px] py-1">
                             <input
                                 type="checkbox"
                                 checked={todo.is_done}
                                 onChange={() => handleToggleTodo(todo.id, todo.is_done)}
-                                className="h-5 w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500"
+                                className="h-6 w-6 sm:h-5 sm:w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500 flex-shrink-0"
                             />
                             <span className="flex-1 text-white">{todo.title}</span>
                             {linkedGoal && (

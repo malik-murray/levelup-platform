@@ -334,15 +334,15 @@ export default function HabitPage() {
                 </div>
             </header>
 
-            {/* Tabs */}
+            {/* Tabs - Mobile-first: scrollable, larger tap targets */}
             <div className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-black">
-                <div className="mx-auto max-w-7xl px-6">
-                    <div className="flex gap-1">
+                <div className="mx-auto max-w-7xl">
+                    <div className="flex gap-1 overflow-x-auto px-4 sm:px-6 scrollbar-hide">
                         {(['home', 'calendar', 'daily', 'statistics', 'goals', 'habits'] as Tab[]).map(tab => (
                                 <button
                                 key={tab}
                                 onClick={() => setActiveTab(tab)}
-                                className={`px-4 py-3 text-sm font-medium capitalize transition-colors ${
+                                className={`px-4 py-4 text-sm font-medium capitalize transition-colors whitespace-nowrap min-h-[48px] flex items-center ${
                                     activeTab === tab
                                         ? 'border-b-2 border-amber-400 text-amber-400'
                                         : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
@@ -355,8 +355,8 @@ export default function HabitPage() {
                 </div>
             </div>
 
-            {/* Content */}
-            <div className="mx-auto max-w-7xl px-6 py-6">
+            {/* Content - Mobile-first padding */}
+            <div className="mx-auto max-w-7xl px-4 sm:px-6 py-4 sm:py-6">
                 {loading ? (
                     <div className="text-center py-12 text-slate-400">Loading...</div>
                 ) : activeTab === 'home' ? (

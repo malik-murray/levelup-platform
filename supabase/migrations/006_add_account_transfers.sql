@@ -24,3 +24,4 @@ CREATE INDEX IF NOT EXISTS idx_transactions_is_transfer ON transactions(is_trans
 
 
 
+
