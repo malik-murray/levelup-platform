@@ -39,6 +39,7 @@ type HabitEntry = {
     habit_template_id: string;
     date: string;
     status: HabitStatus;
+    checked_at: string | null;
 };
 
 type Priority = {
@@ -49,6 +50,7 @@ type Priority = {
     completed: boolean;
     goal_id: string | null;
     date: string;
+    completed_at: string | null;
 };
 
 type Todo = {
@@ -59,6 +61,7 @@ type Todo = {
     is_done: boolean;
     goal_id: string | null;
     date: string;
+    completed_at: string | null;
 };
 
 type DailyContent = {
@@ -792,6 +795,7 @@ function DailyPlanSection({
             ...template,
             entry: entry || null,
             status: (entry?.status || 'missed') as HabitStatus,
+            checked_at: entry?.checked_at || null,
         };
     });
 
@@ -885,8 +889,7 @@ function DailyPlanSection({
                     .eq('user_id', user.id);
             }
             
-            // Refresh data to ensure consistency
-            onDataChange();
+            // No need to reload - local state already updated optimistically
         } catch (error) {
             console.error('Error reordering habits:', error);
             // Revert on error
@@ -896,12 +899,13 @@ function DailyPlanSection({
 
     const handleHabitToggle = async (templateId: string, currentStatus: HabitStatus) => {
         const nextStatus: HabitStatus = currentStatus === 'missed' ? 'checked' : 'missed';
+        const checkedAt = nextStatus === 'checked' ? new Date().toISOString() : null;
         
         // Optimistic update: update local state immediately
         const existingEntry = dateEntries.find(e => e.habit_template_id === templateId);
         if (existingEntry) {
             setLocalHabitEntries(prev => prev.map(e => 
-                e.id === existingEntry.id ? { ...e, status: nextStatus } : e
+                e.id === existingEntry.id ? { ...e, status: nextStatus, checked_at: checkedAt } : e
             ));
         } else {
             // For new entries, we'll add it after the insert succeeds
@@ -913,17 +917,25 @@ function DailyPlanSection({
                 // Revert on error
                 if (existingEntry) {
                     setLocalHabitEntries(prev => prev.map(e => 
-                        e.id === existingEntry.id ? { ...e, status: currentStatus } : e
+                        e.id === existingEntry.id ? { ...e, status: currentStatus, checked_at: existingEntry.checked_at } : e
                     ));
                 }
                 return;
             }
 
             if (existingEntry) {
-                await supabase
+                const { data: updatedEntry } = await supabase
                     .from('habit_daily_entries')
-                    .update({ status: nextStatus })
-                    .eq('id', existingEntry.id);
+                    .update({ status: nextStatus, checked_at: checkedAt })
+                    .eq('id', existingEntry.id)
+                    .select()
+                    .single();
+                
+                if (updatedEntry) {
+                    setLocalHabitEntries(prev => prev.map(e => 
+                        e.id === existingEntry.id ? updatedEntry : e
+                    ));
+                }
             } else {
                 const { data: newEntry } = await supabase
                     .from('habit_daily_entries')
@@ -932,6 +944,7 @@ function DailyPlanSection({
                         date: dateStr,
                         habit_template_id: templateId,
                         status: nextStatus,
+                        checked_at: checkedAt,
                     })
                     .select()
                     .single();
@@ -948,7 +961,7 @@ function DailyPlanSection({
             // Revert optimistic update on error
             if (existingEntry) {
                 setLocalHabitEntries(prev => prev.map(e => 
-                    e.id === existingEntry.id ? { ...e, status: currentStatus } : e
+                    e.id === existingEntry.id ? { ...e, status: currentStatus, checked_at: existingEntry.checked_at } : e
                 ));
             }
         }
@@ -998,26 +1011,38 @@ function DailyPlanSection({
 
     const handleTogglePriority = async (id: string, completed: boolean) => {
         const newCompleted = !completed;
+        const completedAt = newCompleted ? new Date().toISOString() : null;
         
         // Optimistic update: update local state immediately
+        const existingPriority = localPriorities.find(p => p.id === id);
         setLocalPriorities(prev => prev.map(p => 
-            p.id === id ? { ...p, completed: newCompleted } : p
+            p.id === id ? { ...p, completed: newCompleted, completed_at: completedAt } : p
         ));
         
         try {
-            await supabase
+            const { data: updatedPriority } = await supabase
                 .from('habit_daily_priorities')
-                .update({ completed: newCompleted })
-                .eq('id', id);
+                .update({ completed: newCompleted, completed_at: completedAt })
+                .eq('id', id)
+                .select()
+                .single();
+            
+            if (updatedPriority) {
+                setLocalPriorities(prev => prev.map(p => 
+                    p.id === id ? updatedPriority : p
+                ));
+            }
             
             // Update score in background without blocking UI
             saveDailyScore().catch(err => console.error('Error saving score:', err));
         } catch (error) {
             console.error('Error updating priority:', error);
             // Revert optimistic update on error
-            setLocalPriorities(prev => prev.map(p => 
-                p.id === id ? { ...p, completed } : p
-            ));
+            if (existingPriority) {
+                setLocalPriorities(prev => prev.map(p => 
+                    p.id === id ? { ...p, completed, completed_at: existingPriority.completed_at } : p
+                ));
+            }
         }
     };
 
@@ -1064,26 +1089,38 @@ function DailyPlanSection({
 
     const handleToggleTodo = async (id: string, isDone: boolean) => {
         const newIsDone = !isDone;
+        const completedAt = newIsDone ? new Date().toISOString() : null;
         
         // Optimistic update: update local state immediately
+        const existingTodo = localTodos.find(t => t.id === id);
         setLocalTodos(prev => prev.map(t => 
-            t.id === id ? { ...t, is_done: newIsDone } : t
+            t.id === id ? { ...t, is_done: newIsDone, completed_at: completedAt } : t
         ));
         
         try {
-            await supabase
+            const { data: updatedTodo } = await supabase
                 .from('habit_daily_todos')
-                .update({ is_done: newIsDone })
-                .eq('id', id);
+                .update({ is_done: newIsDone, completed_at: completedAt })
+                .eq('id', id)
+                .select()
+                .single();
+            
+            if (updatedTodo) {
+                setLocalTodos(prev => prev.map(t => 
+                    t.id === id ? updatedTodo : t
+                ));
+            }
             
             // Update score in background without blocking UI
             saveDailyScore().catch(err => console.error('Error saving score:', err));
         } catch (error) {
             console.error('Error updating todo:', error);
             // Revert optimistic update on error
-            setLocalTodos(prev => prev.map(t => 
-                t.id === id ? { ...t, is_done: isDone } : t
-            ));
+            if (existingTodo) {
+                setLocalTodos(prev => prev.map(t => 
+                    t.id === id ? { ...t, is_done: isDone, completed_at: existingTodo.completed_at } : t
+                ));
+            }
         }
     };
 
@@ -1313,6 +1350,11 @@ function DailyPlanSection({
                                                         <span className="text-lg mr-2">{habit.icon}</span>
                                                         <div className="flex-1 flex items-center gap-2">
                                                             <span className="text-white">{habit.name}</span>
+                                                            {habit.checked_at && habit.status === 'checked' && (
+                                                                <span className="text-xs text-slate-500 opacity-60">
+                                                                    {new Date(habit.checked_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     </label>
                                                 </div>
@@ -1345,6 +1387,11 @@ function DailyPlanSection({
                             <span className="flex-1 text-white">{priority.text}</span>
                             {linkedGoal && (
                                 <span className="text-xs text-slate-400">→ {linkedGoal.name}</span>
+                            )}
+                            {priority.completed_at && priority.completed && (
+                                <span className="text-xs text-slate-500 opacity-60">
+                                    {new Date(priority.completed_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                </span>
                             )}
                         </label>
                     );
@@ -1411,6 +1458,11 @@ function DailyPlanSection({
                             <span className="flex-1 text-white">{todo.title}</span>
                             {linkedGoal && (
                                 <span className="text-xs text-slate-400">→ {linkedGoal.name}</span>
+                            )}
+                            {todo.completed_at && todo.is_done && (
+                                <span className="text-xs text-slate-500 opacity-60">
+                                    {new Date(todo.completed_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                </span>
                             )}
                         </label>
                     );

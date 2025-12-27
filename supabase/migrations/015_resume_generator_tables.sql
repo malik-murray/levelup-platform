@@ -128,3 +128,4 @@ CREATE TRIGGER update_templates_updated_at BEFORE UPDATE ON templates
 
 
 
+
