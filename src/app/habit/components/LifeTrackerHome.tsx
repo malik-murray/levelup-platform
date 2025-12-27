@@ -795,22 +795,53 @@ function DailyPlanSection({
         };
     });
 
-    // Calculate weighted scores: (completed/total) * weight
+    // Calculate percentage scores: (completed/total) * 100
     const habitsCompleted = habitsWithEntries.filter(h => h.status === 'checked').length;
     const habitsTotal = habitsWithEntries.length;
-    const habitsScore = habitsTotal === 0 ? 0 : Math.round((habitsCompleted / habitsTotal) * scoringSettings.habits_weight);
+    const habitsScore = habitsTotal === 0 ? 0 : Math.round((habitsCompleted / habitsTotal) * 100);
     
     const prioritiesCompleted = localPriorities.filter(p => p.completed).length;
     const prioritiesTotal = localPriorities.length;
-    const prioritiesScore = prioritiesTotal === 0 ? 0 : Math.round((prioritiesCompleted / prioritiesTotal) * scoringSettings.priorities_weight);
+    const prioritiesScore = prioritiesTotal === 0 ? 0 : Math.round((prioritiesCompleted / prioritiesTotal) * 100);
     
     const todosCompleted = localTodos.filter(t => t.is_done).length;
     const todosTotal = localTodos.length;
-    const todosScore = todosTotal === 0 ? 0 : Math.round((todosCompleted / todosTotal) * scoringSettings.todos_weight);
+    const todosScore = todosTotal === 0 ? 0 : Math.round((todosCompleted / todosTotal) * 100);
 
-    // Overall score is the sum of weighted scores (0-100)
-    const overallScore = habitsScore + prioritiesScore + todosScore;
+    // Overall score is the weighted average: (habitsScore * habits_weight + prioritiesScore * priorities_weight + todosScore * todos_weight) / 100
+    const overallScore = Math.round(
+        (habitsScore * scoringSettings.habits_weight + 
+         prioritiesScore * scoringSettings.priorities_weight + 
+         todosScore * scoringSettings.todos_weight) / 100
+    );
     const grade = getGrade(overallScore);
+    
+    // Category scores - calculate directly here
+    const allItems = [...habitsWithEntries, ...localPriorities, ...localTodos];
+    const physicalItems = allItems.filter((item: any) => item.category === 'physical');
+    const physicalCompleted = physicalItems.filter((item: any) => (item.status === 'checked') || item.completed || item.is_done).length;
+    const physicalScore = physicalItems.length === 0 ? 0 : Math.round((physicalCompleted / physicalItems.length) * 100);
+    
+    const mentalItems = allItems.filter((item: any) => item.category === 'mental');
+    const mentalCompleted = mentalItems.filter((item: any) => (item.status === 'checked') || item.completed || item.is_done).length;
+    const mentalScore = mentalItems.length === 0 ? 0 : Math.round((mentalCompleted / mentalItems.length) * 100);
+    
+    const spiritualItems = allItems.filter((item: any) => item.category === 'spiritual');
+    const spiritualCompleted = spiritualItems.filter((item: any) => (item.status === 'checked') || item.completed || item.is_done).length;
+    const spiritualScore = spiritualItems.length === 0 ? 0 : Math.round((spiritualCompleted / spiritualItems.length) * 100);
+
+    // Time of day scores - calculate directly here
+    const morningItems = allItems.filter((item: any) => item.time_of_day === 'morning');
+    const morningCompleted = morningItems.filter((item: any) => (item.status === 'checked') || item.completed || item.is_done).length;
+    const morningScore = morningItems.length === 0 ? 0 : Math.round((morningCompleted / morningItems.length) * 100);
+    
+    const afternoonItems = allItems.filter((item: any) => item.time_of_day === 'afternoon');
+    const afternoonCompleted = afternoonItems.filter((item: any) => (item.status === 'checked') || item.completed || item.is_done).length;
+    const afternoonScore = afternoonItems.length === 0 ? 0 : Math.round((afternoonCompleted / afternoonItems.length) * 100);
+    
+    const eveningItems = allItems.filter((item: any) => item.time_of_day === 'evening');
+    const eveningCompleted = eveningItems.filter((item: any) => (item.status === 'checked') || item.completed || item.is_done).length;
+    const eveningScore = eveningItems.length === 0 ? 0 : Math.round((eveningCompleted / eveningItems.length) * 100);
 
     const handleHabitReorder = async (draggedId: string, targetId: string, category: Category) => {
         // Get habits in the same category, sorted by sort_order
@@ -1090,12 +1121,12 @@ function DailyPlanSection({
                     score_habits: habitsScore,
                     score_priorities: prioritiesScore,
                     score_todos: todosScore,
-                    score_physical: 0,
-                    score_mental: 0,
-                    score_spiritual: 0,
-                    score_morning: 0,
-                    score_afternoon: 0,
-                    score_evening: 0,
+                    score_physical: physicalScore,
+                    score_mental: mentalScore,
+                    score_spiritual: spiritualScore,
+                    score_morning: morningScore,
+                    score_afternoon: afternoonScore,
+                    score_evening: eveningScore,
                 });
         } catch (error) {
             console.error('Error saving score:', error);
@@ -1111,7 +1142,7 @@ function DailyPlanSection({
                 </h2>
                 <div className="flex items-center gap-3">
                     <div className="text-right relative group">
-                        <div className="text-2xl sm:text-3xl font-bold text-amber-400">{overallScore}</div>
+                        <div className="text-2xl sm:text-3xl font-bold text-amber-400">{overallScore}%</div>
                         <div className="text-base sm:text-lg font-semibold text-amber-300">Grade: {grade}</div>
                         <span className="absolute top-0 right-0 text-amber-400 cursor-help" title="Total Score = Habits Score + Priorities Score + Todos Score (0-100)">ℹ️</span>
                         <div className="absolute right-0 top-full mt-2 hidden group-hover:block bg-slate-800 text-xs text-slate-200 p-3 rounded shadow-lg z-10 max-w-xs">
@@ -1141,16 +1172,48 @@ function DailyPlanSection({
             {/* Score Breakdown - Stack on mobile */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 rounded-lg border border-slate-700 bg-slate-900 p-3 sm:p-4">
                 <div className="text-center">
-                    <div className="text-xs text-slate-400 mb-1">Habits ({scoringSettings.habits_weight}%)</div>
-                    <div className="text-2xl font-bold text-blue-400">{habitsScore}</div>
+                    <div className="text-xs text-slate-400 mb-1">Habit Score</div>
+                    <div className="text-2xl font-bold text-blue-400">{habitsScore}%</div>
                 </div>
                 <div className="text-center">
-                    <div className="text-xs text-slate-400 mb-1">Priorities ({scoringSettings.priorities_weight}%)</div>
-                    <div className="text-2xl font-bold text-purple-400">{prioritiesScore}</div>
+                    <div className="text-xs text-slate-400 mb-1">Priority Score</div>
+                    <div className="text-2xl font-bold text-purple-400">{prioritiesScore}%</div>
                 </div>
                 <div className="text-center">
-                    <div className="text-xs text-slate-400 mb-1">Todos ({scoringSettings.todos_weight}%)</div>
-                    <div className="text-2xl font-bold text-green-400">{todosScore}</div>
+                    <div className="text-xs text-slate-400 mb-1">Todo Score</div>
+                    <div className="text-2xl font-bold text-green-400">{todosScore}%</div>
+                </div>
+            </div>
+            
+            {/* Category Scores */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 rounded-lg border border-slate-700 bg-slate-900 p-3 sm:p-4">
+                <div className="text-center">
+                    <div className="text-xs text-slate-400 mb-1">Physical Score</div>
+                    <div className="text-xl font-bold text-blue-400">{physicalScore}%</div>
+                </div>
+                <div className="text-center">
+                    <div className="text-xs text-slate-400 mb-1">Mental Score</div>
+                    <div className="text-xl font-bold text-purple-400">{mentalScore}%</div>
+                </div>
+                <div className="text-center">
+                    <div className="text-xs text-slate-400 mb-1">Spiritual Score</div>
+                    <div className="text-xl font-bold text-amber-400">{spiritualScore}%</div>
+                </div>
+            </div>
+            
+            {/* Time of Day Scores */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 rounded-lg border border-slate-700 bg-slate-900 p-3 sm:p-4">
+                <div className="text-center">
+                    <div className="text-xs text-slate-400 mb-1">Morning Score</div>
+                    <div className="text-xl font-bold text-blue-400">{morningScore}%</div>
+                </div>
+                <div className="text-center">
+                    <div className="text-xs text-slate-400 mb-1">Afternoon Score</div>
+                    <div className="text-xl font-bold text-purple-400">{afternoonScore}%</div>
+                </div>
+                <div className="text-center">
+                    <div className="text-xs text-slate-400 mb-1">Evening Score</div>
+                    <div className="text-xl font-bold text-amber-400">{eveningScore}%</div>
                 </div>
             </div>
 

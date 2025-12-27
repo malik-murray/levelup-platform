@@ -582,12 +582,25 @@ function DailyView({
         };
     });
 
-    // Calculate weighted scores: (completed/total) * weight
-    const habitsScore = calculateHabitsScore(habitsWithEntries, scoringSettings.habits_weight);
-    const prioritiesScore = calculatePrioritiesScore(localPriorities, scoringSettings.priorities_weight);
-    const todosScore = calculateTodosScore(localTodos, scoringSettings.todos_weight);
-    // Overall score is the sum of weighted scores (0-100)
-    const overallScore = habitsScore + prioritiesScore + todosScore;
+    // Calculate percentage scores: (completed/total) * 100
+    const habitsCompleted = habitsWithEntries.filter(h => h.status === 'checked').length;
+    const habitsTotal = habitsWithEntries.length;
+    const habitsScore = habitsTotal === 0 ? 0 : Math.round((habitsCompleted / habitsTotal) * 100);
+    
+    const prioritiesCompleted = localPriorities.filter(p => p.completed).length;
+    const prioritiesTotal = localPriorities.length;
+    const prioritiesScore = prioritiesTotal === 0 ? 0 : Math.round((prioritiesCompleted / prioritiesTotal) * 100);
+    
+    const todosCompleted = localTodos.filter(t => t.is_done).length;
+    const todosTotal = localTodos.length;
+    const todosScore = todosTotal === 0 ? 0 : Math.round((todosCompleted / todosTotal) * 100);
+    
+    // Overall score is the weighted average: (habitsScore * habits_weight + prioritiesScore * priorities_weight + todosScore * todos_weight) / 100
+    const overallScore = Math.round(
+        (habitsScore * scoringSettings.habits_weight + 
+         prioritiesScore * scoringSettings.priorities_weight + 
+         todosScore * scoringSettings.todos_weight) / 100
+    );
     const grade = getGrade(overallScore);
     
     // Import getGrade from helpers instead of defining locally
@@ -924,7 +937,7 @@ function DailyView({
                                 ⚙️
                             </button>
                         </div>
-                        <div className="text-5xl font-bold text-amber-400">{overallScore}</div>
+                        <div className="text-5xl font-bold text-amber-400">{overallScore}%</div>
                         <div className="text-2xl font-semibold text-amber-300 mt-1">Grade: {grade}</div>
                         <div className="text-lg mt-2">{getVisualScore(overallScore)}</div>
                         <span className="absolute top-0 right-0 text-amber-400 cursor-help" title="Total Score = Habits Score + Priorities Score + Todos Score (0-100)">ℹ️</span>
