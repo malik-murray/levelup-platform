@@ -30,6 +30,7 @@ type HabitTemplate = {
     goal_id: string | null;
     is_bad_habit: boolean;
     is_active: boolean;
+    sort_order: number | null;
 };
 
 type HabitEntry = {
@@ -557,20 +558,22 @@ function DailyView({
     const [localHabitEntries, setLocalHabitEntries] = useState<HabitEntry[]>(habitEntries);
     const [localPriorities, setLocalPriorities] = useState<Priority[]>(priorities);
     const [localTodos, setLocalTodos] = useState<Todo[]>(todos);
+    const [localHabitTemplates, setLocalHabitTemplates] = useState<HabitTemplate[]>(habitTemplates);
     
     // Sync with props when they change (e.g., date change or external refresh)
     useEffect(() => {
         setLocalHabitEntries(habitEntries);
         setLocalPriorities(priorities);
         setLocalTodos(todos);
-    }, [habitEntries, priorities, todos]);
+        setLocalHabitTemplates(habitTemplates);
+    }, [habitEntries, priorities, todos, habitTemplates]);
 
     const dateStr = formatDate(date);
     const todayStr = formatDate(new Date());
 
     // Get entries for selected date
     const dateEntries = localHabitEntries.filter(e => e.date === dateStr);
-    const habitsWithEntries = habitTemplates.map(template => {
+    const habitsWithEntries = localHabitTemplates.map(template => {
         const entry = dateEntries.find(e => e.habit_template_id === template.id);
         return {
             ...template,
@@ -598,6 +601,57 @@ function DailyView({
     const morningScore = calculateTimeOfDayScore([...habitsWithEntries, ...priorities, ...todos], 'morning');
     const afternoonScore = calculateTimeOfDayScore([...habitsWithEntries, ...priorities, ...todos], 'afternoon');
     const eveningScore = calculateTimeOfDayScore([...habitsWithEntries, ...priorities, ...todos], 'evening');
+
+    const handleHabitReorder = async (draggedId: string, targetId: string, category: Category) => {
+        // Get habits in the same category, sorted by sort_order
+        const categoryHabits = localHabitTemplates
+            .filter(h => h.category === category && h.is_active)
+            .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+        
+        const draggedIndex = categoryHabits.findIndex(h => h.id === draggedId);
+        const targetIndex = categoryHabits.findIndex(h => h.id === targetId);
+        
+        if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) return;
+        
+        // Reorder the array
+        const reordered = [...categoryHabits];
+        const [removed] = reordered.splice(draggedIndex, 1);
+        reordered.splice(targetIndex, 0, removed);
+        
+        // Update sort_order for all affected habits
+        const updates = reordered.map((habit, index) => ({
+            id: habit.id,
+            sort_order: index + 1,
+        }));
+        
+        // Optimistically update local state
+        setLocalHabitTemplates(prev => prev.map(h => {
+            const update = updates.find(u => u.id === h.id);
+            return update ? { ...h, sort_order: update.sort_order } : h;
+        }));
+        
+        // Update database
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+            
+            // Batch update all affected habits
+            for (const update of updates) {
+                await supabase
+                    .from('habit_templates')
+                    .update({ sort_order: update.sort_order })
+                    .eq('id', update.id)
+                    .eq('user_id', user.id);
+            }
+            
+            // Refresh data to ensure consistency
+            onDataChange();
+        } catch (error) {
+            console.error('Error reordering habits:', error);
+            // Revert on error
+            setLocalHabitTemplates(habitTemplates);
+        }
+    };
 
     const handleHabitToggle = async (templateId: string, currentStatus: HabitStatus) => {
         const nextStatus: HabitStatus = currentStatus === 'missed' ? 'checked' : 'missed';
@@ -1219,7 +1273,11 @@ function HabitsSection({
     setNewHabitCategory,
     newHabitTimeOfDay,
     setNewHabitTimeOfDay,
+    onReorder,
 }: any) {
+    const [draggedHabitId, setDraggedHabitId] = useState<string | null>(null);
+    const [dragOverHabitId, setDragOverHabitId] = useState<string | null>(null);
+    
     const categoryColors = {
         physical: 'border-blue-500/30 bg-blue-950/30',
         mental: 'border-purple-500/30 bg-purple-950/30',
@@ -1235,9 +1293,9 @@ function HabitsSection({
     const badHabits = habits.filter((h: any) => h.is_bad_habit);
     
     const habitsByCategory = {
-        physical: goodHabits.filter((h: any) => h.category === 'physical'),
-        mental: goodHabits.filter((h: any) => h.category === 'mental'),
-        spiritual: goodHabits.filter((h: any) => h.category === 'spiritual'),
+        physical: goodHabits.filter((h: any) => h.category === 'physical').sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)),
+        mental: goodHabits.filter((h: any) => h.category === 'mental').sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)),
+        spiritual: goodHabits.filter((h: any) => h.category === 'spiritual').sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)),
     };
     
     const badHabitsByCategory = {
@@ -1257,24 +1315,65 @@ function HabitsSection({
                         <div className="space-y-2">
                             {habitsByCategory[category].map((habit: any) => {
                                 const linkedGoal = goals?.find((g: any) => g.id === habit.goal_id);
+                                const isDragging = draggedHabitId === habit.id;
+                                const isDragOver = dragOverHabitId === habit.id;
+                                
                                 return (
-                                <button
+                                <div
                                     key={habit.id}
-                                    onClick={() => onToggle(habit.id, habit.status)}
-                                    className="w-full flex items-center gap-2 p-2 rounded hover:bg-slate-900/50 transition-colors text-left"
+                                    draggable
+                                    onDragStart={(e) => {
+                                        setDraggedHabitId(habit.id);
+                                        e.dataTransfer.effectAllowed = 'move';
+                                        e.dataTransfer.setData('text/plain', habit.id);
+                                    }}
+                                    onDragOver={(e) => {
+                                        e.preventDefault();
+                                        e.dataTransfer.dropEffect = 'move';
+                                        if (draggedHabitId && draggedHabitId !== habit.id) {
+                                            setDragOverHabitId(habit.id);
+                                        }
+                                    }}
+                                    onDragLeave={() => {
+                                        setDragOverHabitId(null);
+                                    }}
+                                    onDrop={(e) => {
+                                        e.preventDefault();
+                                        const draggedId = e.dataTransfer.getData('text/plain');
+                                        if (draggedId && draggedId !== habit.id && onReorder) {
+                                            onReorder(draggedId, habit.id, category);
+                                        }
+                                        setDraggedHabitId(null);
+                                        setDragOverHabitId(null);
+                                    }}
+                                    onDragEnd={() => {
+                                        setDraggedHabitId(null);
+                                        setDragOverHabitId(null);
+                                    }}
+                                    className={`flex items-center gap-2 rounded transition-colors ${
+                                        isDragging ? 'opacity-50' : ''
+                                    } ${
+                                        isDragOver ? 'bg-amber-500/20 border-2 border-amber-500/50' : ''
+                                    }`}
                                 >
-                                    <span className="text-lg">{habit.icon}</span>
+                                    <span className="text-slate-500 text-lg select-none cursor-move" title="Drag to reorder">☰</span>
+                                    <button
+                                        onClick={() => onToggle(habit.id, habit.status)}
+                                        className="w-full flex items-center gap-2 p-2 rounded hover:bg-slate-900/50 transition-colors text-left"
+                                    >
+                                        <span className="text-lg">{habit.icon}</span>
                                         <div className="flex-1 flex items-center gap-2">
                                             <span className="text-sm text-slate-200">{habit.name}</span>
                                             {linkedGoal && (
                                                 <span className="text-xs text-slate-400">→ {linkedGoal.name}</span>
                                             )}
                                         </div>
-                                    {habit.time_of_day && (
-                                        <span className="text-xs text-slate-400 capitalize">{habit.time_of_day}</span>
-                                    )}
-                                    <span className="text-lg">{getStatusEmoji(habit.status)}</span>
-                                </button>
+                                        {habit.time_of_day && (
+                                            <span className="text-xs text-slate-400 capitalize">{habit.time_of_day}</span>
+                                        )}
+                                        <span className="text-lg">{getStatusEmoji(habit.status)}</span>
+                                    </button>
+                                </div>
                                 );
                             })}
                         </div>
