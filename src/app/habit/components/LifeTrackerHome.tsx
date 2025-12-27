@@ -510,13 +510,25 @@ function GoalsSection({
                             <option value="education">Education</option>
                             <option value="other">Other</option>
                         </select>
-                        <input
-                            type="number"
-                            placeholder="Priority score"
-                            value={newGoal.priority_score}
-                            onChange={(e) => setNewGoal({ ...newGoal, priority_score: parseInt(e.target.value) || 0 })}
-                            className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
-                        />
+                        <div className="flex flex-col gap-2">
+                            <label className="text-xs text-slate-400">Priority (1-5, 5 = highest)</label>
+                            <div className="flex gap-2">
+                                {[1, 2, 3, 4, 5].map((priority) => (
+                                    <button
+                                        key={priority}
+                                        type="button"
+                                        onClick={() => setNewGoal({ ...newGoal, priority_score: priority })}
+                                        className={`flex-1 rounded-md border px-2 py-2.5 text-sm font-semibold transition-colors min-h-[44px] ${
+                                            newGoal.priority_score === priority
+                                                ? 'border-amber-500 bg-amber-500/20 text-amber-400'
+                                                : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'
+                                        }`}
+                                    >
+                                        {priority}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
                     </div>
                     <input
                         type="date"

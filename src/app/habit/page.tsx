@@ -2532,20 +2532,32 @@ const addHabitToForm = () => {
                                 <option key={cat} value={cat}>{cat.charAt(0).toUpperCase() + cat.slice(1)}</option>
                             ))}
                         </select>
-                        <div className="flex gap-2">
-                            <input
-                                type="number"
-                                placeholder="Priority score"
-                                value={goalForm.priority_score}
-                                onChange={e => setGoalForm({ ...goalForm, priority_score: parseInt(e.target.value) || 0 })}
-                                className="flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
-                            />
+                        <div className="space-y-3">
+                            <div className="flex flex-col gap-2">
+                                <label className="text-xs text-slate-400">Priority (1-5, 5 = highest)</label>
+                                <div className="flex gap-2">
+                                    {[1, 2, 3, 4, 5].map((priority) => (
+                                        <button
+                                            key={priority}
+                                            type="button"
+                                            onClick={() => setGoalForm({ ...goalForm, priority_score: priority })}
+                                            className={`flex-1 rounded border px-2 py-2.5 text-sm font-semibold transition-colors min-h-[44px] ${
+                                                goalForm.priority_score === priority
+                                                    ? 'border-amber-500 bg-amber-500/20 text-amber-400'
+                                                    : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-600'
+                                            }`}
+                                        >
+                                            {priority}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
                             <input
                                 type="date"
                                 placeholder="Deadline"
                                 value={goalForm.deadline || ''}
                                 onChange={e => setGoalForm({ ...goalForm, deadline: e.target.value || null })}
-                                className="flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+                                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-3 text-sm min-h-[48px]"
                             />
                         </div>
                         <div className="flex gap-2">
@@ -3326,14 +3338,30 @@ const addHabitToForm = () => {
                             </div>
 
                             <div>
-                                <label className="text-xs text-slate-400 mb-1 block">Priority Score</label>
-                                <input
-                                    type="number"
-                                    value={bulkEditData.priority_score !== null ? bulkEditData.priority_score : ''}
-                                    onChange={(e) => setBulkEditData({ ...bulkEditData, priority_score: e.target.value === '' ? null : parseInt(e.target.value) || 0 })}
-                                    placeholder="-- Keep current / No change --"
-                                    className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-                                />
+                                <label className="text-xs text-slate-400 mb-2 block">Priority (1-5, 5 = highest)</label>
+                                <div className="flex gap-2 mb-2">
+                                    {[1, 2, 3, 4, 5].map((priority) => (
+                                        <button
+                                            key={priority}
+                                            type="button"
+                                            onClick={() => setBulkEditData({ ...bulkEditData, priority_score: priority })}
+                                            className={`flex-1 rounded border px-2 py-2.5 text-sm font-semibold transition-colors min-h-[44px] ${
+                                                bulkEditData.priority_score === priority
+                                                    ? 'border-amber-500 bg-amber-500/20 text-amber-400'
+                                                    : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'
+                                            }`}
+                                        >
+                                            {priority}
+                                        </button>
+                                    ))}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setBulkEditData({ ...bulkEditData, priority_score: null })}
+                                    className="w-full text-xs text-slate-400 hover:text-slate-200 py-1"
+                                >
+                                    Clear / Keep current
+                                </button>
                             </div>
 
                             <div>
