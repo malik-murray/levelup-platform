@@ -733,6 +733,12 @@ function DailyPlanSection({
     scoringSettings: { habits_weight: number; priorities_weight: number; todos_weight: number };
     onDataChange: () => void;
 }) {
+    const [showScoringModal, setShowScoringModal] = useState(false);
+    const [scoringFormData, setScoringFormData] = useState({
+        habits_weight: scoringSettings.habits_weight,
+        priorities_weight: scoringSettings.priorities_weight,
+        todos_weight: scoringSettings.todos_weight,
+    });
     const [newPriority, setNewPriority] = useState('');
     const [newPriorityGoalId, setNewPriorityGoalId] = useState<string | null>(null);
     const [newTodo, setNewTodo] = useState('');
@@ -940,16 +946,32 @@ function DailyPlanSection({
                 <h2 className="text-2xl font-bold">
                     Daily Plan - {date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                 </h2>
-                <div className="text-right relative group">
-                    <div className="text-3xl font-bold text-amber-400">{overallScore}</div>
-                    <div className="text-lg font-semibold text-amber-300">Grade: {grade}</div>
-                    <span className="absolute top-0 right-0 text-amber-400 cursor-help" title="Total Score = Habits Score + Priorities Score + Todos Score (0-100)">ℹ️</span>
-                    <div className="absolute right-0 top-full mt-2 hidden group-hover:block bg-slate-800 text-xs text-slate-200 p-3 rounded shadow-lg z-10 max-w-xs">
-                        <div className="font-semibold mb-2">Scoring Formula:</div>
-                        <div className="mb-1">Each category: (completed / total) × weight</div>
-                        <div className="mb-1">Total Score = Habits + Priorities + Todos</div>
-                        <div className="text-slate-400 mt-2">Example: 1/4 habits × 40% = 10 points</div>
+                <div className="flex items-center gap-3">
+                    <div className="text-right relative group">
+                        <div className="text-3xl font-bold text-amber-400">{overallScore}</div>
+                        <div className="text-lg font-semibold text-amber-300">Grade: {grade}</div>
+                        <span className="absolute top-0 right-0 text-amber-400 cursor-help" title="Total Score = Habits Score + Priorities Score + Todos Score (0-100)">ℹ️</span>
+                        <div className="absolute right-0 top-full mt-2 hidden group-hover:block bg-slate-800 text-xs text-slate-200 p-3 rounded shadow-lg z-10 max-w-xs">
+                            <div className="font-semibold mb-2">Scoring Formula:</div>
+                            <div className="mb-1">Each category: (completed / total) × weight</div>
+                            <div className="mb-1">Total Score = Habits + Priorities + Todos</div>
+                            <div className="text-slate-400 mt-2">Example: 1/4 habits × 40% = 10 points</div>
+                        </div>
                     </div>
+                    <button
+                        onClick={() => {
+                            setScoringFormData({
+                                habits_weight: scoringSettings.habits_weight,
+                                priorities_weight: scoringSettings.priorities_weight,
+                                todos_weight: scoringSettings.todos_weight,
+                            });
+                            setShowScoringModal(true);
+                        }}
+                        className="text-slate-400 hover:text-amber-400 transition-colors p-2"
+                        title="Edit scoring weights"
+                    >
+                        ⚙️
+                    </button>
                 </div>
             </div>
 
@@ -1202,6 +1224,144 @@ function DailyPlanSection({
                     />
                 </div>
             </div>
+
+            {/* Scoring Settings Modal */}
+            {showScoringModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowScoringModal(false)}>
+                    <div className="bg-slate-900 rounded-lg border border-slate-800 p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-semibold">Scoring Weights</h3>
+                            <button
+                                onClick={() => setShowScoringModal(false)}
+                                className="text-slate-400 hover:text-slate-200"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {/* Info Section */}
+                        <div className="mb-4 p-3 bg-slate-800/50 rounded border border-slate-700">
+                            <div className="text-xs text-slate-300 mb-2">
+                                <div className="font-semibold mb-1">How Scoring Works:</div>
+                                <div className="mb-1">• Each category score = (completed items / total items) × weight</div>
+                                <div className="mb-1">• Total Score = Habits Score + Priorities Score + Todos Score (0-100)</div>
+                                <div className="mb-1">• Grade: A (90-100), B (80-89), C (70-79), D (60-69), F (0-59)</div>
+                                <div className="text-slate-400 mt-2">Example: If you complete 2 out of 4 habits with 40% weight, Habits Score = (2/4) × 40 = 20 points</div>
+                            </div>
+                        </div>
+
+                        {/* Form Inputs */}
+                        <div className="space-y-3 mb-4">
+                            <div>
+                                <label className="text-xs text-slate-400 mb-1 block">Habits Weight (%)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    value={scoringFormData.habits_weight}
+                                    onChange={(e) => {
+                                        const value = parseInt(e.target.value) || 0;
+                                        setScoringFormData({
+                                            ...scoringFormData,
+                                            habits_weight: value,
+                                        });
+                                    }}
+                                    className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-slate-400 mb-1 block">Priorities Weight (%)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    value={scoringFormData.priorities_weight}
+                                    onChange={(e) => {
+                                        const value = parseInt(e.target.value) || 0;
+                                        setScoringFormData({
+                                            ...scoringFormData,
+                                            priorities_weight: value,
+                                        });
+                                    }}
+                                    className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-slate-400 mb-1 block">To-Dos Weight (%)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    value={scoringFormData.todos_weight}
+                                    onChange={(e) => {
+                                        const value = parseInt(e.target.value) || 0;
+                                        setScoringFormData({
+                                            ...scoringFormData,
+                                            todos_weight: value,
+                                        });
+                                    }}
+                                    className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Total Validation */}
+                        <div className={`mb-4 text-sm ${Math.abs(scoringFormData.habits_weight + scoringFormData.priorities_weight + scoringFormData.todos_weight - 100) < 0.01 ? 'text-green-400' : 'text-red-400'}`}>
+                            Total: {scoringFormData.habits_weight + scoringFormData.priorities_weight + scoringFormData.todos_weight}% 
+                            {Math.abs(scoringFormData.habits_weight + scoringFormData.priorities_weight + scoringFormData.todos_weight - 100) >= 0.01 && (
+                                <span className="ml-2">(Must equal 100%)</span>
+                            )}
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex gap-2">
+                            <button
+                                onClick={async () => {
+                                    const total = scoringFormData.habits_weight + scoringFormData.priorities_weight + scoringFormData.todos_weight;
+                                    if (Math.abs(total - 100) >= 0.01) {
+                                        alert('Weights must sum to exactly 100%');
+                                        return;
+                                    }
+
+                                    try {
+                                        const { data: { user } } = await supabase.auth.getUser();
+                                        if (!user) return;
+
+                                        await supabase
+                                            .from('habit_scoring_settings')
+                                            .upsert({
+                                                user_id: user.id,
+                                                habits_weight: scoringFormData.habits_weight,
+                                                priorities_weight: scoringFormData.priorities_weight,
+                                                todos_weight: scoringFormData.todos_weight,
+                                            });
+
+                                        setShowScoringModal(false);
+                                        onDataChange();
+                                        // Reload the page to refresh scoring settings
+                                        setTimeout(() => {
+                                            window.location.reload();
+                                        }, 100);
+                                    } catch (error) {
+                                        console.error('Error saving scoring settings:', error);
+                                        alert('Error saving settings');
+                                    }
+                                }}
+                                disabled={Math.abs(scoringFormData.habits_weight + scoringFormData.priorities_weight + scoringFormData.todos_weight - 100) >= 0.01}
+                                className="flex-1 rounded-md bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300 disabled:bg-slate-700 disabled:text-slate-400 disabled:cursor-not-allowed"
+                            >
+                                Save
+                            </button>
+                            <button
+                                onClick={() => setShowScoringModal(false)}
+                                className="rounded-md border border-slate-700 px-4 py-2 text-sm font-semibold hover:bg-slate-800"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </section>
     );
 }
