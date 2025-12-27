@@ -2392,7 +2392,20 @@ const addHabitToForm = () => {
         ? goals.filter(g => !g.category)
         : goals.filter(g => g.category === categoryFilter);
     
-    const mainGoals = filteredGoals;
+    // Sort goals by priority: priority > 0 descending, then priority 0 at bottom
+    const sortedGoals = [...filteredGoals].sort((a, b) => {
+        const aPriority = a.priority_score || 0;
+        const bPriority = b.priority_score || 0;
+        // If both are 0, maintain order
+        if (aPriority === 0 && bPriority === 0) return 0;
+        // If one is 0, it goes to bottom
+        if (aPriority === 0) return 1;
+        if (bPriority === 0) return -1;
+        // Otherwise sort descending
+        return bPriority - aPriority;
+    });
+    
+    const mainGoals = sortedGoals;
     
     // Group goals by category for "all" view
     const goalsByCategory = goalCategories.reduce((acc, cat) => {
@@ -2846,6 +2859,20 @@ const addHabitToForm = () => {
                                                             <div className="flex-1">
                                                                 <div className="flex items-center gap-2">
                                                                     <h3 className="text-lg font-semibold">{goal.name}</h3>
+                                                                    {(() => {
+                                                                        const priority = goal.priority_score || 0;
+                                                                        const getPriorityBadgeColor = (priority: number) => {
+                                                                            if (priority === 0) return 'bg-slate-600 text-slate-300';
+                                                                            if (priority >= 50) return 'bg-red-500 text-white';
+                                                                            if (priority >= 20) return 'bg-yellow-500 text-black';
+                                                                            return 'bg-slate-500 text-white';
+                                                                        };
+                                                                        return (
+                                                                            <span className={`text-xs px-2 py-0.5 rounded font-semibold ${getPriorityBadgeColor(priority)}`}>
+                                                                                {priority}
+                                                                            </span>
+                                                                        );
+                                                                    })()}
                                                                 {goal.category && (
                                                                     <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded capitalize">
                                                                         {goal.category}
@@ -3118,6 +3145,20 @@ const addHabitToForm = () => {
                                 <div className="flex-1">
                                     <div className="flex items-center gap-2">
                                         <h3 className="text-lg font-semibold">{goal.name}</h3>
+                                        {(() => {
+                                            const priority = goal.priority_score || 0;
+                                            const getPriorityBadgeColor = (priority: number) => {
+                                                if (priority === 0) return 'bg-slate-600 text-slate-300';
+                                                if (priority >= 50) return 'bg-red-500 text-white';
+                                                if (priority >= 20) return 'bg-yellow-500 text-black';
+                                                return 'bg-slate-500 text-white';
+                                            };
+                                            return (
+                                                <span className={`text-xs px-2 py-0.5 rounded font-semibold ${getPriorityBadgeColor(priority)}`}>
+                                                    {priority}
+                                                </span>
+                                            );
+                                        })()}
                                         {goal.category && (
                                             <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded capitalize">
                                                 {goal.category}

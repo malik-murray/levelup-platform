@@ -538,35 +538,58 @@ function GoalsSection({
                 {goals.length === 0 ? (
                     <p className="text-center py-8 text-slate-400">No goals yet. Add your first goal above!</p>
                 ) : (
-                    goals.map((goal) => (
-                        <button
-                            key={goal.id}
-                            onClick={() => onGoalClick(goal.id)}
-                            className={`w-full rounded-lg border p-4 text-left transition-colors hover:border-amber-500/50 ${
-                                categoryColors[goal.category || 'other'] || categoryColors.other
-                            } border-slate-700`}
-                        >
-                            <div className="flex items-start justify-between">
-                                <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <h3 className="font-semibold text-white">{goal.name}</h3>
-                                        <span className="text-xs text-slate-400">Priority: {goal.priority_score}</span>
-                                    </div>
-                                    {goal.description && (
-                                        <p className="text-sm text-slate-300 mb-2">{goal.description}</p>
-                                    )}
-                                    <div className="flex items-center gap-4 text-xs text-slate-400">
-                                        {goal.category && (
-                                            <span className="capitalize">{goal.category}</span>
+                    // Sort goals: priority > 0 descending, then priority 0 at bottom
+                    [...goals].sort((a, b) => {
+                        const aPriority = a.priority_score || 0;
+                        const bPriority = b.priority_score || 0;
+                        // If both are 0, maintain order
+                        if (aPriority === 0 && bPriority === 0) return 0;
+                        // If one is 0, it goes to bottom
+                        if (aPriority === 0) return 1;
+                        if (bPriority === 0) return -1;
+                        // Otherwise sort descending
+                        return bPriority - aPriority;
+                    }).map((goal) => {
+                        const priority = goal.priority_score || 0;
+                        const getPriorityBadgeColor = (priority: number) => {
+                            if (priority === 0) return 'bg-slate-600 text-slate-300';
+                            if (priority >= 50) return 'bg-red-500 text-white';
+                            if (priority >= 20) return 'bg-yellow-500 text-black';
+                            return 'bg-slate-500 text-white';
+                        };
+                        
+                        return (
+                            <button
+                                key={goal.id}
+                                onClick={() => onGoalClick(goal.id)}
+                                className={`w-full rounded-lg border p-4 text-left transition-colors hover:border-amber-500/50 ${
+                                    categoryColors[goal.category || 'other'] || categoryColors.other
+                                } border-slate-700`}
+                            >
+                                <div className="flex items-start justify-between">
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <h3 className="font-semibold text-white">{goal.name}</h3>
+                                            <span className={`text-xs px-2 py-0.5 rounded font-semibold ${getPriorityBadgeColor(priority)}`}>
+                                                {priority}
+                                            </span>
+                                        </div>
+                                        {goal.description && (
+                                            <p className="text-sm text-slate-300 mb-2">{goal.description}</p>
                                         )}
-                                        {goal.deadline && (
-                                            <span>Deadline: {new Date(goal.deadline).toLocaleDateString()}</span>
-                                        )}
+                                        <div className="flex items-center gap-4 text-xs text-slate-400">
+                                            {goal.category && (
+                                                <span className="capitalize">{goal.category}</span>
+                                            )}
+                                            {goal.deadline && (
+                                                <span>Deadline: {new Date(goal.deadline).toLocaleDateString()}</span>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        </button>
-                    ))
+                            </button>
+                        );
+                    })
                 )}
             </div>
         </section>
