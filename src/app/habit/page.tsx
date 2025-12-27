@@ -3339,6 +3339,7 @@ function HabitsManagementView({
                 .select('*')
                 .eq('user_id', user.id)
                 .eq('is_completed', false)
+                .eq('is_archived', false)
                 .order('name');
 
             setGoals(goalsData || []);
