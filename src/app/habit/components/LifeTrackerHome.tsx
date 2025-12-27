@@ -565,9 +565,11 @@ function GoalsSection({
                         const priority = goal.priority_score || 0;
                         const getPriorityBadgeColor = (priority: number) => {
                             if (priority === 0) return 'bg-slate-600 text-slate-300';
-                            if (priority >= 50) return 'bg-red-500 text-white';
-                            if (priority >= 20) return 'bg-yellow-500 text-black';
-                            return 'bg-slate-500 text-white';
+                            if (priority === 5) return 'bg-red-500 text-white';
+                            if (priority === 4) return 'bg-orange-500 text-white';
+                            if (priority === 3) return 'bg-yellow-500 text-black';
+                            if (priority === 2) return 'bg-slate-500 text-white';
+                            return 'bg-slate-600 text-slate-300'; // priority === 1 or 0
                         };
                         
                         return (
