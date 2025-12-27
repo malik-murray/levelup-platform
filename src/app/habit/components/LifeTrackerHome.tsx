@@ -766,9 +766,21 @@ function DailyPlanSection({
         news_updates: dailyContent?.news_updates || '',
     });
     const [expandedCategories, setExpandedCategories] = useState<Set<Category>>(new Set());
+    
+    // Local state for optimistic updates
+    const [localHabitEntries, setLocalHabitEntries] = useState<HabitEntry[]>(habitEntries);
+    const [localPriorities, setLocalPriorities] = useState<Priority[]>(priorities);
+    const [localTodos, setLocalTodos] = useState<Todo[]>(todos);
+    
+    // Sync with props when they change (e.g., date change or external refresh)
+    useEffect(() => {
+        setLocalHabitEntries(habitEntries);
+        setLocalPriorities(priorities);
+        setLocalTodos(todos);
+    }, [habitEntries, priorities, todos]);
 
     const dateStr = formatDate(date);
-    const dateEntries = habitEntries.filter(e => e.date === dateStr);
+    const dateEntries = localHabitEntries.filter(e => e.date === dateStr);
     const habitsWithEntries = habitTemplates.map(template => {
         const entry = dateEntries.find(e => e.habit_template_id === template.id);
         return {
@@ -783,12 +795,12 @@ function DailyPlanSection({
     const habitsTotal = habitsWithEntries.length;
     const habitsScore = habitsTotal === 0 ? 0 : Math.round((habitsCompleted / habitsTotal) * scoringSettings.habits_weight);
     
-    const prioritiesCompleted = priorities.filter(p => p.completed).length;
-    const prioritiesTotal = priorities.length;
+    const prioritiesCompleted = localPriorities.filter(p => p.completed).length;
+    const prioritiesTotal = localPriorities.length;
     const prioritiesScore = prioritiesTotal === 0 ? 0 : Math.round((prioritiesCompleted / prioritiesTotal) * scoringSettings.priorities_weight);
     
-    const todosCompleted = todos.filter(t => t.is_done).length;
-    const todosTotal = todos.length;
+    const todosCompleted = localTodos.filter(t => t.is_done).length;
+    const todosTotal = localTodos.length;
     const todosScore = todosTotal === 0 ? 0 : Math.round((todosCompleted / todosTotal) * scoringSettings.todos_weight);
 
     // Overall score is the sum of weighted scores (0-100)
@@ -798,113 +810,193 @@ function DailyPlanSection({
     const handleHabitToggle = async (templateId: string, currentStatus: HabitStatus) => {
         const nextStatus: HabitStatus = currentStatus === 'missed' ? 'checked' : 'missed';
         
+        // Optimistic update: update local state immediately
+        const existingEntry = dateEntries.find(e => e.habit_template_id === templateId);
+        if (existingEntry) {
+            setLocalHabitEntries(prev => prev.map(e => 
+                e.id === existingEntry.id ? { ...e, status: nextStatus } : e
+            ));
+        } else {
+            // For new entries, we'll add it after the insert succeeds
+        }
+        
         try {
             const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            if (!user) {
+                // Revert on error
+                if (existingEntry) {
+                    setLocalHabitEntries(prev => prev.map(e => 
+                        e.id === existingEntry.id ? { ...e, status: currentStatus } : e
+                    ));
+                }
+                return;
+            }
 
-            const existingEntry = dateEntries.find(e => e.habit_template_id === templateId);
-            
             if (existingEntry) {
                 await supabase
                     .from('habit_daily_entries')
                     .update({ status: nextStatus })
                     .eq('id', existingEntry.id);
             } else {
-                await supabase
+                const { data: newEntry } = await supabase
                     .from('habit_daily_entries')
                     .insert({
                         user_id: user.id,
                         date: dateStr,
                         habit_template_id: templateId,
                         status: nextStatus,
-                    });
+                    })
+                    .select()
+                    .single();
+                
+                if (newEntry) {
+                    setLocalHabitEntries(prev => [...prev, newEntry]);
+                }
             }
             
-            await saveDailyScore();
-            onDataChange();
+            // Update score in background without blocking UI
+            saveDailyScore().catch(err => console.error('Error saving score:', err));
         } catch (error) {
             console.error('Error updating habit:', error);
+            // Revert optimistic update on error
+            if (existingEntry) {
+                setLocalHabitEntries(prev => prev.map(e => 
+                    e.id === existingEntry.id ? { ...e, status: currentStatus } : e
+                ));
+            }
         }
     };
 
     const handleAddPriority = async () => {
         if (!newPriority.trim()) return;
-        if (priorities.length >= 5) return; // Enforce 5 priority limit
+        if (localPriorities.length >= 5) return; // Enforce 5 priority limit
+
+        const priorityText = newPriority.trim();
+        const priorityGoalId = newPriorityGoalId;
+        
+        // Clear input immediately for better UX
+        setNewPriority('');
+        setNewPriorityGoalId(null);
 
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
 
-            await supabase
+            const { data: newPriorityData } = await supabase
                 .from('habit_daily_priorities')
                 .insert({
                     user_id: user.id,
                     date: dateStr,
-                    text: newPriority,
+                    text: priorityText,
                     completed: false,
-                    goal_id: newPriorityGoalId,
-                });
+                    goal_id: priorityGoalId,
+                })
+                .select()
+                .single();
 
-            setNewPriority('');
-            setNewPriorityGoalId(null);
-            await saveDailyScore();
-            onDataChange();
+            if (newPriorityData) {
+                // Optimistic update: add to local state immediately
+                setLocalPriorities(prev => [...prev, newPriorityData]);
+            }
+            
+            // Update score in background without blocking UI
+            saveDailyScore().catch(err => console.error('Error saving score:', err));
         } catch (error) {
             console.error('Error adding priority:', error);
+            // Restore input on error
+            setNewPriority(priorityText);
+            setNewPriorityGoalId(priorityGoalId);
         }
     };
 
     const handleTogglePriority = async (id: string, completed: boolean) => {
+        const newCompleted = !completed;
+        
+        // Optimistic update: update local state immediately
+        setLocalPriorities(prev => prev.map(p => 
+            p.id === id ? { ...p, completed: newCompleted } : p
+        ));
+        
         try {
             await supabase
                 .from('habit_daily_priorities')
-                .update({ completed: !completed })
+                .update({ completed: newCompleted })
                 .eq('id', id);
             
-            await saveDailyScore();
-            onDataChange();
+            // Update score in background without blocking UI
+            saveDailyScore().catch(err => console.error('Error saving score:', err));
         } catch (error) {
             console.error('Error updating priority:', error);
+            // Revert optimistic update on error
+            setLocalPriorities(prev => prev.map(p => 
+                p.id === id ? { ...p, completed } : p
+            ));
         }
     };
 
     const handleAddTodo = async () => {
         if (!newTodo.trim()) return;
 
+        const todoTitle = newTodo.trim();
+        const todoGoalId = newTodoGoalId;
+        
+        // Clear input immediately for better UX
+        setNewTodo('');
+        setNewTodoGoalId(null);
+
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
 
-            await supabase
+            const { data: newTodoData } = await supabase
                 .from('habit_daily_todos')
                 .insert({
                     user_id: user.id,
                     date: dateStr,
-                    title: newTodo,
+                    title: todoTitle,
                     is_done: false,
-                    goal_id: newTodoGoalId,
-                });
+                    goal_id: todoGoalId,
+                })
+                .select()
+                .single();
 
-            setNewTodo('');
-            setNewTodoGoalId(null);
-            await saveDailyScore();
-            onDataChange();
+            if (newTodoData) {
+                // Optimistic update: add to local state immediately
+                setLocalTodos(prev => [...prev, newTodoData]);
+            }
+            
+            // Update score in background without blocking UI
+            saveDailyScore().catch(err => console.error('Error saving score:', err));
         } catch (error) {
             console.error('Error adding todo:', error);
+            // Restore input on error
+            setNewTodo(todoTitle);
+            setNewTodoGoalId(todoGoalId);
         }
     };
 
     const handleToggleTodo = async (id: string, isDone: boolean) => {
+        const newIsDone = !isDone;
+        
+        // Optimistic update: update local state immediately
+        setLocalTodos(prev => prev.map(t => 
+            t.id === id ? { ...t, is_done: newIsDone } : t
+        ));
+        
         try {
             await supabase
                 .from('habit_daily_todos')
-                .update({ is_done: !isDone })
+                .update({ is_done: newIsDone })
                 .eq('id', id);
             
-            await saveDailyScore();
-            onDataChange();
+            // Update score in background without blocking UI
+            saveDailyScore().catch(err => console.error('Error saving score:', err));
         } catch (error) {
             console.error('Error updating todo:', error);
+            // Revert optimistic update on error
+            setLocalTodos(prev => prev.map(t => 
+                t.id === id ? { ...t, is_done: isDone } : t
+            ));
         }
     };
 
@@ -1078,7 +1170,7 @@ function DailyPlanSection({
             {/* Priorities (Max 5) */}
             <div className="rounded-lg border border-slate-700 bg-slate-900 p-3 sm:p-4 space-y-2">
                 <h3 className="text-base font-semibold mb-3 text-purple-400">Priorities (Max 5)</h3>
-                {priorities.map((priority) => {
+                {localPriorities.map((priority) => {
                     const linkedGoal = goals.find(g => g.id === priority.goal_id);
                     return (
                         <label key={priority.id} className="flex items-center gap-3 cursor-pointer min-h-[44px] py-1">
@@ -1101,10 +1193,10 @@ function DailyPlanSection({
                         placeholder="Add priority"
                         value={newPriority}
                         onChange={(e) => setNewPriority(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && priorities.length < 5 && handleAddPriority()}
-                        disabled={priorities.length >= 5}
-                        className={`flex-1 rounded-md border border-slate-700 px-3 py-3 text-sm placeholder-slate-400 focus:outline-none min-h-[48px] ${
-                            priorities.length >= 5
+                        onKeyPress={(e) => e.key === 'Enter' && localPriorities.length < 5 && handleAddPriority()}
+                        disabled={localPriorities.length >= 5}
+                                className={`flex-1 rounded-md border border-slate-700 px-3 py-3 text-sm placeholder-slate-400 focus:outline-none min-h-[48px] ${
+                            localPriorities.length >= 5
                                 ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
                                 : 'bg-slate-800 text-white focus:border-amber-500'
                         }`}
@@ -1112,9 +1204,9 @@ function DailyPlanSection({
                     <select
                         value={newPriorityGoalId || ''}
                         onChange={(e) => setNewPriorityGoalId(e.target.value || null)}
-                        disabled={priorities.length >= 5}
+                        disabled={localPriorities.length >= 5}
                         className={`rounded-md border border-slate-700 px-3 py-3 text-sm focus:outline-none min-h-[48px] sm:min-w-[140px] ${
-                            priorities.length >= 5
+                            localPriorities.length >= 5
                                 ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
                                 : 'bg-slate-800 text-white focus:border-amber-500'
                         }`}
@@ -1126,9 +1218,9 @@ function DailyPlanSection({
                     </select>
                     <button
                         onClick={handleAddPriority}
-                        disabled={priorities.length >= 5}
+                        disabled={localPriorities.length >= 5}
                         className={`rounded-md px-4 py-3 text-sm font-medium transition-colors min-h-[48px] ${
-                            priorities.length >= 5
+                            localPriorities.length >= 5
                                 ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
                                 : 'bg-amber-500 text-black hover:bg-amber-400 active:bg-amber-600'
                         }`}
@@ -1136,7 +1228,7 @@ function DailyPlanSection({
                         Add
                     </button>
                 </div>
-                {priorities.length >= 5 && (
+                {localPriorities.length >= 5 && (
                     <p className="text-xs text-slate-400 mt-2">Maximum of 5 priorities per day allowed</p>
                 )}
             </div>
@@ -1144,7 +1236,7 @@ function DailyPlanSection({
             {/* To-Do List */}
             <div className="rounded-lg border border-slate-700 bg-slate-900 p-3 sm:p-4 space-y-2">
                 <h3 className="text-base font-semibold mb-3 text-green-400">To-Do List</h3>
-                {todos.map((todo) => {
+                {localTodos.map((todo) => {
                     const linkedGoal = goals.find(g => g.id === todo.goal_id);
                     return (
                         <label key={todo.id} className="flex items-center gap-3 cursor-pointer min-h-[44px] py-1">
@@ -1352,11 +1444,8 @@ function DailyPlanSection({
                                             });
 
                                         setShowScoringModal(false);
+                                        // Reload scoring settings without page reload
                                         onDataChange();
-                                        // Reload the page to refresh scoring settings
-                                        setTimeout(() => {
-                                            window.location.reload();
-                                        }, 100);
                                     } catch (error) {
                                         console.error('Error saving scoring settings:', error);
                                         alert('Error saving settings');

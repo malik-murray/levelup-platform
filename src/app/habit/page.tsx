@@ -288,7 +288,7 @@ export default function HabitPage() {
     const calendarDays = getDatesInMonth(currentMonth).map(date => {
         const dateStr = formatDate(date);
         return {
-            date,
+        date,
             score: dailyScores.get(dateStr) || null,
             prioritiesCount: prioritiesByDate.get(dateStr) || 0,
             todosCount: todosByDate.get(dateStr) || 0,
@@ -462,7 +462,7 @@ function CalendarView({
                         const hasData = score || prioritiesCount > 0 || todosCount > 0 || habitsCount > 0;
 
                         return (
-                            <button
+                                        <button
                                 key={formatDate(date)}
                                 onClick={() => onDateSelect(date)}
                                 className={`aspect-square border border-slate-200 dark:border-slate-800 p-1.5 text-left transition-colors ${
@@ -474,10 +474,10 @@ function CalendarView({
                                 <div className="text-xs font-medium mb-0.5">{date.getDate()}</div>
                                 {hasData && (
                                     <div className="space-y-0.5">
-                                        {score && (
+                                {score && (
                                             <div className="inline-flex items-center gap-1 px-1 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-600 dark:text-amber-400">
                                                 {score.grade}
-                                            </div>
+                                        </div>
                                         )}
                                         {(prioritiesCount > 0 || todosCount > 0 || habitsCount > 0) && (
                                             <div className="flex flex-wrap gap-0.5 text-[9px] text-slate-500 dark:text-slate-400">
@@ -494,7 +494,7 @@ function CalendarView({
                                         )}
                                     </div>
                                 )}
-                            </button>
+                                        </button>
                         );
                     })}
                 </div>
@@ -553,11 +553,23 @@ function DailyView({
         todos_weight: scoringSettings.todos_weight,
     });
 
+    // Local state for optimistic updates
+    const [localHabitEntries, setLocalHabitEntries] = useState<HabitEntry[]>(habitEntries);
+    const [localPriorities, setLocalPriorities] = useState<Priority[]>(priorities);
+    const [localTodos, setLocalTodos] = useState<Todo[]>(todos);
+    
+    // Sync with props when they change (e.g., date change or external refresh)
+    useEffect(() => {
+        setLocalHabitEntries(habitEntries);
+        setLocalPriorities(priorities);
+        setLocalTodos(todos);
+    }, [habitEntries, priorities, todos]);
+
     const dateStr = formatDate(date);
     const todayStr = formatDate(new Date());
 
     // Get entries for selected date
-    const dateEntries = habitEntries.filter(e => e.date === dateStr);
+    const dateEntries = localHabitEntries.filter(e => e.date === dateStr);
     const habitsWithEntries = habitTemplates.map(template => {
         const entry = dateEntries.find(e => e.habit_template_id === template.id);
         return {
@@ -569,8 +581,8 @@ function DailyView({
 
     // Calculate weighted scores: (completed/total) * weight
     const habitsScore = calculateHabitsScore(habitsWithEntries, scoringSettings.habits_weight);
-    const prioritiesScore = calculatePrioritiesScore(priorities, scoringSettings.priorities_weight);
-    const todosScore = calculateTodosScore(todos, scoringSettings.todos_weight);
+    const prioritiesScore = calculatePrioritiesScore(localPriorities, scoringSettings.priorities_weight);
+    const todosScore = calculateTodosScore(localTodos, scoringSettings.todos_weight);
     // Overall score is the sum of weighted scores (0-100)
     const overallScore = habitsScore + prioritiesScore + todosScore;
     const grade = getGrade(overallScore);
@@ -590,11 +602,25 @@ function DailyView({
     const handleHabitToggle = async (templateId: string, currentStatus: HabitStatus) => {
         const nextStatus: HabitStatus = currentStatus === 'missed' ? 'checked' : 'missed';
         
+        // Optimistic update: update local state immediately
+        const existingEntry = dateEntries.find(e => e.habit_template_id === templateId);
+        if (existingEntry) {
+            setLocalHabitEntries(prev => prev.map(e => 
+                e.id === existingEntry.id ? { ...e, status: nextStatus } : e
+            ));
+        }
+        
         try {
             const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            const existingEntry = dateEntries.find(e => e.habit_template_id === templateId);
+            if (!user) {
+                // Revert on error
+                if (existingEntry) {
+                    setLocalHabitEntries(prev => prev.map(e => 
+                        e.id === existingEntry.id ? { ...e, status: currentStatus } : e
+                    ));
+                }
+                return;
+            }
             
             if (existingEntry) {
                 await supabase
@@ -602,20 +628,32 @@ function DailyView({
                     .update({ status: nextStatus })
                     .eq('id', existingEntry.id);
             } else {
-                await supabase
+                const { data: newEntry } = await supabase
                     .from('habit_daily_entries')
                     .insert({
                         user_id: user.id,
                         date: dateStr,
                         habit_template_id: templateId,
                         status: nextStatus,
-                    });
+                    })
+                    .select()
+                    .single();
+                
+                if (newEntry) {
+                    setLocalHabitEntries(prev => [...prev, newEntry]);
+                }
             }
             
-            await saveDailyScore();
-            onDataChange();
+            // Update score in background without blocking UI
+            saveDailyScore().catch(err => console.error('Error saving score:', err));
         } catch (error) {
             console.error('Error updating habit:', error);
+            // Revert optimistic update on error
+            if (existingEntry) {
+                setLocalHabitEntries(prev => prev.map(e => 
+                    e.id === existingEntry.id ? { ...e, status: currentStatus } : e
+                ));
+            }
         }
     };
 
@@ -679,16 +717,27 @@ function DailyView({
     };
 
     const handleTogglePriority = async (id: string, completed: boolean) => {
+        const newCompleted = !completed;
+        
+        // Optimistic update: update local state immediately
+        setLocalPriorities(prev => prev.map(p => 
+            p.id === id ? { ...p, completed: newCompleted } : p
+        ));
+        
         try {
             await supabase
                 .from('habit_daily_priorities')
-                .update({ completed: !completed })
+                .update({ completed: newCompleted })
                 .eq('id', id);
             
-            await saveDailyScore();
-            onDataChange();
+            // Update score in background without blocking UI
+            saveDailyScore().catch(err => console.error('Error saving score:', err));
         } catch (error) {
             console.error('Error updating priority:', error);
+            // Revert optimistic update on error
+            setLocalPriorities(prev => prev.map(p => 
+                p.id === id ? { ...p, completed } : p
+            ));
         }
     };
 
@@ -723,16 +772,27 @@ function DailyView({
     };
 
     const handleToggleTodo = async (id: string, isDone: boolean) => {
+        const newIsDone = !isDone;
+        
+        // Optimistic update: update local state immediately
+        setLocalTodos(prev => prev.map(t => 
+            t.id === id ? { ...t, is_done: newIsDone } : t
+        ));
+        
         try {
             await supabase
                 .from('habit_daily_todos')
-                .update({ is_done: !isDone })
+                .update({ is_done: newIsDone })
                 .eq('id', id);
             
-            await saveDailyScore();
-            onDataChange();
+            // Update score in background without blocking UI
+            saveDailyScore().catch(err => console.error('Error saving score:', err));
         } catch (error) {
             console.error('Error updating todo:', error);
+            // Revert optimistic update on error
+            setLocalTodos(prev => prev.map(t => 
+                t.id === id ? { ...t, is_done: isDone } : t
+            ));
         }
     };
 
@@ -833,7 +893,7 @@ function DailyView({
                         <div className="text-2xl font-bold text-blue-400">{habitsScore}</div>
                         <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block bg-slate-800 text-xs text-slate-200 p-2 rounded shadow-lg z-10 whitespace-nowrap">
                             Formula: (completed / total) × {scoringSettings.habits_weight}%
-                        </div>
+                    </div>
                     </div>
                     <div className="rounded-md border border-purple-500/30 bg-purple-950/20 p-3 text-center relative group">
                         <div className="text-xs text-purple-300 mb-1">
@@ -843,7 +903,7 @@ function DailyView({
                         <div className="text-2xl font-bold text-purple-400">{prioritiesScore}</div>
                         <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block bg-slate-800 text-xs text-slate-200 p-2 rounded shadow-lg z-10 whitespace-nowrap">
                             Formula: (completed / total) × {scoringSettings.priorities_weight}%
-                        </div>
+                    </div>
                     </div>
                     <div className="rounded-md border border-green-500/30 bg-green-950/20 p-3 text-center relative group">
                         <div className="text-xs text-green-300 mb-1">
@@ -908,7 +968,7 @@ function DailyView({
 
             {/* Priorities Section */}
             <PrioritiesSection
-                priorities={priorities}
+                priorities={localPriorities}
                 goals={goals}
                 onToggle={handleTogglePriority}
                 onAdd={handleAddPriority}
@@ -924,7 +984,7 @@ function DailyView({
 
             {/* Todos Section */}
             <TodosSection
-                todos={todos}
+                todos={localTodos}
                 goals={goals}
                 onToggle={handleToggleTodo}
                 onAdd={handleAddTodo}
@@ -1078,7 +1138,7 @@ function DailyView({
                 </div>
             </div>
         )}
-    </div>
+        </div>
     );
 }
 
@@ -1198,23 +1258,23 @@ function HabitsSection({
                             {habitsByCategory[category].map((habit: any) => {
                                 const linkedGoal = goals?.find((g: any) => g.id === habit.goal_id);
                                 return (
-                                    <button
-                                        key={habit.id}
-                                        onClick={() => onToggle(habit.id, habit.status)}
-                                        className="w-full flex items-center gap-2 p-2 rounded hover:bg-slate-900/50 transition-colors text-left"
-                                    >
-                                        <span className="text-lg">{habit.icon}</span>
+                                <button
+                                    key={habit.id}
+                                    onClick={() => onToggle(habit.id, habit.status)}
+                                    className="w-full flex items-center gap-2 p-2 rounded hover:bg-slate-900/50 transition-colors text-left"
+                                >
+                                    <span className="text-lg">{habit.icon}</span>
                                         <div className="flex-1 flex items-center gap-2">
                                             <span className="text-sm text-slate-200">{habit.name}</span>
                                             {linkedGoal && (
                                                 <span className="text-xs text-slate-400">→ {linkedGoal.name}</span>
                                             )}
                                         </div>
-                                        {habit.time_of_day && (
-                                            <span className="text-xs text-slate-400 capitalize">{habit.time_of_day}</span>
-                                        )}
-                                        <span className="text-lg">{getStatusEmoji(habit.status)}</span>
-                                    </button>
+                                    {habit.time_of_day && (
+                                        <span className="text-xs text-slate-400 capitalize">{habit.time_of_day}</span>
+                                    )}
+                                    <span className="text-lg">{getStatusEmoji(habit.status)}</span>
+                                </button>
                                 );
                             })}
                         </div>
@@ -1341,41 +1401,41 @@ function PrioritiesSection({
                 {priorities.map((priority: Priority) => {
                     const linkedGoal = goals.find((g: any) => g.id === priority.goal_id);
                     return (
-                        <div key={priority.id} className="flex items-center gap-2">
-                            <button
-                                onClick={() => onToggle(priority.id, priority.completed)}
-                                className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-                                    priority.completed
-                                        ? 'bg-amber-400 border-amber-400'
-                                        : 'border-slate-600'
-                                }`}
-                            >
-                                {priority.completed && <span className="text-black text-xs">✓</span>}
-                            </button>
-                            <span className={`flex-1 text-sm ${priority.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
-                                {priority.text}
+                    <div key={priority.id} className="flex items-center gap-2">
+                        <button
+                            onClick={() => onToggle(priority.id, priority.completed)}
+                            className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                                priority.completed
+                                    ? 'bg-amber-400 border-amber-400'
+                                    : 'border-slate-600'
+                            }`}
+                        >
+                            {priority.completed && <span className="text-black text-xs">✓</span>}
+                        </button>
+                        <span className={`flex-1 text-sm ${priority.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                            {priority.text}
                                 {linkedGoal && (
                                     <span className="ml-2 text-xs text-slate-400">→ {linkedGoal.name}</span>
                                 )}
-                            </span>
-                            {priority.category && (
-                                <span className="text-xs text-slate-400 capitalize">{priority.category}</span>
-                            )}
-                            {priority.time_of_day && (
-                                <span className="text-xs text-slate-400 capitalize">{priority.time_of_day}</span>
-                            )}
-                        </div>
+                        </span>
+                        {priority.category && (
+                            <span className="text-xs text-slate-400 capitalize">{priority.category}</span>
+                        )}
+                        {priority.time_of_day && (
+                            <span className="text-xs text-slate-400 capitalize">{priority.time_of_day}</span>
+                        )}
+                    </div>
                     );
                 })}
             </div>
             <div className="mt-4">
                 <h4 className="text-sm font-medium text-purple-300 mb-2">Add Priority</h4>
                 <div className="flex gap-2 items-center">
-                    <input
-                        type="text"
-                        placeholder="Add priority..."
-                        value={newPriority}
-                        onChange={e => setNewPriority(e.target.value)}
+                <input
+                    type="text"
+                    placeholder="Add priority..."
+                    value={newPriority}
+                    onChange={e => setNewPriority(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && !isLimitReached && onAdd()}
                         disabled={isLimitReached}
                         className={`flex-1 rounded border border-slate-700 px-2 py-1 text-sm ${
@@ -1383,37 +1443,37 @@ function PrioritiesSection({
                                 ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
                                 : 'bg-slate-900'
                         }`}
-                    />
-                    <select
-                        value={newPriorityCategory || ''}
-                        onChange={e => setNewPriorityCategory(e.target.value || null)}
+                />
+                <select
+                    value={newPriorityCategory || ''}
+                    onChange={e => setNewPriorityCategory(e.target.value || null)}
                         disabled={isLimitReached}
                         className={`rounded border border-slate-700 px-2 py-1 text-sm ${
                             isLimitReached 
                                 ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
                                 : 'bg-slate-900'
                         }`}
-                    >
-                        <option value="">No Category</option>
-                        <option value="physical">Physical</option>
-                        <option value="mental">Mental</option>
-                        <option value="spiritual">Spiritual</option>
-                    </select>
-                    <select
-                        value={newPriorityTimeOfDay || ''}
-                        onChange={e => setNewPriorityTimeOfDay(e.target.value || null)}
+                >
+                    <option value="">No Category</option>
+                    <option value="physical">Physical</option>
+                    <option value="mental">Mental</option>
+                    <option value="spiritual">Spiritual</option>
+                </select>
+                <select
+                    value={newPriorityTimeOfDay || ''}
+                    onChange={e => setNewPriorityTimeOfDay(e.target.value || null)}
                         disabled={isLimitReached}
                         className={`rounded border border-slate-700 px-2 py-1 text-sm ${
                             isLimitReached 
                                 ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
                                 : 'bg-slate-900'
                         }`}
-                    >
-                        <option value="">Any Time</option>
-                        <option value="morning">Morning</option>
-                        <option value="afternoon">Afternoon</option>
-                        <option value="evening">Evening</option>
-                    </select>
+                >
+                    <option value="">Any Time</option>
+                    <option value="morning">Morning</option>
+                    <option value="afternoon">Afternoon</option>
+                    <option value="evening">Evening</option>
+                </select>
                     <select
                         value={newPriorityGoalId || ''}
                         onChange={e => setNewPriorityGoalId(e.target.value || null)}
@@ -1430,17 +1490,17 @@ function PrioritiesSection({
                             <option key={goal.id} value={goal.id}>{goal.name}</option>
                         ))}
                     </select>
-                    <button
-                        onClick={onAdd}
+                <button
+                    onClick={onAdd}
                         disabled={isLimitReached}
                         className={`rounded-md px-3 py-1 text-xs font-semibold ${
                             isLimitReached
                                 ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
                                 : 'bg-amber-400 text-black hover:bg-amber-300'
                         }`}
-                    >
-                        Add
-                    </button>
+                >
+                    Add
+                </button>
                 </div>
                 {isLimitReached && (
                     <p className="text-xs text-slate-400 mt-2">Maximum of 5 priorities per day allowed</p>
@@ -1471,37 +1531,37 @@ function TodosSection({
                 {todos.map((todo: Todo) => {
                     const linkedGoal = goals.find((g: any) => g.id === todo.goal_id);
                     return (
-                        <div key={todo.id} className="flex items-center gap-2">
-                            <button
-                                onClick={() => onToggle(todo.id, todo.is_done)}
-                                className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-                                    todo.is_done ? 'bg-amber-400 border-amber-400' : 'border-slate-600'
-                                }`}
-                            >
-                                {todo.is_done && <span className="text-black text-xs">✓</span>}
-                            </button>
-                            <span className={`flex-1 text-sm ${todo.is_done ? 'line-through text-slate-500' : 'text-slate-200'}`}>
-                                {todo.title}
+                    <div key={todo.id} className="flex items-center gap-2">
+                        <button
+                            onClick={() => onToggle(todo.id, todo.is_done)}
+                            className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                                todo.is_done ? 'bg-amber-400 border-amber-400' : 'border-slate-600'
+                            }`}
+                        >
+                            {todo.is_done && <span className="text-black text-xs">✓</span>}
+                        </button>
+                        <span className={`flex-1 text-sm ${todo.is_done ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                            {todo.title}
                                 {linkedGoal && (
                                     <span className="ml-2 text-xs text-slate-400">→ {linkedGoal.name}</span>
                                 )}
-                            </span>
-                            {todo.category && (
-                                <span className="text-xs text-slate-400 capitalize">{todo.category}</span>
-                            )}
-                            {todo.time_of_day && (
-                                <span className="text-xs text-slate-400 capitalize">{todo.time_of_day}</span>
-                            )}
-                        </div>
+                        </span>
+                        {todo.category && (
+                            <span className="text-xs text-slate-400 capitalize">{todo.category}</span>
+                        )}
+                        {todo.time_of_day && (
+                            <span className="text-xs text-slate-400 capitalize">{todo.time_of_day}</span>
+                        )}
+                    </div>
                     );
                 })}
             </div>
             <div className="mt-4">
                 <h4 className="text-sm font-medium text-green-300 mb-2">Add Todo</h4>
                 <div className="flex gap-2 items-center">
-                    <input
-                        type="text"
-                        placeholder="Add task..."
+                <input
+                    type="text"
+                    placeholder="Add task..."
                     value={newTodo}
                     onChange={e => setNewTodo(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && onAdd()}
@@ -1935,7 +1995,7 @@ function GoalsView() {
 
             if (!goalData) return;
 
-// Save habits
+            // Save habits
             for (const habit of goalHabits) {
                 if (!habit.name.trim()) continue;
                 
@@ -2365,7 +2425,7 @@ function GoalsView() {
         setGoalMilestones(updated);
     };
 
-const addHabitToForm = () => {
+    const addHabitToForm = () => {
         setGoalHabits([...goalHabits, { name: '', icon: '📝', category: 'mental', time_of_day: null, is_bad_habit: false, auto_streak_milestones: true }]);
     };
 
@@ -2578,7 +2638,7 @@ const addHabitToForm = () => {
                                 className="flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
                             />
                         </div>
-{editingGoal && (
+                        {editingGoal && (
                             <div className="flex items-center gap-2">
                                 <input
                                     type="checkbox"
@@ -2593,10 +2653,10 @@ const addHabitToForm = () => {
 
                     {/* Milestones & Links Summary Section */}
                     {editingGoal && (
-                        <div className="border-t border-slate-800 pt-4">
+                    <div className="border-t border-slate-800 pt-4">
                             <div className="w-full flex items-center justify-between p-3 rounded border border-slate-700 bg-slate-900">
-                                <button
-                                    type="button"
+                            <button
+                                type="button"
                                     onClick={() => {
                                         const newExpanded = !showSummarySection;
                                         setShowSummarySection(newExpanded);
@@ -2619,7 +2679,7 @@ const addHabitToForm = () => {
                                             {linkedPrioritiesCount > 0 && `, ${linkedPrioritiesCount} priorit${linkedPrioritiesCount !== 1 ? 'ies' : 'y'} linked`}
                                             {linkedTodosCount > 0 && `, ${linkedTodosCount} todo${linkedTodosCount !== 1 ? 's' : ''} linked`}
                                         </span>
-                                    </div>
+                        </div>
                                     <span className="text-xs text-slate-400 ml-2">{showSummarySection ? '▼' : '▶'}</span>
                                 </button>
                                 <div className="flex items-center gap-1 ml-2">
@@ -2644,8 +2704,8 @@ const addHabitToForm = () => {
                                         <span className="text-lg leading-none">+</span>
                                     </button>
                                 </div>
+                                </div>
                             </div>
-                        </div>
                     )}
 
                     {/* Habits Section */}
@@ -2821,8 +2881,8 @@ const addHabitToForm = () => {
                                 <div key={category}>
                                     <div className="flex items-center justify-between mb-3">
                                         <h3 className="text-lg font-semibold capitalize text-slate-300">
-                                            {category.charAt(0).toUpperCase() + category.slice(1)} Goals
-                                        </h3>
+                                        {category.charAt(0).toUpperCase() + category.slice(1)} Goals
+                                    </h3>
                                         <div className="flex items-center gap-2">
                                             <input
                                                 type="checkbox"
@@ -2863,9 +2923,9 @@ const addHabitToForm = () => {
                                                                 onClick={(e) => e.stopPropagation()}
                                                                 className="rounded border-slate-600"
                                                             />
-                                                            <div className="flex-1">
-                                                                <div className="flex items-center gap-2">
-                                                                    <h3 className="text-lg font-semibold">{goal.name}</h3>
+                                                        <div className="flex-1">
+                                                            <div className="flex items-center gap-2">
+                                                                <h3 className="text-lg font-semibold">{goal.name}</h3>
                                                                     {(() => {
                                                                         const priority = goal.priority_score || 0;
                                                                         const getPriorityBadgeColor = (priority: number) => {
@@ -2890,10 +2950,10 @@ const addHabitToForm = () => {
                                                                 {goal.is_completed && (
                                                                     <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">Completed</span>
                                                                 )}
-                                                                </div>
-                                                                {goal.description && (
-                                                                    <p className="text-sm text-slate-400 mt-1">{goal.description}</p>
-                                                                )}
+                                                            </div>
+                                                            {goal.description && (
+                                                                <p className="text-sm text-slate-400 mt-1">{goal.description}</p>
+                                                            )}
                                                             </div>
                                                         </div>
                                                         <div className="flex gap-2">
@@ -2957,8 +3017,8 @@ const addHabitToForm = () => {
                                                                         >
                                                                             Delete ({selectedMilestones.size})
                                                                         </button>
-                                                                    </div>
-                                                                )}
+                                                        </div>
+                                                    )}
                                                             </div>
                                                             {goalMilestones.map(milestone => (
                                                                 <div key={milestone.id} className="flex items-center justify-between text-sm text-slate-300">
@@ -3022,16 +3082,16 @@ const addHabitToForm = () => {
                                                             onClick={(e) => e.stopPropagation()}
                                                             className="rounded border-slate-600"
                                                         />
-                                                        <div className="flex-1">
-                                                            <div className="flex items-center gap-2">
-                                                                <h3 className="text-lg font-semibold">{goal.name}</h3>
-                                                                {goal.is_completed && (
-                                                                    <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">Completed</span>
-                                                                )}
-                                                            </div>
-                                                            {goal.description && (
-                                                                <p className="text-sm text-slate-400 mt-1">{goal.description}</p>
+                                                    <div className="flex-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <h3 className="text-lg font-semibold">{goal.name}</h3>
+                                                            {goal.is_completed && (
+                                                                <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">Completed</span>
                                                             )}
+                                                        </div>
+                                                        {goal.description && (
+                                                            <p className="text-sm text-slate-400 mt-1">{goal.description}</p>
+                                                        )}
                                                         </div>
                                                     </div>
                                                     <div className="flex gap-2">
@@ -3779,43 +3839,43 @@ function HabitsManagementView({
 
             {/* Filters and Bulk Actions */}
             <div className="flex gap-2 items-center justify-between">
-                <div className="flex gap-2 items-center">
-                    <div className="flex gap-1 rounded-md border border-slate-700 bg-slate-900 p-1">
-                        <button
-                            onClick={() => setFilter('all')}
-                            className={`px-3 py-1 text-xs rounded ${
-                                filter === 'all' ? 'bg-amber-400 text-black' : 'text-slate-300'
-                            }`}
-                        >
-                            All
-                        </button>
-                        <button
-                            onClick={() => setFilter('good')}
-                            className={`px-3 py-1 text-xs rounded ${
-                                filter === 'good' ? 'bg-amber-400 text-black' : 'text-slate-300'
-                            }`}
-                        >
-                            Good Habits
-                        </button>
-                        <button
-                            onClick={() => setFilter('bad')}
-                            className={`px-3 py-1 text-xs rounded ${
-                                filter === 'bad' ? 'bg-amber-400 text-black' : 'text-slate-300'
-                            }`}
-                        >
-                            Bad Habits
-                        </button>
-                    </div>
-                    <select
-                        value={categoryFilter}
-                        onChange={e => setCategoryFilter(e.target.value as Category | 'all')}
-                        className="rounded border border-slate-700 bg-slate-900 px-3 py-1 text-sm"
+            <div className="flex gap-2 items-center">
+                <div className="flex gap-1 rounded-md border border-slate-700 bg-slate-900 p-1">
+                    <button
+                        onClick={() => setFilter('all')}
+                        className={`px-3 py-1 text-xs rounded ${
+                            filter === 'all' ? 'bg-amber-400 text-black' : 'text-slate-300'
+                        }`}
                     >
-                        <option value="all">All Categories</option>
-                        <option value="physical">Physical</option>
-                        <option value="mental">Mental</option>
-                        <option value="spiritual">Spiritual</option>
-                    </select>
+                        All
+                    </button>
+                    <button
+                        onClick={() => setFilter('good')}
+                        className={`px-3 py-1 text-xs rounded ${
+                            filter === 'good' ? 'bg-amber-400 text-black' : 'text-slate-300'
+                        }`}
+                    >
+                        Good Habits
+                    </button>
+                    <button
+                        onClick={() => setFilter('bad')}
+                        className={`px-3 py-1 text-xs rounded ${
+                            filter === 'bad' ? 'bg-amber-400 text-black' : 'text-slate-300'
+                        }`}
+                    >
+                        Bad Habits
+                    </button>
+                </div>
+                <select
+                    value={categoryFilter}
+                    onChange={e => setCategoryFilter(e.target.value as Category | 'all')}
+                    className="rounded border border-slate-700 bg-slate-900 px-3 py-1 text-sm"
+                >
+                    <option value="all">All Categories</option>
+                    <option value="physical">Physical</option>
+                    <option value="mental">Mental</option>
+                    <option value="spiritual">Spiritual</option>
+                </select>
                 </div>
                 {selectedHabits.size > 0 && (
                     <div className="flex gap-2 items-center">
@@ -3900,16 +3960,16 @@ function HabitsManagementView({
                     </div>
                     <div className="flex flex-col gap-1">
                         <label className="text-xs text-slate-400">Link to goal (optional)</label>
-                        <select
-                            value={formData.goal_id || ''}
-                            onChange={e => setFormData({ ...formData, goal_id: e.target.value || null })}
-                            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
-                        >
+                    <select
+                        value={formData.goal_id || ''}
+                        onChange={e => setFormData({ ...formData, goal_id: e.target.value || null })}
+                        className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
+                    >
                             <option value="">No goal</option>
-                            {goals.map(goal => (
-                                <option key={goal.id} value={goal.id}>{goal.name}</option>
-                            ))}
-                        </select>
+                        {goals.map(goal => (
+                            <option key={goal.id} value={goal.id}>{goal.name}</option>
+                        ))}
+                    </select>
                     </div>
                     <div className="flex gap-2">
                         <button
