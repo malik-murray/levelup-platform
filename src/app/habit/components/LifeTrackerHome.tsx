@@ -722,6 +722,7 @@ function DailyPlanSection({
         reflection: dailyContent?.reflection || '',
         news_updates: dailyContent?.news_updates || '',
     });
+    const [expandedCategories, setExpandedCategories] = useState<Set<Category>>(new Set());
 
     const dateStr = formatDate(date);
     const dateEntries = habitEntries.filter(e => e.date === dateStr);
@@ -951,18 +952,62 @@ function DailyPlanSection({
             {/* Habits */}
             <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-2">
                 <h3 className="text-base font-semibold mb-3 text-blue-400">Habits</h3>
-                {habitsWithEntries.map((habit) => (
-                    <label key={habit.id} className="flex items-center gap-3 cursor-pointer">
-                        <input
-                            type="checkbox"
-                            checked={habit.status === 'checked'}
-                            onChange={() => handleHabitToggle(habit.id, habit.status)}
-                            className="h-5 w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500"
-                        />
-                        <span className="text-lg mr-2">{habit.icon}</span>
-                        <span className="flex-1 text-white">{habit.name}</span>
-                    </label>
-                ))}
+                {(['physical', 'mental', 'spiritual'] as Category[]).map(category => {
+                    const categoryHabits = habitsWithEntries.filter(h => h.category === category);
+                    if (categoryHabits.length === 0) return null;
+                    
+                    const completed = categoryHabits.filter(h => h.status === 'checked').length;
+                    const total = categoryHabits.length;
+                    const isExpanded = expandedCategories.has(category);
+                    
+                    const categoryColors = {
+                        physical: 'text-blue-400 border-blue-500/30 bg-blue-950/20',
+                        mental: 'text-purple-400 border-purple-500/30 bg-purple-950/20',
+                        spiritual: 'text-amber-400 border-amber-500/30 bg-amber-950/20',
+                    };
+                    
+                    return (
+                        <div key={category} className={`rounded-lg border ${categoryColors[category]} overflow-hidden`}>
+                            <button
+                                onClick={() => {
+                                    const newExpanded = new Set(expandedCategories);
+                                    if (isExpanded) {
+                                        newExpanded.delete(category);
+                                    } else {
+                                        newExpanded.add(category);
+                                    }
+                                    setExpandedCategories(newExpanded);
+                                }}
+                                className="w-full flex items-center justify-between p-3 hover:opacity-80 transition-opacity"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <span className="text-sm font-semibold capitalize">{category}</span>
+                                    <span className="text-xs text-slate-400">{completed}/{total} completed</span>
+                                </div>
+                                <span className="text-sm">{isExpanded ? '▼' : '▶'}</span>
+                            </button>
+                            {isExpanded && (
+                                <div className="border-t border-slate-700/50 p-3 space-y-2 bg-slate-900/50">
+                                    {categoryHabits.map((habit) => (
+                                        <label key={habit.id} className="flex items-center gap-3 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={habit.status === 'checked'}
+                                                onChange={() => handleHabitToggle(habit.id, habit.status)}
+                                                className="h-5 w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500"
+                                            />
+                                            <span className="text-lg mr-2">{habit.icon}</span>
+                                            <span className="flex-1 text-white">{habit.name}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+                {habitsWithEntries.length === 0 && (
+                    <p className="text-sm text-slate-400 text-center py-4">No habits for today. Add habits in the Habits tab.</p>
+                )}
             </div>
 
             {/* Priorities (Max 5) */}
