@@ -796,7 +796,7 @@ function DailyPlanSection({
     const grade = getGrade(overallScore);
 
     const handleHabitToggle = async (templateId: string, currentStatus: HabitStatus) => {
-        const nextStatus: HabitStatus = currentStatus === 'missed' ? 'half' : currentStatus === 'half' ? 'checked' : 'missed';
+        const nextStatus: HabitStatus = currentStatus === 'missed' ? 'checked' : 'missed';
         
         try {
             const { data: { user } } = await supabase.auth.getUser();

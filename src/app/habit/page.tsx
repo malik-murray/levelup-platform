@@ -588,7 +588,7 @@ function DailyView({
     const eveningScore = calculateTimeOfDayScore([...habitsWithEntries, ...priorities, ...todos], 'evening');
 
     const handleHabitToggle = async (templateId: string, currentStatus: HabitStatus) => {
-        const nextStatus: HabitStatus = currentStatus === 'missed' ? 'half' : currentStatus === 'half' ? 'checked' : 'missed';
+        const nextStatus: HabitStatus = currentStatus === 'missed' ? 'checked' : 'missed';
         
         try {
             const { data: { user } } = await supabase.auth.getUser();
@@ -1091,12 +1091,10 @@ function calculateHabitsScore(habits: Array<{ status: HabitStatus; is_bad_habit?
         if (h.is_bad_habit) {
             // For bad habits: missed (avoided) = good, checked (did it) = bad
             if (h.status === 'missed') points += 1; // Avoided the bad habit = success
-            else if (h.status === 'half') points += 0.5;
             // checked = did the bad habit = 0 points
         } else {
             // For good habits: checked = good, missed = bad
             if (h.status === 'checked') points += 1;
-            else if (h.status === 'half') points += 0.5;
         }
     });
     const completionRatio = points / habits.length;
@@ -1127,7 +1125,6 @@ function calculateCategoryScore(
     let points = 0;
     categoryItems.forEach(item => {
         if (item.status === 'checked' || item.completed || item.is_done) points += 1;
-        else if (item.status === 'half') points += 0.5;
     });
     
     return Math.round((points / categoryItems.length) * 100);
@@ -1143,7 +1140,6 @@ function calculateTimeOfDayScore(
     let points = 0;
     timeItems.forEach(item => {
         if (item.status === 'checked' || item.completed || item.is_done) points += 1;
-        else if (item.status === 'half') points += 0.5;
     });
     
     return Math.round((points / timeItems.length) * 100);
@@ -1172,7 +1168,6 @@ function HabitsSection({
 
     const getStatusEmoji = (status: HabitStatus) => {
         if (status === 'checked') return '✅';
-        if (status === 'half') return '🥑';
         return '⚪';
     };
 
@@ -1240,7 +1235,7 @@ function HabitsSection({
                                     <div className="space-y-2">
                                         {badHabitsByCategory[category].map((habit: any) => {
                                             // For bad habits, invert the status display: missed = good (avoided), checked = bad (did it)
-                                            const displayStatus = habit.status === 'missed' ? 'checked' : habit.status === 'checked' ? 'missed' : 'half';
+                                            const displayStatus = habit.status === 'missed' ? 'checked' : 'missed';
                                             const linkedGoal = goals?.find((g: any) => g.id === habit.goal_id);
                                             return (
                                                 <button

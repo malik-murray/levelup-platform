@@ -2,7 +2,7 @@
  * Helper functions for habit tracker calculations and utilities
  */
 
-export type HabitStatus = 'checked' | 'half' | 'missed';
+export type HabitStatus = 'checked' | 'missed';
 export type Category = 'physical' | 'mental' | 'spiritual';
 export type TimeOfDay = 'morning' | 'afternoon' | 'evening';
 
@@ -22,11 +22,10 @@ export interface DailyScore {
 
 /**
  * Calculate score from habit status
- * checked = 1.0, half = 0.5, missed = 0.0
+ * checked = 1.0, missed = 0.0
  */
 export function getHabitStatusValue(status: HabitStatus): number {
     if (status === 'checked') return 1.0;
-    if (status === 'half') return 0.5;
     return 0.0;
 }
 
