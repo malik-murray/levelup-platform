@@ -13,6 +13,39 @@ import {
     calculateItemScore,
 } from '@/lib/habitHelpers';
 
+// Hook to calculate habits per page based on screen width
+// Matches the grid breakpoints: 5, 4, 3, 2 columns
+function useHabitsPerPage() {
+    const [habitsPerPage, setHabitsPerPage] = useState(5);
+    
+    useEffect(() => {
+        const updateHabitsPerPage = () => {
+            const width = window.innerWidth;
+            // Match Tailwind breakpoints to ensure no wrapping:
+            // 2xl: 1536px+ -> 5 per page
+            // xl: 1280px+ -> 4 per page
+            // lg: 1024px+ -> 3 per page
+            // sm: 640px+ -> 2 per page
+            // default: < 640px -> 2 per page (cleaner than 1)
+            if (width >= 1536) {
+                setHabitsPerPage(5);
+            } else if (width >= 1280) {
+                setHabitsPerPage(4);
+            } else if (width >= 1024) {
+                setHabitsPerPage(3);
+            } else {
+                setHabitsPerPage(2);
+            }
+        };
+        
+        updateHabitsPerPage();
+        window.addEventListener('resize', updateHabitsPerPage);
+        return () => window.removeEventListener('resize', updateHabitsPerPage);
+    }, []);
+    
+    return habitsPerPage;
+}
+
 type Goal = {
     id: string;
     name: string;
@@ -772,6 +805,7 @@ function DailyPlanSection({
     const [expandedCategories, setExpandedCategories] = useState<Set<Category>>(new Set());
     const [draggedHabitId, setDraggedHabitId] = useState<string | null>(null);
     const [dragOverHabitId, setDragOverHabitId] = useState<string | null>(null);
+    const [upNextPage, setUpNextPage] = useState(0);
     
     // Local state for optimistic updates
     const [localHabitEntries, setLocalHabitEntries] = useState<HabitEntry[]>(habitEntries);
@@ -788,6 +822,15 @@ function DailyPlanSection({
     }, [habitEntries, priorities, todos, habitTemplates]);
 
     const dateStr = formatDate(date);
+    
+    // Reset Up Next pagination when date changes
+    useEffect(() => {
+        setUpNextPage(0);
+    }, [dateStr]);
+    
+    // Calculate habits per page based on screen width (matches grid columns)
+    const HABITS_PER_PAGE = useHabitsPerPage();
+    
     const dateEntries = localHabitEntries.filter(e => e.date === dateStr);
     const habitsWithEntries = localHabitTemplates.map(template => {
         const entry = dateEntries.find(e => e.habit_template_id === template.id);
@@ -1257,13 +1300,95 @@ function DailyPlanSection({
             {/* Habits */}
             <div className="rounded-lg border border-slate-700 bg-slate-900 p-3 sm:p-4 space-y-2">
                 <h3 className="text-base font-semibold mb-3 text-blue-400">Habits</h3>
-                {(['physical', 'mental', 'spiritual'] as Category[]).map(category => {
+                
+                {(() => {
+                    // Sort all habits by GLOBAL execution order (sort_order)
+                    const allHabitsSorted = habitsWithEntries
+                        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+                    const incompleteHabits = allHabitsSorted.filter(h => h.status !== 'checked');
+                    // HABITS_PER_PAGE is calculated at component level
+                    const totalPages = Math.ceil(incompleteHabits.length / HABITS_PER_PAGE);
+                    const startIndex = upNextPage * HABITS_PER_PAGE;
+                    const endIndex = startIndex + HABITS_PER_PAGE;
+                    const upNextHabits = incompleteHabits.slice(startIndex, endIndex);
+                    const upNextHabitIds = new Set(upNextHabits.map((h: any) => h.id));
+                    
+                    return (
+                        <>
+                            {/* Up Next Execution Lane */}
+                            {incompleteHabits.length > 0 && (
+                                <div className="mb-5 pb-5 border-b border-slate-700/50">
+                                    {/* Header with navigation */}
+                                    <div className="flex items-center mb-3">
+                                        <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex-shrink-0">Up Next</h4>
+                                        {totalPages > 1 && (
+                                            <>
+                                                {/* Prev button on left */}
+                                                <button
+                                                    onClick={() => setUpNextPage(Math.max(0, upNextPage - 1))}
+                                                    disabled={upNextPage === 0}
+                                                    className={`ml-4 px-3 py-1.5 text-xs font-medium rounded transition-colors min-h-[36px] flex-shrink-0 ${
+                                                        upNextPage === 0
+                                                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                                            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                                                    }`}
+                                                >
+                                                    ← Prev
+                                                </button>
+                                                {/* Pager centered */}
+                                                <span className="flex-1 text-center text-xs text-slate-400 px-2">
+                                                    {upNextPage + 1} / {totalPages}
+                                                </span>
+                                                {/* Next button on right */}
+                                                <button
+                                                    onClick={() => setUpNextPage(Math.min(totalPages - 1, upNextPage + 1))}
+                                                    disabled={upNextPage >= totalPages - 1}
+                                                    className={`px-3 py-1.5 text-xs font-medium rounded transition-colors min-h-[36px] flex-shrink-0 ${
+                                                        upNextPage >= totalPages - 1
+                                                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                                            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                                                    }`}
+                                                >
+                                                    Next →
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                    {/* Responsive grid that fits perfectly - matches HABITS_PER_PAGE */}
+                                    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${HABITS_PER_PAGE}, minmax(0, 1fr))` }}>
+                                        {upNextHabits.map((habit: any) => (
+                                            <div
+                                                key={habit.id}
+                                                className="flex items-center gap-2.5 px-3 py-3 rounded-lg border border-amber-500/30 bg-gradient-to-br from-amber-950/40 to-slate-950/60 hover:border-amber-500/50 hover:from-amber-950/50 hover:to-slate-950/70 transition-all min-h-[52px] group"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={habit.status === 'checked'}
+                                                    onChange={() => handleHabitToggle(habit.id, habit.status)}
+                                                    className="h-5 w-5 sm:h-5 sm:w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500 flex-shrink-0 cursor-pointer"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                />
+                                                <span className="text-xl flex-shrink-0">{habit.icon}</span>
+                                                <div className="flex flex-col min-w-0 flex-1">
+                                                    <span className="text-sm font-medium text-white group-hover:text-amber-100 transition-colors truncate">{habit.name}</span>
+                                                    <span className="text-xs text-slate-400 capitalize">{habit.category}</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {/* Category Lists */}
+                            {(['physical', 'mental', 'spiritual'] as Category[]).map(category => {
                     const categoryHabits = habitsWithEntries.filter(h => h.category === category);
                     if (categoryHabits.length === 0) return null;
                     
                     const completed = categoryHabits.filter(h => h.status === 'checked').length;
                     const total = categoryHabits.length;
                     const isExpanded = expandedCategories.has(category);
+                    
+                    const sortedCategoryHabits = categoryHabits.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
                     
                     const categoryColors = {
                         physical: 'text-blue-400 border-blue-500/30 bg-blue-950/20',
@@ -1331,10 +1456,14 @@ function DailyPlanSection({
                                                     setDraggedHabitId(null);
                                                     setDragOverHabitId(null);
                                                 }}
-                                                className={`flex items-center gap-2 min-h-[44px] py-1 rounded transition-colors ${
+                                                className={`flex items-center gap-2 min-h-[44px] py-1 rounded transition-all ${
                                                     isDragging ? 'opacity-50' : ''
                                                 } ${
                                                     isDragOver ? 'bg-amber-500/20 border-2 border-amber-500/50' : ''
+                                                } ${
+                                                    upNextHabitIds.has(habit.id) && habit.status !== 'checked'
+                                                        ? 'bg-amber-950/30 border border-amber-500/40 shadow-[0_0_12px_rgba(245,158,11,0.2)] ring-1 ring-amber-500/20' 
+                                                        : ''
                                                 }`}
                                             >
                                                 <div className="flex items-center gap-2 flex-1 cursor-move">
@@ -1350,6 +1479,11 @@ function DailyPlanSection({
                                                         <span className="text-lg mr-2">{habit.icon}</span>
                                                         <div className="flex-1 flex items-center gap-2">
                                                             <span className="text-white">{habit.name}</span>
+                                                            {upNextHabitIds.has(habit.id) && habit.status !== 'checked' && (
+                                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-medium">
+                                                                    Up Next
+                                                                </span>
+                                                            )}
                                                             {habit.checked_at && habit.status === 'checked' && (
                                                                 <span className="text-xs text-slate-500 opacity-60">
                                                                     {new Date(habit.checked_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
@@ -1365,7 +1499,10 @@ function DailyPlanSection({
                             )}
                         </div>
                     );
-                })}
+                    })}
+                        </>
+                    );
+                })()}
                 {habitsWithEntries.length === 0 && (
                     <p className="text-sm text-slate-400 text-center py-4">No habits for today. Add habits in the Habits tab.</p>
                 )}

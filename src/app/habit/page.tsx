@@ -19,6 +19,39 @@ import {
 } from '@/lib/habitHelpers';
 import LifeTrackerHome from './components/LifeTrackerHome';
 
+// Hook to calculate habits per page based on screen width
+// Matches the grid breakpoints: 5, 4, 3, 2 columns
+function useHabitsPerPage() {
+    const [habitsPerPage, setHabitsPerPage] = useState(5);
+    
+    useEffect(() => {
+        const updateHabitsPerPage = () => {
+            const width = window.innerWidth;
+            // Match Tailwind breakpoints to ensure no wrapping:
+            // 2xl: 1536px+ -> 5 per page
+            // xl: 1280px+ -> 4 per page
+            // lg: 1024px+ -> 3 per page
+            // sm: 640px+ -> 2 per page
+            // default: < 640px -> 2 per page (cleaner than 1)
+            if (width >= 1536) {
+                setHabitsPerPage(5);
+            } else if (width >= 1280) {
+                setHabitsPerPage(4);
+            } else if (width >= 1024) {
+                setHabitsPerPage(3);
+            } else {
+                setHabitsPerPage(2);
+            }
+        };
+        
+        updateHabitsPerPage();
+        window.addEventListener('resize', updateHabitsPerPage);
+        return () => window.removeEventListener('resize', updateHabitsPerPage);
+    }, []);
+    
+    return habitsPerPage;
+}
+
 type Tab = 'home' | 'calendar' | 'daily' | 'statistics' | 'goals' | 'habits';
 
 type HabitTemplate = {
@@ -566,6 +599,10 @@ function DailyView({
         is_bad_habit: false,
         goal_id: null as string | null,
     });
+    const [showEditDailyFlow, setShowEditDailyFlow] = useState(false);
+    const [draggedFlowHabitId, setDraggedFlowHabitId] = useState<string | null>(null);
+    const [dragOverFlowHabitId, setDragOverFlowHabitId] = useState<string | null>(null);
+    const [upNextPage, setUpNextPage] = useState(0);
 
     // Local state for optimistic updates
     const [localHabitEntries, setLocalHabitEntries] = useState<HabitEntry[]>(habitEntries);
@@ -579,7 +616,9 @@ function DailyView({
         setLocalPriorities(priorities);
         setLocalTodos(todos);
         setLocalHabitTemplates(habitTemplates);
-    }, [habitEntries, priorities, todos, habitTemplates]);
+        // Reset Up Next pagination when date changes
+        setUpNextPage(0);
+    }, [habitEntries, priorities, todos, habitTemplates, date]);
 
     const dateStr = formatDate(date);
     const todayStr = formatDate(new Date());
@@ -629,23 +668,24 @@ function DailyView({
     const afternoonScore = calculateTimeOfDayScore([...habitsWithEntries, ...priorities, ...todos], 'afternoon');
     const eveningScore = calculateTimeOfDayScore([...habitsWithEntries, ...priorities, ...todos], 'evening');
 
-    const handleHabitReorder = async (draggedId: string, targetId: string, category: Category) => {
-        // Get habits in the same category, sorted by sort_order
-        const categoryHabits = localHabitTemplates
-            .filter(h => h.category === category && h.is_active)
+    // Global execution order reordering (for Edit Daily Flow)
+    const handleGlobalHabitReorder = async (draggedId: string, targetId: string) => {
+        // Get all active habits, sorted by global execution order
+        const allHabits = localHabitTemplates
+            .filter(h => h.is_active && !h.is_bad_habit)
             .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
         
-        const draggedIndex = categoryHabits.findIndex(h => h.id === draggedId);
-        const targetIndex = categoryHabits.findIndex(h => h.id === targetId);
+        const draggedIndex = allHabits.findIndex(h => h.id === draggedId);
+        const targetIndex = allHabits.findIndex(h => h.id === targetId);
         
         if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) return;
         
         // Reorder the array
-        const reordered = [...categoryHabits];
+        const reordered = [...allHabits];
         const [removed] = reordered.splice(draggedIndex, 1);
         reordered.splice(targetIndex, 0, removed);
         
-        // Update sort_order for all affected habits
+        // Update sort_order globally for all affected habits
         const updates = reordered.map((habit, index) => ({
             id: habit.id,
             sort_order: index + 1,
@@ -677,6 +717,12 @@ function DailyView({
             // Revert on error
             setLocalHabitTemplates(habitTemplates);
         }
+    };
+
+    // Legacy per-category reordering (kept for category view drag-and-drop, but now updates global order)
+    const handleHabitReorder = async (draggedId: string, targetId: string, category: Category) => {
+        // Use global reordering even when dragging within a category
+        await handleGlobalHabitReorder(draggedId, targetId);
     };
 
     const handleHabitToggle = async (templateId: string, currentStatus: HabitStatus) => {
@@ -1253,6 +1299,9 @@ function DailyView({
                 newHabitTimeOfDay={newHabitTimeOfDay}
                 setNewHabitTimeOfDay={setNewHabitTimeOfDay}
                 onReorder={handleHabitReorder}
+                onEditDailyFlow={() => setShowEditDailyFlow(true)}
+                upNextPage={upNextPage}
+                setUpNextPage={setUpNextPage}
             />
 
             {/* Priorities Section */}
@@ -1293,6 +1342,98 @@ function DailyView({
                 setContent={setEditingContent}
                 onSave={handleSaveContent}
             />
+
+            {/* Edit Daily Flow Modal */}
+            {showEditDailyFlow && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowEditDailyFlow(false)}>
+                    <div className="bg-slate-900 rounded-lg border border-slate-800 p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-semibold">Edit Daily Flow</h3>
+                            <button
+                                onClick={() => setShowEditDailyFlow(false)}
+                                className="text-slate-400 hover:text-slate-200"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <p className="text-sm text-slate-400 mb-4">Drag habits to reorder your daily execution flow. Categories are shown for reference only.</p>
+                        <div className="space-y-2">
+                            {localHabitTemplates
+                                .filter(h => h.is_active && !h.is_bad_habit)
+                                .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+                                .map((habit) => {
+                                    const isDragging = draggedFlowHabitId === habit.id;
+                                    const isDragOver = dragOverFlowHabitId === habit.id;
+                                    const categoryColors = {
+                                        physical: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+                                        mental: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+                                        spiritual: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+                                    };
+                                    
+                                    return (
+                                        <div
+                                            key={habit.id}
+                                            draggable
+                                            onDragStart={(e) => {
+                                                setDraggedFlowHabitId(habit.id);
+                                                e.dataTransfer.effectAllowed = 'move';
+                                                e.dataTransfer.setData('text/plain', habit.id);
+                                            }}
+                                            onDragOver={(e) => {
+                                                e.preventDefault();
+                                                e.dataTransfer.dropEffect = 'move';
+                                                if (draggedFlowHabitId && draggedFlowHabitId !== habit.id) {
+                                                    setDragOverFlowHabitId(habit.id);
+                                                }
+                                            }}
+                                            onDragLeave={() => {
+                                                setDragOverFlowHabitId(null);
+                                            }}
+                                            onDrop={(e) => {
+                                                e.preventDefault();
+                                                const draggedId = e.dataTransfer.getData('text/plain');
+                                                if (draggedId && draggedId !== habit.id) {
+                                                    handleGlobalHabitReorder(draggedId, habit.id);
+                                                }
+                                                setDraggedFlowHabitId(null);
+                                                setDragOverFlowHabitId(null);
+                                            }}
+                                            onDragEnd={() => {
+                                                setDraggedFlowHabitId(null);
+                                                setDragOverFlowHabitId(null);
+                                            }}
+                                            className={`flex items-center gap-3 p-3 rounded-lg border transition-all min-h-[52px] ${
+                                                isDragging ? 'opacity-50' : ''
+                                            } ${
+                                                isDragOver ? 'bg-amber-500/20 border-2 border-amber-500/50' : 'border-slate-700'
+                                            }`}
+                                        >
+                                            <span className="text-slate-500 text-lg select-none cursor-move" title="Drag to reorder">☰</span>
+                                            <span className="text-xl">{habit.icon}</span>
+                                            <div className="flex-1">
+                                                <div className="text-sm font-medium text-white">{habit.name}</div>
+                                                {habit.time_of_day && (
+                                                    <div className="text-xs text-slate-400 capitalize">{habit.time_of_day}</div>
+                                                )}
+                                            </div>
+                                            <span className={`text-xs px-2 py-1 rounded border ${categoryColors[habit.category]}`}>
+                                                {habit.category}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+                        </div>
+                        <div className="mt-6 flex justify-end">
+                            <button
+                                onClick={() => setShowEditDailyFlow(false)}
+                                className="px-4 py-2 bg-amber-500 text-black rounded-md font-medium hover:bg-amber-400 transition-colors min-h-[44px]"
+                            >
+                                Done
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Habit Edit Modal */}
             {showHabitEditModal && editingHabit && (
@@ -1611,9 +1752,15 @@ function HabitsSection({
     newHabitTimeOfDay,
     setNewHabitTimeOfDay,
     onReorder,
+    onEditDailyFlow,
+    upNextPage,
+    setUpNextPage,
 }: any) {
     const [draggedHabitId, setDraggedHabitId] = useState<string | null>(null);
     const [dragOverHabitId, setDragOverHabitId] = useState<string | null>(null);
+    
+    // Calculate habits per page based on screen width (matches grid columns)
+    const HABITS_PER_PAGE = useHabitsPerPage();
     
     const categoryColors = {
         physical: 'border-blue-500/30 bg-blue-950/30',
@@ -1629,11 +1776,29 @@ function HabitsSection({
     const goodHabits = habits.filter((h: any) => !h.is_bad_habit);
     const badHabits = habits.filter((h: any) => h.is_bad_habit);
     
+    // Sort all good habits by GLOBAL execution order (sort_order)
+    const allGoodHabitsSorted = goodHabits.sort((a: any, b: any) => {
+        return (a.sort_order || 0) - (b.sort_order || 0);
+    });
+    
+    // Get next incomplete habits for "Up Next" section (dynamic pagination based on screen width)
+    const incompleteHabits = allGoodHabitsSorted.filter((h: any) => h.status !== 'checked');
+    const totalPages = Math.ceil(incompleteHabits.length / HABITS_PER_PAGE);
+    const startIndex = upNextPage * HABITS_PER_PAGE;
+    const endIndex = startIndex + HABITS_PER_PAGE;
+    const upNextHabits = incompleteHabits.slice(startIndex, endIndex);
+    
+    // Find the next incomplete habit globally (for highlighting)
+    const nextHabitGlobally = incompleteHabits[0] || null;
+    
     const habitsByCategory = {
         physical: goodHabits.filter((h: any) => h.category === 'physical').sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)),
         mental: goodHabits.filter((h: any) => h.category === 'mental').sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)),
         spiritual: goodHabits.filter((h: any) => h.category === 'spiritual').sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)),
     };
+    
+    // Create a Set of habit IDs currently in Up Next for efficient lookup
+    const upNextHabitIds = new Set(upNextHabits.map((h: any) => h.id));
     
     const badHabitsByCategory = {
         physical: badHabits.filter((h: any) => h.category === 'physical'),
@@ -1643,7 +1808,81 @@ function HabitsSection({
 
     return (
         <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-            <h3 className="text-base font-semibold mb-3 text-blue-400">Habits</h3>
+            <div className="flex items-center justify-between mb-3">
+                <h3 className="text-base font-semibold text-blue-400">Habits</h3>
+                {onEditDailyFlow && (
+                    <button
+                        onClick={onEditDailyFlow}
+                        className="text-xs text-slate-400 hover:text-amber-400 transition-colors px-2 py-1 rounded hover:bg-slate-800"
+                    >
+                        Edit Daily Flow
+                    </button>
+                )}
+            </div>
+            
+            {/* Up Next Execution Lane */}
+            {incompleteHabits.length > 0 && (
+                <div className="mb-6 pb-5 border-b border-slate-700/50">
+                    {/* Header with navigation */}
+                    <div className="flex items-center mb-3">
+                        <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex-shrink-0">Up Next</h4>
+                        {totalPages > 1 && (
+                            <>
+                                {/* Prev button on left */}
+                                <button
+                                    onClick={() => setUpNextPage(Math.max(0, upNextPage - 1))}
+                                    disabled={upNextPage === 0}
+                                    className={`ml-4 px-3 py-1.5 text-xs font-medium rounded transition-colors min-h-[36px] flex-shrink-0 ${
+                                        upNextPage === 0
+                                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                                    }`}
+                                >
+                                    ← Prev
+                                </button>
+                                {/* Pager centered */}
+                                <span className="flex-1 text-center text-xs text-slate-400 px-2">
+                                    {upNextPage + 1} / {totalPages}
+                                </span>
+                                {/* Next button on right */}
+                                <button
+                                    onClick={() => setUpNextPage(Math.min(totalPages - 1, upNextPage + 1))}
+                                    disabled={upNextPage >= totalPages - 1}
+                                    className={`px-3 py-1.5 text-xs font-medium rounded transition-colors min-h-[36px] flex-shrink-0 ${
+                                        upNextPage >= totalPages - 1
+                                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                                    }`}
+                                >
+                                    Next →
+                                </button>
+                            </>
+                        )}
+                    </div>
+                    {/* Responsive grid that fits perfectly - matches HABITS_PER_PAGE */}
+                    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${HABITS_PER_PAGE}, minmax(0, 1fr))` }}>
+                        {upNextHabits.map((habit: any) => (
+                            <div
+                                key={habit.id}
+                                className="flex items-center gap-2.5 px-3 py-3 rounded-lg border border-amber-500/30 bg-gradient-to-br from-amber-950/40 to-slate-950/60 hover:border-amber-500/50 hover:from-amber-950/50 hover:to-slate-950/70 transition-all min-h-[52px] group"
+                            >
+                                <input
+                                    type="checkbox"
+                                    checked={habit.status === 'checked'}
+                                    onChange={() => onToggle(habit.id, habit.status)}
+                                    className="h-5 w-5 sm:h-5 sm:w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500 flex-shrink-0 cursor-pointer"
+                                    onClick={(e) => e.stopPropagation()}
+                                />
+                                <span className="text-xl flex-shrink-0">{habit.icon}</span>
+                                <div className="flex flex-col min-w-0 flex-1">
+                                    <span className="text-sm font-medium text-white group-hover:text-amber-100 transition-colors truncate">{habit.name}</span>
+                                    <span className="text-xs text-slate-400 capitalize">{habit.category}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
             
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
                 {(['physical', 'mental', 'spiritual'] as Category[]).map(category => (
@@ -1686,10 +1925,14 @@ function HabitsSection({
                                         setDraggedHabitId(null);
                                         setDragOverHabitId(null);
                                     }}
-                                    className={`flex items-center gap-2 rounded transition-colors ${
+                                    className={`flex items-center gap-2 rounded transition-all ${
                                         isDragging ? 'opacity-50' : ''
                                     } ${
                                         isDragOver ? 'bg-amber-500/20 border-2 border-amber-500/50' : ''
+                                    } ${
+                                        upNextHabitIds.has(habit.id) && habit.status !== 'checked'
+                                            ? 'bg-amber-950/30 border border-amber-500/40 shadow-[0_0_12px_rgba(245,158,11,0.2)] ring-1 ring-amber-500/20' 
+                                            : ''
                                     }`}
                                 >
                                     <span className="text-slate-500 text-lg select-none cursor-move" title="Drag to reorder">☰</span>
@@ -1700,6 +1943,11 @@ function HabitsSection({
                                         <span className="text-lg">{habit.icon}</span>
                                         <div className="flex-1 flex items-center gap-2">
                                             <span className="text-sm text-slate-200">{habit.name}</span>
+                                            {upNextHabitIds.has(habit.id) && habit.status !== 'checked' && (
+                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-medium">
+                                                    Up Next
+                                                </span>
+                                            )}
                                             {habit.checked_at && habit.status === 'checked' && (
                                                 <span className="text-xs text-slate-500 opacity-60">
                                                     {new Date(habit.checked_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
