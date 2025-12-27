@@ -1746,7 +1746,6 @@ function GoalsView() {
         target_value: '',
         target_unit: '',
         current_value: '',
-        parent_goal_id: null as string | null,
         is_completed: false,
     });
     
@@ -1777,15 +1776,6 @@ function GoalsView() {
         name: string;
         values: string;
         is_completed?: boolean;
-    }>>([]);
-    
-    const [goalSubGoals, setGoalSubGoals] = useState<Array<{
-        id?: string;
-        name: string;
-        description: string;
-        category: string | null;
-        target_value: string;
-        target_unit: string;
     }>>([]);
     
     const [goalHabits, setGoalHabits] = useState<Array<{
@@ -1870,7 +1860,6 @@ function GoalsView() {
                         target_value: goalForm.target_value ? parseFloat(goalForm.target_value) : null,
                         target_unit: goalForm.target_unit || null,
                         current_value: goalForm.current_value ? parseFloat(goalForm.current_value) : null,
-                        parent_goal_id: goalForm.parent_goal_id || null,
                         is_completed: goalForm.is_completed || false,
                     })
                     .eq('id', editingGoal.id)
@@ -1892,7 +1881,6 @@ function GoalsView() {
                         target_value: goalForm.target_value ? parseFloat(goalForm.target_value) : null,
                         target_unit: goalForm.target_unit || null,
                         current_value: goalForm.current_value ? parseFloat(goalForm.current_value) : null,
-                        parent_goal_id: goalForm.parent_goal_id || null,
                         is_completed: goalForm.is_completed || false,
                     })
                     .select()
@@ -1902,40 +1890,7 @@ function GoalsView() {
 
             if (!goalData) return;
 
-            // Save sub-goals
-            for (const subGoal of goalSubGoals) {
-                if (!subGoal.name.trim()) continue;
-                
-                if (subGoal.id) {
-                    // Update existing sub-goal
-                    await supabase
-                        .from('habit_goals')
-                        .update({
-                            name: subGoal.name,
-                            description: subGoal.description || null,
-                            category: subGoal.category || null,
-                            target_value: subGoal.target_value ? parseFloat(subGoal.target_value) : null,
-                            target_unit: subGoal.target_unit || null,
-                            parent_goal_id: goalData.id,
-                        })
-                        .eq('id', subGoal.id);
-                } else {
-                    // Create new sub-goal
-                    await supabase
-                        .from('habit_goals')
-                        .insert({
-                            user_id: user.id,
-                            name: subGoal.name,
-                            description: subGoal.description || null,
-                            category: subGoal.category || null,
-                            target_value: subGoal.target_value ? parseFloat(subGoal.target_value) : null,
-                            target_unit: subGoal.target_unit || null,
-                            parent_goal_id: goalData.id,
-                        });
-                }
-            }
-
-            // Save habits
+// Save habits
             for (const habit of goalHabits) {
                 if (!habit.name.trim()) continue;
                 
@@ -2032,9 +1987,8 @@ function GoalsView() {
             }
 
             // Reset form
-            setGoalForm({ name: '', description: '', category: null, priority_score: 0, deadline: '', target_value: '', target_unit: '', current_value: '', parent_goal_id: null, is_completed: false });
+            setGoalForm({ name: '', description: '', category: null, priority_score: 0, deadline: '', target_value: '', target_unit: '', current_value: '', is_completed: false });
             setGoalMilestones([]);
-            setGoalSubGoals([]);
             setGoalHabits([]);
             setEditingGoal(null);
             setShowGoalForm(false);
@@ -2056,7 +2010,6 @@ function GoalsView() {
             target_value: goal.target_value?.toString() || '',
             target_unit: goal.target_unit || '',
             current_value: goal.current_value?.toString() || '',
-            parent_goal_id: goal.parent_goal_id || null,
             is_completed: goal.is_completed || false,
         });
         
@@ -2070,19 +2023,6 @@ function GoalsView() {
                 is_completed: m.is_completed || false,
             }));
         setGoalMilestones(goalMilestonesData);
-        
-        // Load sub-goals
-        const subGoalsData = goals
-            .filter(g => g.parent_goal_id === goal.id)
-            .map(g => ({
-                id: g.id,
-                name: g.name,
-                description: g.description || '',
-                category: g.category || null,
-                target_value: g.target_value?.toString() || '',
-                target_unit: g.target_unit || '',
-            }));
-        setGoalSubGoals(subGoalsData);
         
         // Load habits
         const habitsData = habitTemplates
@@ -2351,21 +2291,7 @@ function GoalsView() {
         setGoalMilestones(updated);
     };
 
-    const addSubGoalToForm = () => {
-        setGoalSubGoals([...goalSubGoals, { name: '', description: '', category: null, target_value: '', target_unit: '' }]);
-    };
-
-    const removeSubGoalFromForm = (index: number) => {
-        setGoalSubGoals(goalSubGoals.filter((_, i) => i !== index));
-    };
-
-    const updateSubGoalInForm = (index: number, field: string, value: any) => {
-        const updated = [...goalSubGoals];
-        updated[index] = { ...updated[index], [field]: value };
-        setGoalSubGoals(updated);
-    };
-
-    const addHabitToForm = () => {
+const addHabitToForm = () => {
         setGoalHabits([...goalHabits, { name: '', icon: '📝', category: 'mental', time_of_day: null, is_bad_habit: false, auto_streak_milestones: true }]);
     };
 
@@ -2387,16 +2313,15 @@ function GoalsView() {
         ? goals.filter(g => !g.category)
         : goals.filter(g => g.category === categoryFilter);
     
-    const mainGoals = filteredGoals.filter(g => !g.parent_goal_id);
-    const subGoals = filteredGoals.filter(g => g.parent_goal_id);
+    const mainGoals = filteredGoals;
     
     // Group goals by category for "all" view
     const goalsByCategory = goalCategories.reduce((acc, cat) => {
-        acc[cat] = goals.filter(g => !g.parent_goal_id && g.category === cat);
+        acc[cat] = goals.filter(g => g.category === cat);
         return acc;
     }, {} as Record<string, typeof goals>);
     
-    const uncategorizedGoals = goals.filter(g => !g.parent_goal_id && !g.category);
+    const uncategorizedGoals = goals.filter(g => !g.category);
 
     if (loading) {
         return <div className="text-center py-12 text-slate-400">Loading...</div>;
@@ -2453,9 +2378,8 @@ function GoalsView() {
                         onClick={() => {
                             setShowGoalForm(!showGoalForm);
                             setEditingGoal(null);
-                            setGoalForm({ name: '', description: '', category: null, priority_score: 0, deadline: '', target_value: '', target_unit: '', current_value: '', parent_goal_id: null, is_completed: false });
+                            setGoalForm({ name: '', description: '', category: null, priority_score: 0, deadline: '', target_value: '', target_unit: '', current_value: '', is_completed: false });
                             setGoalMilestones([]);
-                            setGoalSubGoals([]);
                             setGoalHabits([]);
                         }}
                         className="rounded-md bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300"
@@ -2552,19 +2476,7 @@ function GoalsView() {
                                 className="flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
                             />
                         </div>
-                        {!editingGoal && (
-                            <select
-                                value={goalForm.parent_goal_id || ''}
-                                onChange={e => setGoalForm({ ...goalForm, parent_goal_id: e.target.value || null })}
-                                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
-                            >
-                                <option value="">No parent goal (main goal)</option>
-                                {mainGoals.map(goal => (
-                                    <option key={goal.id} value={goal.id}>{goal.name}</option>
-                                ))}
-                            </select>
-                        )}
-                        {editingGoal && (
+{editingGoal && (
                             <div className="flex items-center gap-2">
                                 <input
                                     type="checkbox"
@@ -2577,73 +2489,7 @@ function GoalsView() {
                         )}
                     </div>
 
-                    {/* Sub-Goals Section */}
-                    <div className="border-t border-slate-800 pt-4">
-                        <div className="flex items-center justify-between mb-3">
-                            <h4 className="text-sm font-semibold">Sub-Goals</h4>
-                            <button
-                                type="button"
-                                onClick={addSubGoalToForm}
-                                className="text-xs text-amber-400 hover:text-amber-300"
-                            >
-                                + Add Sub-Goal
-                            </button>
-                        </div>
-                        {goalSubGoals.map((subGoal, index) => (
-                            <div key={index} className="mb-3 p-3 rounded border border-slate-800 bg-slate-900 space-y-2">
-                                <div className="flex gap-2">
-                                    <input
-                                        type="text"
-                                        placeholder="Sub-goal name"
-                                        value={subGoal.name}
-                                        onChange={e => updateSubGoalInForm(index, 'name', e.target.value)}
-                                        className="flex-1 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm"
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => removeSubGoalFromForm(index)}
-                                        className="text-xs text-red-400 hover:text-red-300 px-2"
-                                    >
-                                        Remove
-                                    </button>
-                                </div>
-                                <textarea
-                                    placeholder="Description (optional)"
-                                    value={subGoal.description}
-                                    onChange={e => updateSubGoalInForm(index, 'description', e.target.value)}
-                                    className="w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm"
-                                />
-                                <div className="flex gap-2">
-                                    <select
-                                        value={subGoal.category || ''}
-                                        onChange={e => updateSubGoalInForm(index, 'category', e.target.value || null)}
-                                        className="flex-1 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm"
-                                    >
-                                        <option value="">No category</option>
-                                        {goalCategories.map(cat => (
-                                            <option key={cat} value={cat}>{cat.charAt(0).toUpperCase() + cat.slice(1)}</option>
-                                        ))}
-                                    </select>
-                                    <input
-                                        type="number"
-                                        placeholder="Target value"
-                                        value={subGoal.target_value}
-                                        onChange={e => updateSubGoalInForm(index, 'target_value', e.target.value)}
-                                        className="flex-1 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm"
-                                    />
-                                    <input
-                                        type="text"
-                                        placeholder="Unit"
-                                        value={subGoal.target_unit}
-                                        onChange={e => updateSubGoalInForm(index, 'target_unit', e.target.value)}
-                                        className="flex-1 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm"
-                                    />
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-
-                    {/* Habits Section */}
+{/* Habits Section */}
                     <div className="border-t border-slate-800 pt-4">
                         <div className="flex items-center justify-between mb-3">
                             <h4 className="text-sm font-semibold">Habits</h4>
@@ -2788,9 +2634,8 @@ function GoalsView() {
                             onClick={() => {
                                 setShowGoalForm(false);
                                 setEditingGoal(null);
-                                setGoalForm({ name: '', description: '', category: null, priority_score: 0, deadline: '', target_value: '', target_unit: '', current_value: '', parent_goal_id: null, is_completed: false });
+                                setGoalForm({ name: '', description: '', category: null, priority_score: 0, deadline: '', target_value: '', target_unit: '', current_value: '', is_completed: false });
                                 setGoalMilestones([]);
-                                setGoalSubGoals([]);
                                 setGoalHabits([]);
                             }}
                             className="rounded-md border border-slate-700 px-4 py-2 text-sm font-semibold hover:bg-slate-800"
@@ -2845,7 +2690,6 @@ function GoalsView() {
                                     </div>
                                     <div className="space-y-4">
                                         {categoryGoals.map(goal => {
-                                            const goalSubGoals = subGoals.filter(sg => sg.parent_goal_id === goal.id);
                                             const goalMilestones = milestones.filter(m => m.goal_id === goal.id);
                                             const progress = goal.target_value ? (goal.current_value / goal.target_value) * 100 : 0;
 
@@ -2917,18 +2761,7 @@ function GoalsView() {
                                                         </div>
                                                     )}
 
-                                                    {goalSubGoals.length > 0 && (
-                                                        <div className="mt-3 space-y-2">
-                                                            <div className="text-xs text-slate-400 mb-1">Sub-goals:</div>
-                                                            {goalSubGoals.map(subGoal => (
-                                                                <div key={subGoal.id} className="text-sm text-slate-300 pl-4 border-l-2 border-slate-700">
-                                                                    • {subGoal.name}
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    )}
-
-                                                    {goalMilestones.length > 0 && (
+{goalMilestones.length > 0 && (
                                                         <div className="mt-3 space-y-2">
                                                             <div className="flex items-center justify-between mb-1">
                                                                 <div className="text-xs text-slate-400">Milestones:</div>
@@ -3000,7 +2833,6 @@ function GoalsView() {
                                 <h3 className="text-lg font-semibold mb-3 text-slate-300">Uncategorized Goals</h3>
                                 <div className="space-y-4">
                                     {uncategorizedGoals.map(goal => {
-                                        const goalSubGoals = subGoals.filter(sg => sg.parent_goal_id === goal.id);
                                         const goalMilestones = milestones.filter(m => m.goal_id === goal.id);
                                         const progress = goal.target_value ? (goal.current_value / goal.target_value) * 100 : 0;
 
@@ -3067,16 +2899,6 @@ function GoalsView() {
                                                     </div>
                                                 )}
 
-                                                {goalSubGoals.length > 0 && (
-                                                    <div className="mt-3 space-y-2">
-                                                        <div className="text-xs text-slate-400 mb-1">Sub-goals:</div>
-                                                        {goalSubGoals.map(subGoal => (
-                                                            <div key={subGoal.id} className="text-sm text-slate-300 pl-4 border-l-2 border-slate-700">
-                                                                • {subGoal.name}
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
 
                                                 {goalMilestones.length > 0 && (
                                                     <div className="mt-3 space-y-2">
@@ -3148,7 +2970,6 @@ function GoalsView() {
                 ) : (
                     <div className="space-y-4">
                         {mainGoals.map(goal => {
-                    const goalSubGoals = subGoals.filter(sg => sg.parent_goal_id === goal.id);
                     const goalMilestones = milestones.filter(m => m.goal_id === goal.id);
                     const progress = goal.target_value ? (goal.current_value / goal.target_value) * 100 : 0;
 
@@ -3211,16 +3032,6 @@ function GoalsView() {
                                 </div>
                             )}
 
-                            {goalSubGoals.length > 0 && (
-                                <div className="mt-3 space-y-2">
-                                    <div className="text-xs text-slate-400 mb-1">Sub-goals:</div>
-                                    {goalSubGoals.map(subGoal => (
-                                        <div key={subGoal.id} className="text-sm text-slate-300 pl-4 border-l-2 border-slate-700">
-                                            • {subGoal.name}
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
 
                             {goalMilestones.length > 0 && (
                                 <div className="mt-3 space-y-2">
