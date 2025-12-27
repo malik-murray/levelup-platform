@@ -954,32 +954,32 @@ function DailyView({
                 <div className="grid grid-cols-3 gap-4 mt-4 mb-4">
                     <div className="rounded-md border border-blue-500/30 bg-blue-950/20 p-3 text-center relative group">
                         <div className="text-xs text-blue-300 mb-1">
-                            Habits ({scoringSettings.habits_weight}%)
-                            <span className="ml-1 text-blue-400 cursor-help" title="Score = (completed habits / total habits) × weight">ℹ️</span>
+                            Habit Score
+                            <span className="ml-1 text-blue-400 cursor-help" title="Percentage of completed habits = (completed habits / total habits) × 100">ℹ️</span>
                         </div>
-                        <div className="text-2xl font-bold text-blue-400">{habitsScore}</div>
+                        <div className="text-2xl font-bold text-blue-400">{habitsScore}%</div>
                         <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block bg-slate-800 text-xs text-slate-200 p-2 rounded shadow-lg z-10 whitespace-nowrap">
-                            Formula: (completed / total) × {scoringSettings.habits_weight}%
+                            Formula: (completed / total) × 100
                     </div>
                     </div>
                     <div className="rounded-md border border-purple-500/30 bg-purple-950/20 p-3 text-center relative group">
                         <div className="text-xs text-purple-300 mb-1">
-                            Priorities ({scoringSettings.priorities_weight}%)
-                            <span className="ml-1 text-purple-400 cursor-help" title="Score = (completed priorities / total priorities) × weight">ℹ️</span>
+                            Priority Score
+                            <span className="ml-1 text-purple-400 cursor-help" title="Percentage of completed priorities = (completed priorities / total priorities) × 100">ℹ️</span>
                         </div>
-                        <div className="text-2xl font-bold text-purple-400">{prioritiesScore}</div>
+                        <div className="text-2xl font-bold text-purple-400">{prioritiesScore}%</div>
                         <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block bg-slate-800 text-xs text-slate-200 p-2 rounded shadow-lg z-10 whitespace-nowrap">
-                            Formula: (completed / total) × {scoringSettings.priorities_weight}%
+                            Formula: (completed / total) × 100
                     </div>
                     </div>
                     <div className="rounded-md border border-green-500/30 bg-green-950/20 p-3 text-center relative group">
                         <div className="text-xs text-green-300 mb-1">
-                            Todos ({scoringSettings.todos_weight}%)
-                            <span className="ml-1 text-green-400 cursor-help" title="Score = (completed todos / total todos) × weight">ℹ️</span>
+                            To Do List Score
+                            <span className="ml-1 text-green-400 cursor-help" title="Percentage of completed todos = (completed todos / total todos) × 100">ℹ️</span>
                         </div>
-                        <div className="text-2xl font-bold text-green-400">{todosScore}</div>
+                        <div className="text-2xl font-bold text-green-400">{todosScore}%</div>
                         <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block bg-slate-800 text-xs text-slate-200 p-2 rounded shadow-lg z-10 whitespace-nowrap">
-                            Formula: (completed / total) × {scoringSettings.todos_weight}%
+                            Formula: (completed / total) × 100
                         </div>
                     </div>
                 </div>
@@ -987,32 +987,32 @@ function DailyView({
                 {/* Category Scores */}
                 <div className="grid grid-cols-3 gap-4 mb-4">
                     <div className="rounded-md border border-blue-500/30 bg-blue-950/20 p-3 text-center">
-                        <div className="text-xs text-blue-300 mb-1">Physical</div>
-                        <div className="text-xl font-bold text-blue-400">{physicalScore}</div>
+                        <div className="text-xs text-blue-300 mb-1">Physical Score</div>
+                        <div className="text-xl font-bold text-blue-400">{physicalScore}%</div>
                     </div>
                     <div className="rounded-md border border-purple-500/30 bg-purple-950/20 p-3 text-center">
-                        <div className="text-xs text-purple-300 mb-1">Mental</div>
-                        <div className="text-xl font-bold text-purple-400">{mentalScore}</div>
+                        <div className="text-xs text-purple-300 mb-1">Mental Score</div>
+                        <div className="text-xl font-bold text-purple-400">{mentalScore}%</div>
                     </div>
                     <div className="rounded-md border border-amber-500/30 bg-amber-950/20 p-3 text-center">
-                        <div className="text-xs text-amber-300 mb-1">Spiritual</div>
-                        <div className="text-xl font-bold text-amber-400">{spiritualScore}</div>
+                        <div className="text-xs text-amber-300 mb-1">Spiritual Score</div>
+                        <div className="text-xl font-bold text-amber-400">{spiritualScore}%</div>
                     </div>
                 </div>
 
                 {/* Time of Day Scores */}
                 <div className="grid grid-cols-3 gap-4">
                     <div className="rounded-md border border-slate-500/30 bg-slate-950/20 p-3 text-center">
-                        <div className="text-xs text-slate-300 mb-1">Morning</div>
-                        <div className="text-xl font-bold text-slate-200">{morningScore}</div>
+                        <div className="text-xs text-slate-300 mb-1">Morning Score</div>
+                        <div className="text-xl font-bold text-slate-200">{morningScore}%</div>
                     </div>
                     <div className="rounded-md border border-slate-500/30 bg-slate-950/20 p-3 text-center">
-                        <div className="text-xs text-slate-300 mb-1">Afternoon</div>
-                        <div className="text-xl font-bold text-slate-200">{afternoonScore}</div>
+                        <div className="text-xs text-slate-300 mb-1">Afternoon Score</div>
+                        <div className="text-xl font-bold text-slate-200">{afternoonScore}%</div>
                     </div>
                     <div className="rounded-md border border-slate-500/30 bg-slate-950/20 p-3 text-center">
-                        <div className="text-xs text-slate-300 mb-1">Evening</div>
-                        <div className="text-xl font-bold text-slate-200">{eveningScore}</div>
+                        <div className="text-xs text-slate-300 mb-1">Evening Score</div>
+                        <div className="text-xl font-bold text-slate-200">{eveningScore}%</div>
                     </div>
                 </div>
             </div>

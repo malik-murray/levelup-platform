@@ -1180,7 +1180,7 @@ function DailyPlanSection({
                     <div className="text-2xl font-bold text-purple-400">{prioritiesScore}%</div>
                 </div>
                 <div className="text-center">
-                    <div className="text-xs text-slate-400 mb-1">Todo Score</div>
+                    <div className="text-xs text-slate-400 mb-1">To Do List Score</div>
                     <div className="text-2xl font-bold text-green-400">{todosScore}%</div>
                 </div>
             </div>
