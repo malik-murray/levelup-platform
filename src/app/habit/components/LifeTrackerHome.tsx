@@ -1259,7 +1259,6 @@ function DailyPlanSection({
                                     {categoryHabits
                                         .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
                                         .map((habit, index) => {
-                                        const linkedGoal = goals.find(g => g.id === habit.goal_id);
                                         const isDragging = draggedHabitId === habit.id;
                                         const isDragOver = dragOverHabitId === habit.id;
                                         
@@ -1314,9 +1313,6 @@ function DailyPlanSection({
                                                         <span className="text-lg mr-2">{habit.icon}</span>
                                                         <div className="flex-1 flex items-center gap-2">
                                                             <span className="text-white">{habit.name}</span>
-                                                            {linkedGoal && (
-                                                                <span className="text-xs text-slate-400">→ {linkedGoal.name}</span>
-                                                            )}
                                                         </div>
                                                     </label>
                                                 </div>

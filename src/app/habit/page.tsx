@@ -553,6 +553,16 @@ function DailyView({
         priorities_weight: scoringSettings.priorities_weight,
         todos_weight: scoringSettings.todos_weight,
     });
+    const [editingHabit, setEditingHabit] = useState<HabitTemplate | null>(null);
+    const [showHabitEditModal, setShowHabitEditModal] = useState(false);
+    const [habitEditForm, setHabitEditForm] = useState({
+        name: '',
+        icon: '📝',
+        category: 'mental' as Category,
+        time_of_day: null as TimeOfDay | null,
+        is_bad_habit: false,
+        goal_id: null as string | null,
+    });
 
     // Local state for optimistic updates
     const [localHabitEntries, setLocalHabitEntries] = useState<HabitEntry[]>(habitEntries);
@@ -749,6 +759,71 @@ function DailyView({
             onDataChange();
         } catch (error) {
             console.error('Error adding habit:', error);
+        }
+    };
+
+    const handleEditHabit = (habit: HabitTemplate) => {
+        setEditingHabit(habit);
+        setHabitEditForm({
+            name: habit.name || '',
+            icon: habit.icon || '📝',
+            category: habit.category || 'mental',
+            time_of_day: habit.time_of_day || null,
+            is_bad_habit: habit.is_bad_habit || false,
+            goal_id: habit.goal_id || null,
+        });
+        setShowHabitEditModal(true);
+    };
+
+    const handleDeleteHabit = async (id: string) => {
+        if (!confirm('Are you sure you want to delete this habit? This will also delete all daily entries for this habit.')) {
+            return;
+        }
+
+        try {
+            await supabase
+                .from('habit_templates')
+                .delete()
+                .eq('id', id);
+            
+            onDataChange();
+        } catch (error) {
+            console.error('Error deleting habit:', error);
+        }
+    };
+
+    const handleSaveHabitEdit = async () => {
+        if (!habitEditForm.name.trim() || !editingHabit) return;
+
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            await supabase
+                .from('habit_templates')
+                .update({
+                    name: habitEditForm.name,
+                    icon: habitEditForm.icon,
+                    category: habitEditForm.category,
+                    time_of_day: habitEditForm.time_of_day,
+                    is_bad_habit: habitEditForm.is_bad_habit,
+                    goal_id: habitEditForm.goal_id,
+                })
+                .eq('id', editingHabit.id);
+
+            setShowHabitEditModal(false);
+            setEditingHabit(null);
+            setHabitEditForm({
+                name: '',
+                icon: '📝',
+                category: 'mental',
+                time_of_day: null,
+                is_bad_habit: false,
+                goal_id: null,
+            });
+            onDataChange();
+        } catch (error) {
+            console.error('Error updating habit:', error);
         }
     };
 
@@ -1023,6 +1098,8 @@ function DailyView({
                 goals={goals}
                 onToggle={handleHabitToggle}
                 onAdd={handleAddHabit}
+                onEdit={handleEditHabit}
+                onDelete={handleDeleteHabit}
                 newHabitName={newHabitName}
                 setNewHabitName={setNewHabitName}
                 newHabitIcon={newHabitIcon}
@@ -1031,6 +1108,7 @@ function DailyView({
                 setNewHabitCategory={setNewHabitCategory}
                 newHabitTimeOfDay={newHabitTimeOfDay}
                 setNewHabitTimeOfDay={setNewHabitTimeOfDay}
+                onReorder={handleHabitReorder}
             />
 
             {/* Priorities Section */}
@@ -1071,6 +1149,106 @@ function DailyView({
                 setContent={setEditingContent}
                 onSave={handleSaveContent}
             />
+
+            {/* Habit Edit Modal */}
+            {showHabitEditModal && editingHabit && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowHabitEditModal(false)}>
+                    <div className="bg-slate-900 rounded-lg border border-slate-800 p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-semibold">Edit Habit</h3>
+                            <button
+                                onClick={() => setShowHabitEditModal(false)}
+                                className="text-slate-400 hover:text-slate-200"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <div className="space-y-3">
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    placeholder="Icon (emoji)"
+                                    value={habitEditForm.icon}
+                                    onChange={e => setHabitEditForm({ ...habitEditForm, icon: e.target.value })}
+                                    className="w-20 rounded border border-slate-700 bg-slate-800 px-2 py-2 text-sm"
+                                    maxLength={2}
+                                />
+                                <input
+                                    type="text"
+                                    placeholder="Habit name..."
+                                    value={habitEditForm.name}
+                                    onChange={e => setHabitEditForm({ ...habitEditForm, name: e.target.value })}
+                                    className="flex-1 rounded border border-slate-700 bg-slate-800 px-2 py-2 text-sm"
+                                />
+                            </div>
+                            <div className="flex gap-2">
+                                <select
+                                    value={habitEditForm.category}
+                                    onChange={e => setHabitEditForm({ ...habitEditForm, category: e.target.value as Category })}
+                                    className="flex-1 rounded border border-slate-700 bg-slate-800 px-2 py-2 text-sm"
+                                >
+                                    <option value="physical">Physical</option>
+                                    <option value="mental">Mental</option>
+                                    <option value="spiritual">Spiritual</option>
+                                </select>
+                                <select
+                                    value={habitEditForm.time_of_day || ''}
+                                    onChange={e => setHabitEditForm({ ...habitEditForm, time_of_day: (e.target.value as TimeOfDay) || null })}
+                                    className="flex-1 rounded border border-slate-700 bg-slate-800 px-2 py-2 text-sm"
+                                >
+                                    <option value="">Any Time</option>
+                                    <option value="morning">Morning</option>
+                                    <option value="afternoon">Afternoon</option>
+                                    <option value="evening">Evening</option>
+                                </select>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    id="edit_is_bad_habit"
+                                    checked={habitEditForm.is_bad_habit}
+                                    onChange={e => setHabitEditForm({ ...habitEditForm, is_bad_habit: e.target.checked })}
+                                    className="rounded border-slate-700"
+                                />
+                                <label htmlFor="edit_is_bad_habit" className="text-sm text-slate-300">
+                                    This is a bad habit (to avoid)
+                                </label>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <label className="text-xs text-slate-400">Link to goal (optional)</label>
+                                <select
+                                    value={habitEditForm.goal_id || ''}
+                                    onChange={e => setHabitEditForm({ ...habitEditForm, goal_id: e.target.value || null })}
+                                    className="w-full rounded border border-slate-700 bg-slate-800 px-2 py-2 text-sm"
+                                >
+                                    <option value="">No goal</option>
+                                    {goals.map(goal => (
+                                        <option key={goal.id} value={goal.id}>{goal.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="flex gap-2 pt-2">
+                                <button
+                                    onClick={handleSaveHabitEdit}
+                                    className="flex-1 rounded-md bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300"
+                                >
+                                    Save Changes
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setShowHabitEditModal(false);
+                                        setEditingHabit(null);
+                                    }}
+                                    className="rounded-md border border-slate-700 px-4 py-2 text-sm font-semibold hover:bg-slate-800"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Scoring Settings Modal */}
         {showScoringModal && (
@@ -1278,6 +1456,8 @@ function HabitsSection({
     goals,
     onToggle,
     onAdd,
+    onEdit,
+    onDelete,
     newHabitName,
     setNewHabitName,
     newHabitIcon,
@@ -1327,7 +1507,6 @@ function HabitsSection({
                         <h4 className="text-xs font-semibold mb-2 capitalize">{category} Habits</h4>
                         <div className="space-y-2">
                             {habitsByCategory[category].map((habit: any) => {
-                                const linkedGoal = goals?.find((g: any) => g.id === habit.goal_id);
                                 const isDragging = draggedHabitId === habit.id;
                                 const isDragOver = dragOverHabitId === habit.id;
                                 
@@ -1372,20 +1551,41 @@ function HabitsSection({
                                     <span className="text-slate-500 text-lg select-none cursor-move" title="Drag to reorder">☰</span>
                                     <button
                                         onClick={() => onToggle(habit.id, habit.status)}
-                                        className="w-full flex items-center gap-2 p-2 rounded hover:bg-slate-900/50 transition-colors text-left"
+                                        className="flex-1 flex items-center gap-2 p-2 rounded hover:bg-slate-900/50 transition-colors text-left"
                                     >
                                         <span className="text-lg">{habit.icon}</span>
                                         <div className="flex-1 flex items-center gap-2">
                                             <span className="text-sm text-slate-200">{habit.name}</span>
-                                            {linkedGoal && (
-                                                <span className="text-xs text-slate-400">→ {linkedGoal.name}</span>
-                                            )}
                                         </div>
                                         {habit.time_of_day && (
                                             <span className="text-xs text-slate-400 capitalize">{habit.time_of_day}</span>
                                         )}
                                         <span className="text-lg">{getStatusEmoji(habit.status)}</span>
                                     </button>
+                                    {onEdit && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onEdit(habit);
+                                            }}
+                                            className="p-1.5 rounded hover:bg-blue-600/20 text-blue-400 hover:text-blue-300 transition-colors"
+                                            title="Edit habit"
+                                        >
+                                            ✏️
+                                        </button>
+                                    )}
+                                    {onDelete && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onDelete(habit.id);
+                                            }}
+                                            className="p-1.5 rounded hover:bg-red-600/20 text-red-400 hover:text-red-300 transition-colors"
+                                            title="Delete habit"
+                                        >
+                                            🗑️
+                                        </button>
+                                    )}
                                 </div>
                                 );
                             })}
@@ -1408,27 +1608,48 @@ function HabitsSection({
                                         {badHabitsByCategory[category].map((habit: any) => {
                                             // For bad habits, invert the status display: missed = good (avoided), checked = bad (did it)
                                             const displayStatus = habit.status === 'missed' ? 'checked' : 'missed';
-                                            const linkedGoal = goals?.find((g: any) => g.id === habit.goal_id);
                                             return (
-                                                <button
-                                                    key={habit.id}
-                                                    onClick={() => onToggle(habit.id, habit.status)}
-                                                    className="w-full flex items-center gap-2 p-2 rounded hover:bg-slate-900/50 transition-colors text-left"
-                                                >
-                                                    <span className="text-lg">{habit.icon}</span>
-                                                    <div className="flex-1 flex items-center gap-2">
-                                                        <span className="text-sm text-slate-200">{habit.name}</span>
-                                                        {linkedGoal && (
-                                                            <span className="text-xs text-slate-400">→ {linkedGoal.name}</span>
+                                                <div key={habit.id} className="flex items-center gap-2">
+                                                    <button
+                                                        onClick={() => onToggle(habit.id, habit.status)}
+                                                        className="flex-1 flex items-center gap-2 p-2 rounded hover:bg-slate-900/50 transition-colors text-left"
+                                                    >
+                                                        <span className="text-lg">{habit.icon}</span>
+                                                        <div className="flex-1 flex items-center gap-2">
+                                                            <span className="text-sm text-slate-200">{habit.name}</span>
+                                                        </div>
+                                                        {habit.time_of_day && (
+                                                            <span className="text-xs text-slate-400 capitalize">{habit.time_of_day}</span>
                                                         )}
-                                                    </div>
-                                                    {habit.time_of_day && (
-                                                        <span className="text-xs text-slate-400 capitalize">{habit.time_of_day}</span>
+                                                        <span className="text-lg" title={habit.status === 'missed' ? 'Avoided ✓' : habit.status === 'checked' ? 'Did it ✗' : 'Partial'}>
+                                                            {getStatusEmoji(displayStatus)}
+                                                        </span>
+                                                    </button>
+                                                    {onEdit && (
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                onEdit(habit);
+                                                            }}
+                                                            className="p-1.5 rounded hover:bg-blue-600/20 text-blue-400 hover:text-blue-300 transition-colors"
+                                                            title="Edit habit"
+                                                        >
+                                                            ✏️
+                                                        </button>
                                                     )}
-                                                    <span className="text-lg" title={habit.status === 'missed' ? 'Avoided ✓' : habit.status === 'checked' ? 'Did it ✗' : 'Partial'}>
-                                                        {getStatusEmoji(displayStatus)}
-                                                    </span>
-                                                </button>
+                                                    {onDelete && (
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                onDelete(habit.id);
+                                                            }}
+                                                            className="p-1.5 rounded hover:bg-red-600/20 text-red-400 hover:text-red-300 transition-colors"
+                                                            title="Delete habit"
+                                                        >
+                                                            🗑️
+                                                        </button>
+                                                    )}
+                                                </div>
                                             );
                                         })}
                                     </div>
