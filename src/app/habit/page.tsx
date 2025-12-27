@@ -129,6 +129,7 @@ export default function HabitPage() {
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [loading, setLoading] = useState(true);
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     
     // Data
     const [habitTemplates, setHabitTemplates] = useState<HabitTemplate[]>([]);
@@ -371,12 +372,42 @@ export default function HabitPage() {
                 </div>
             </header>
 
-            {/* Tabs - Mobile-first: scrollable, larger tap targets */}
+            {/* Tabs - Mobile: hamburger menu, Desktop: horizontal tabs */}
             <div className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-black">
                 <div className="mx-auto max-w-7xl">
-                    <div className="flex gap-1 overflow-x-auto px-4 sm:px-6 scrollbar-hide">
+                    {/* Mobile: Hamburger button (visible only on mobile) */}
+                    <div className="md:hidden flex items-center justify-between px-4 py-4">
+                        <button
+                            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                            className="p-2 rounded-md text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                            aria-label="Toggle menu"
+                        >
+                            <svg
+                                className="w-6 h-6"
+                                fill="none"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="2"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                {mobileMenuOpen ? (
+                                    <path d="M6 18L18 6M6 6l12 12" />
+                                ) : (
+                                    <path d="M4 6h16M4 12h16M4 18h16" />
+                                )}
+                            </svg>
+                        </button>
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300 capitalize">
+                            {activeTab === 'home' ? 'Home' : activeTab === 'calendar' ? 'Calendar' : activeTab === 'daily' ? 'Daily' : activeTab === 'statistics' ? 'Statistics' : activeTab === 'goals' ? 'Goals' : 'Habits'}
+                        </span>
+                        <div className="w-10" /> {/* Spacer for centering */}
+                    </div>
+                    
+                    {/* Desktop: Horizontal tabs (visible only on desktop) */}
+                    <div className="hidden md:flex gap-1 px-4 sm:px-6">
                         {(['home', 'calendar', 'daily', 'statistics', 'goals', 'habits'] as Tab[]).map(tab => (
-                                <button
+                            <button
                                 key={tab}
                                 onClick={() => setActiveTab(tab)}
                                 className={`px-4 py-4 text-sm font-medium capitalize transition-colors whitespace-nowrap min-h-[48px] flex items-center ${
@@ -386,11 +417,78 @@ export default function HabitPage() {
                                 }`}
                             >
                                 {tab === 'home' ? 'Home' : tab === 'calendar' ? 'Calendar' : tab === 'daily' ? 'Daily' : tab === 'statistics' ? 'Statistics/Streaks' : tab === 'goals' ? 'Goals & Milestones' : 'Habits/Bad Habits'}
-                                </button>
+                            </button>
                         ))}
                     </div>
                 </div>
             </div>
+
+            {/* Mobile Menu Drawer */}
+            {mobileMenuOpen && (
+                <>
+                    {/* Overlay/Backdrop */}
+                    <div
+                        className="fixed inset-0 bg-black/50 z-40 md:hidden"
+                        onClick={() => setMobileMenuOpen(false)}
+                    />
+                    {/* Slide-out drawer */}
+                    <div className="fixed inset-y-0 left-0 w-64 bg-white dark:bg-slate-900 shadow-xl z-50 md:hidden transform transition-transform duration-300 ease-in-out">
+                        <div className="flex flex-col h-full">
+                            {/* Drawer header */}
+                            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-800">
+                                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Menu</h2>
+                                <button
+                                    onClick={() => setMobileMenuOpen(false)}
+                                    className="p-2 rounded-md text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                                    aria-label="Close menu"
+                                >
+                                    <svg
+                                        className="w-6 h-6"
+                                        fill="none"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth="2"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                            {/* Navigation links */}
+                            <nav className="flex-1 overflow-y-auto py-4">
+                                {(['home', 'calendar', 'daily', 'statistics', 'goals', 'habits'] as Tab[]).map(tab => {
+                                    const tabLabels: Record<Tab, string> = {
+                                        home: 'Home',
+                                        calendar: 'Calendar',
+                                        daily: 'Daily',
+                                        statistics: 'Statistics/Streaks',
+                                        goals: 'Goals & Milestones',
+                                        habits: 'Habits/Bad Habits',
+                                    };
+                                    
+                                    return (
+                                        <button
+                                            key={tab}
+                                            onClick={() => {
+                                                setActiveTab(tab);
+                                                setMobileMenuOpen(false);
+                                            }}
+                                            className={`w-full text-left px-4 py-4 text-base font-medium transition-colors ${
+                                                activeTab === tab
+                                                    ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 border-l-4 border-amber-400'
+                                                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                                            }`}
+                                        >
+                                            {tabLabels[tab]}
+                                        </button>
+                                    );
+                                })}
+                            </nav>
+                        </div>
+                    </div>
+                </>
+            )}
 
             {/* Content - Mobile-first padding */}
             <div className="mx-auto max-w-7xl px-4 sm:px-6 py-4 sm:py-6">
