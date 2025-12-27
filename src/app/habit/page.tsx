@@ -892,6 +892,7 @@ function DailyView({
             {/* Habits Section */}
             <HabitsSection
                 habits={habitsWithEntries}
+                goals={goals}
                 onToggle={handleHabitToggle}
                 onAdd={handleAddHabit}
                 newHabitName={newHabitName}
@@ -1150,6 +1151,7 @@ function calculateTimeOfDayScore(
 // Section Components
 function HabitsSection({
     habits,
+    goals,
     onToggle,
     onAdd,
     newHabitName,
@@ -1197,20 +1199,28 @@ function HabitsSection({
                     <div key={category} className={`rounded-lg border ${categoryColors[category]} p-4`}>
                         <h4 className="text-xs font-semibold mb-2 capitalize">{category} Habits</h4>
                         <div className="space-y-2">
-                            {habitsByCategory[category].map((habit: any) => (
-                                <button
-                                    key={habit.id}
-                                    onClick={() => onToggle(habit.id, habit.status)}
-                                    className="w-full flex items-center gap-2 p-2 rounded hover:bg-slate-900/50 transition-colors text-left"
-                                >
-                                    <span className="text-lg">{habit.icon}</span>
-                                    <span className="flex-1 text-sm text-slate-200">{habit.name}</span>
-                                    {habit.time_of_day && (
-                                        <span className="text-xs text-slate-400 capitalize">{habit.time_of_day}</span>
-                                    )}
-                                    <span className="text-lg">{getStatusEmoji(habit.status)}</span>
-                                </button>
-                            ))}
+                            {habitsByCategory[category].map((habit: any) => {
+                                const linkedGoal = goals?.find((g: any) => g.id === habit.goal_id);
+                                return (
+                                    <button
+                                        key={habit.id}
+                                        onClick={() => onToggle(habit.id, habit.status)}
+                                        className="w-full flex items-center gap-2 p-2 rounded hover:bg-slate-900/50 transition-colors text-left"
+                                    >
+                                        <span className="text-lg">{habit.icon}</span>
+                                        <div className="flex-1 flex items-center gap-2">
+                                            <span className="text-sm text-slate-200">{habit.name}</span>
+                                            {linkedGoal && (
+                                                <span className="text-xs text-slate-400">→ {linkedGoal.name}</span>
+                                            )}
+                                        </div>
+                                        {habit.time_of_day && (
+                                            <span className="text-xs text-slate-400 capitalize">{habit.time_of_day}</span>
+                                        )}
+                                        <span className="text-lg">{getStatusEmoji(habit.status)}</span>
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
                 ))}
@@ -1230,6 +1240,7 @@ function HabitsSection({
                                         {badHabitsByCategory[category].map((habit: any) => {
                                             // For bad habits, invert the status display: missed = good (avoided), checked = bad (did it)
                                             const displayStatus = habit.status === 'missed' ? 'checked' : habit.status === 'checked' ? 'missed' : 'half';
+                                            const linkedGoal = goals?.find((g: any) => g.id === habit.goal_id);
                                             return (
                                                 <button
                                                     key={habit.id}
@@ -1237,7 +1248,12 @@ function HabitsSection({
                                                     className="w-full flex items-center gap-2 p-2 rounded hover:bg-slate-900/50 transition-colors text-left"
                                                 >
                                                     <span className="text-lg">{habit.icon}</span>
-                                                    <span className="flex-1 text-sm text-slate-200">{habit.name}</span>
+                                                    <div className="flex-1 flex items-center gap-2">
+                                                        <span className="text-sm text-slate-200">{habit.name}</span>
+                                                        {linkedGoal && (
+                                                            <span className="text-xs text-slate-400">→ {linkedGoal.name}</span>
+                                                        )}
+                                                    </div>
                                                     {habit.time_of_day && (
                                                         <span className="text-xs text-slate-400 capitalize">{habit.time_of_day}</span>
                                                     )}
@@ -3691,7 +3707,7 @@ function HabitsManagementView({
                         </label>
                     </div>
                     <div className="flex flex-col gap-1">
-                        <label className="text-xs text-slate-400">Link to goal</label>
+                        <label className="text-xs text-slate-400">Link to goal (optional)</label>
                         <select
                             value={formData.goal_id || ''}
                             onChange={e => setFormData({ ...formData, goal_id: e.target.value || null })}

@@ -988,18 +988,26 @@ function DailyPlanSection({
                             </button>
                             {isExpanded && (
                                 <div className="border-t border-slate-700/50 p-3 space-y-2 bg-slate-900/50">
-                                    {categoryHabits.map((habit) => (
-                                        <label key={habit.id} className="flex items-center gap-3 cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                checked={habit.status === 'checked'}
-                                                onChange={() => handleHabitToggle(habit.id, habit.status)}
-                                                className="h-5 w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500"
-                                            />
-                                            <span className="text-lg mr-2">{habit.icon}</span>
-                                            <span className="flex-1 text-white">{habit.name}</span>
-                                        </label>
-                                    ))}
+                                    {categoryHabits.map((habit) => {
+                                        const linkedGoal = goals.find(g => g.id === habit.goal_id);
+                                        return (
+                                            <label key={habit.id} className="flex items-center gap-3 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={habit.status === 'checked'}
+                                                    onChange={() => handleHabitToggle(habit.id, habit.status)}
+                                                    className="h-5 w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500"
+                                                />
+                                                <span className="text-lg mr-2">{habit.icon}</span>
+                                                <div className="flex-1 flex items-center gap-2">
+                                                    <span className="text-white">{habit.name}</span>
+                                                    {linkedGoal && (
+                                                        <span className="text-xs text-slate-400">→ {linkedGoal.name}</span>
+                                                    )}
+                                                </div>
+                                            </label>
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>
