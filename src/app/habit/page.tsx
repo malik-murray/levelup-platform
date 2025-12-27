@@ -3474,12 +3474,12 @@ function HabitsManagementView({
     const handleEdit = (habit: HabitTemplate) => {
         setEditingHabit(habit);
         setFormData({
-            name: habit.name,
-            icon: habit.icon,
-            category: habit.category,
-            time_of_day: habit.time_of_day,
-            is_bad_habit: habit.is_bad_habit,
-            goal_id: habit.goal_id,
+            name: habit.name || '',
+            icon: habit.icon || '📝',
+            category: habit.category || 'mental',
+            time_of_day: habit.time_of_day || null,
+            is_bad_habit: habit.is_bad_habit || false,
+            goal_id: habit.goal_id || null,
         });
         setShowForm(true);
     };
