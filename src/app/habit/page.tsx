@@ -649,6 +649,7 @@ function DailyView({
 
     const handleAddPriority = async () => {
         if (!newPriority.trim()) return;
+        if (priorities.length >= 5) return; // Enforce 5 priority limit
         
         try {
             const { data: { user } } = await supabase.auth.getUser();
@@ -1336,9 +1337,11 @@ function PrioritiesSection({
     newPriorityGoalId,
     setNewPriorityGoalId,
 }: any) {
+    const isLimitReached = priorities.length >= 5;
+    
     return (
         <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-            <h3 className="text-base font-semibold mb-3 text-purple-400">Priorities</h3>
+            <h3 className="text-base font-semibold mb-3 text-purple-400">Priorities (Max 5)</h3>
             <div className="space-y-2 mb-3">
                 {priorities.map((priority: Priority) => {
                     const linkedGoal = goals.find((g: any) => g.id === priority.goal_id);
@@ -1376,49 +1379,77 @@ function PrioritiesSection({
                     <input
                         type="text"
                         placeholder="Add priority..."
-                    value={newPriority}
-                    onChange={e => setNewPriority(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && onAdd()}
-                    className="flex-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
-                />
-                <select
-                    value={newPriorityCategory || ''}
-                    onChange={e => setNewPriorityCategory(e.target.value || null)}
-                    className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
-                >
-                    <option value="">No Category</option>
-                    <option value="physical">Physical</option>
-                    <option value="mental">Mental</option>
-                    <option value="spiritual">Spiritual</option>
-                </select>
-                <select
-                    value={newPriorityTimeOfDay || ''}
-                    onChange={e => setNewPriorityTimeOfDay(e.target.value || null)}
-                    className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
-                >
-                    <option value="">Any Time</option>
-                    <option value="morning">Morning</option>
-                    <option value="afternoon">Afternoon</option>
-                    <option value="evening">Evening</option>
-                </select>
-                <select
-                    value={newPriorityGoalId || ''}
-                    onChange={e => setNewPriorityGoalId(e.target.value || null)}
-                    className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
-                    title="Link to goal"
-                >
-                    <option value="">No Goal</option>
-                    {goals.map((goal: any) => (
-                        <option key={goal.id} value={goal.id}>{goal.name}</option>
-                    ))}
-                </select>
-                <button
-                    onClick={onAdd}
-                    className="rounded-md bg-amber-400 px-3 py-1 text-xs font-semibold text-black hover:bg-amber-300"
-                >
-                    Add
-                </button>
+                        value={newPriority}
+                        onChange={e => setNewPriority(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && !isLimitReached && onAdd()}
+                        disabled={isLimitReached}
+                        className={`flex-1 rounded border border-slate-700 px-2 py-1 text-sm ${
+                            isLimitReached 
+                                ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
+                                : 'bg-slate-900'
+                        }`}
+                    />
+                    <select
+                        value={newPriorityCategory || ''}
+                        onChange={e => setNewPriorityCategory(e.target.value || null)}
+                        disabled={isLimitReached}
+                        className={`rounded border border-slate-700 px-2 py-1 text-sm ${
+                            isLimitReached 
+                                ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
+                                : 'bg-slate-900'
+                        }`}
+                    >
+                        <option value="">No Category</option>
+                        <option value="physical">Physical</option>
+                        <option value="mental">Mental</option>
+                        <option value="spiritual">Spiritual</option>
+                    </select>
+                    <select
+                        value={newPriorityTimeOfDay || ''}
+                        onChange={e => setNewPriorityTimeOfDay(e.target.value || null)}
+                        disabled={isLimitReached}
+                        className={`rounded border border-slate-700 px-2 py-1 text-sm ${
+                            isLimitReached 
+                                ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
+                                : 'bg-slate-900'
+                        }`}
+                    >
+                        <option value="">Any Time</option>
+                        <option value="morning">Morning</option>
+                        <option value="afternoon">Afternoon</option>
+                        <option value="evening">Evening</option>
+                    </select>
+                    <select
+                        value={newPriorityGoalId || ''}
+                        onChange={e => setNewPriorityGoalId(e.target.value || null)}
+                        disabled={isLimitReached}
+                        className={`rounded border border-slate-700 px-2 py-1 text-sm ${
+                            isLimitReached 
+                                ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
+                                : 'bg-slate-900'
+                        }`}
+                        title="Link to goal"
+                    >
+                        <option value="">No Goal</option>
+                        {goals.map((goal: any) => (
+                            <option key={goal.id} value={goal.id}>{goal.name}</option>
+                        ))}
+                    </select>
+                    <button
+                        onClick={onAdd}
+                        disabled={isLimitReached}
+                        className={`rounded-md px-3 py-1 text-xs font-semibold ${
+                            isLimitReached
+                                ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                                : 'bg-amber-400 text-black hover:bg-amber-300'
+                        }`}
+                    >
+                        Add
+                    </button>
                 </div>
+                {isLimitReached && (
+                    <p className="text-xs text-slate-400 mt-2">Maximum of 5 priorities per day allowed</p>
+                )}
             </div>
         </div>
     );

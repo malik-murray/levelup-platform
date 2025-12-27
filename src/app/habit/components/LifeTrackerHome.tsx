@@ -786,10 +786,7 @@ function DailyPlanSection({
 
     const handleAddPriority = async () => {
         if (!newPriority.trim()) return;
-        if (priorities.length >= 5) {
-            alert('Maximum 5 priorities per day');
-            return;
-        }
+        if (priorities.length >= 5) return; // Enforce 5 priority limit
 
         try {
             const { data: { user } } = await supabase.auth.getUser();
@@ -1038,33 +1035,49 @@ function DailyPlanSection({
                         </label>
                     );
                 })}
-                {priorities.length < 5 && (
-                    <div className="flex gap-2 mt-3">
-                        <input
-                            type="text"
-                            placeholder="Add priority"
-                            value={newPriority}
-                            onChange={(e) => setNewPriority(e.target.value)}
-                            onKeyPress={(e) => e.key === 'Enter' && handleAddPriority()}
-                            className="flex-1 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
-                        />
-                        <select
-                            value={newPriorityGoalId || ''}
-                            onChange={(e) => setNewPriorityGoalId(e.target.value || null)}
-                            className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-                        >
-                            <option value="">Link to goal (optional)</option>
-                            {goals.map(goal => (
-                                <option key={goal.id} value={goal.id}>{goal.name}</option>
-                            ))}
-                        </select>
-                        <button
-                            onClick={handleAddPriority}
-                            className="rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-black hover:bg-amber-400 transition-colors"
-                        >
-                            Add
-                        </button>
-                    </div>
+                <div className="flex gap-2 mt-3">
+                    <input
+                        type="text"
+                        placeholder="Add priority"
+                        value={newPriority}
+                        onChange={(e) => setNewPriority(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && priorities.length < 5 && handleAddPriority()}
+                        disabled={priorities.length >= 5}
+                        className={`flex-1 rounded-md border border-slate-700 px-3 py-2 text-sm placeholder-slate-400 focus:outline-none ${
+                            priorities.length >= 5
+                                ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                                : 'bg-slate-800 text-white focus:border-amber-500'
+                        }`}
+                    />
+                    <select
+                        value={newPriorityGoalId || ''}
+                        onChange={(e) => setNewPriorityGoalId(e.target.value || null)}
+                        disabled={priorities.length >= 5}
+                        className={`rounded-md border border-slate-700 px-3 py-2 text-sm focus:outline-none ${
+                            priorities.length >= 5
+                                ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                                : 'bg-slate-800 text-white focus:border-amber-500'
+                        }`}
+                    >
+                        <option value="">Link to goal (optional)</option>
+                        {goals.map(goal => (
+                            <option key={goal.id} value={goal.id}>{goal.name}</option>
+                        ))}
+                    </select>
+                    <button
+                        onClick={handleAddPriority}
+                        disabled={priorities.length >= 5}
+                        className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                            priorities.length >= 5
+                                ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                                : 'bg-amber-500 text-black hover:bg-amber-400'
+                        }`}
+                    >
+                        Add
+                    </button>
+                </div>
+                {priorities.length >= 5 && (
+                    <p className="text-xs text-slate-400 mt-2">Maximum of 5 priorities per day allowed</p>
                 )}
             </div>
 
