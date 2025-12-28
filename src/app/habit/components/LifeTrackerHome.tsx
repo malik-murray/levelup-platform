@@ -114,7 +114,7 @@ type DailyScore = {
     score_todos: number;
 };
 
-export default function LifeTrackerHome() {
+export default function LifeTrackerHome({ onNavigateToDaily, onNavigateToWeeklyPlan }: { onNavigateToDaily?: (date: Date) => void; onNavigateToWeeklyPlan?: () => void } = {}) {
     const [loading, setLoading] = useState(true);
     
     // Goals data
@@ -232,13 +232,25 @@ export default function LifeTrackerHome() {
             const weekStartStr = formatDate(weekStart);
             const weekEndStr = formatDate(weekEnd);
 
+            // Also load next 7 days for Weekly Overview (starting from today)
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const nextWeekEnd = new Date(today);
+            nextWeekEnd.setDate(today.getDate() + 7);
+            const todayStr = formatDate(today);
+            const nextWeekEndStr = formatDate(nextWeekEnd);
+
+            // Use the wider date range for loading
+            const loadStartStr = weekStartStr < todayStr ? weekStartStr : todayStr;
+            const loadEndStr = weekEndStr > nextWeekEndStr ? weekEndStr : nextWeekEndStr;
+
             // Load scores
             const { data: scoresData } = await supabase
                 .from('habit_daily_scores')
                 .select('*')
                 .eq('user_id', user.id)
-                .gte('date', weekStartStr)
-                .lte('date', weekEndStr);
+                .gte('date', loadStartStr)
+                .lte('date', loadEndStr);
 
             const scoresMap = new Map<string, DailyScore>();
             scoresData?.forEach(score => {
@@ -252,28 +264,28 @@ export default function LifeTrackerHome() {
             });
             setDailyScores(scoresMap);
 
-            // Load priorities and todos for the week
+            // Load priorities and todos for the week (and next 7 days)
             const { data: prioritiesData } = await supabase
                 .from('habit_daily_priorities')
                 .select('*')
                 .eq('user_id', user.id)
-                .gte('date', weekStartStr)
-                .lte('date', weekEndStr);
+                .gte('date', loadStartStr)
+                .lte('date', loadEndStr);
 
             const { data: todosData } = await supabase
                 .from('habit_daily_todos')
                 .select('*')
                 .eq('user_id', user.id)
-                .gte('date', weekStartStr)
-                .lte('date', weekEndStr);
+                .gte('date', loadStartStr)
+                .lte('date', loadEndStr);
 
-            // Load habit entries for the week
+            // Load habit entries for the week (and next 7 days)
             const { data: habitEntriesData } = await supabase
                 .from('habit_daily_entries')
                 .select('date, habit_template_id')
                 .eq('user_id', user.id)
-                .gte('date', weekStartStr)
-                .lte('date', weekEndStr);
+                .gte('date', loadStartStr)
+                .lte('date', loadEndStr);
 
             const prioritiesMap = new Map<string, Priority[]>();
             prioritiesData?.forEach(p => {
@@ -385,8 +397,30 @@ export default function LifeTrackerHome() {
         return <div className="text-center py-12 text-slate-400">Loading...</div>;
     }
 
+    // Check if today is Sunday
+    const today = new Date();
+    const isSunday = today.getDay() === 0;
+
     return (
         <div className="space-y-12">
+            {/* Sunday prompt for weekly plan */}
+            {isSunday && onNavigateToWeeklyPlan && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-950/20 p-4">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h3 className="font-semibold text-amber-400 mb-1">Set up your week</h3>
+                            <p className="text-sm text-slate-400">Plan your week's focus and goals</p>
+                        </div>
+                        <button
+                            onClick={onNavigateToWeeklyPlan}
+                            className="px-4 py-2 rounded-md bg-amber-500 text-black text-sm font-semibold hover:bg-amber-400 transition-colors min-h-[44px]"
+                        >
+                            Weekly Plan
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* 1. GOALS SECTION */}
             <GoalsSection
                 goals={goals}
@@ -407,6 +441,22 @@ export default function LifeTrackerHome() {
                     const newWeek = new Date(currentWeek);
                     newWeek.setDate(newWeek.getDate() + (direction === 'next' ? 7 : -7));
                     setCurrentWeek(newWeek);
+                }}
+            />
+
+            {/* 2.5. WEEKLY OVERVIEW SECTION */}
+            <WeeklyOverviewSection
+                goals={goals}
+                dailyScores={dailyScores}
+                weekPriorities={weekPriorities}
+                weekTodos={weekTodos}
+                weekHabits={weekHabits}
+                onDateSelect={(date) => {
+                    if (onNavigateToDaily) {
+                        onNavigateToDaily(date);
+                    } else {
+                        setSelectedDate(date);
+                    }
                 }}
             />
 
@@ -762,6 +812,178 @@ function CalendarOverviewSection({
     );
 }
 
+// Weekly Overview Section Component
+function WeeklyOverviewSection({
+    goals,
+    dailyScores,
+    weekPriorities,
+    weekTodos,
+    weekHabits,
+    onDateSelect,
+}: {
+    goals: Goal[];
+    dailyScores: Map<string, DailyScore>;
+    weekPriorities: Map<string, Priority[]>;
+    weekTodos: Map<string, Todo[]>;
+    weekHabits: Map<string, number>;
+    onDateSelect: (date: Date) => void;
+}) {
+    // Get next 7 days starting from today
+    const getNextSevenDays = (): Date[] => {
+        const days: Date[] = [];
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        for (let i = 0; i < 7; i++) {
+            const day = new Date(today);
+            day.setDate(today.getDate() + i);
+            days.push(day);
+        }
+        return days;
+    };
+
+    const nextSevenDays = getNextSevenDays();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Get weekly goals (goals with deadlines in the next 7 days)
+    const getWeeklyGoals = (): Goal[] => {
+        const weekEnd = new Date(today);
+        weekEnd.setDate(today.getDate() + 7);
+        return goals.filter(goal => {
+            if (!goal.deadline) return false;
+            const deadline = new Date(goal.deadline);
+            deadline.setHours(0, 0, 0, 0);
+            return deadline >= today && deadline <= weekEnd;
+        }).sort((a, b) => {
+            if (!a.deadline || !b.deadline) return 0;
+            return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+        });
+    };
+
+    const weeklyGoals = getWeeklyGoals();
+
+    const getGradeColor = (grade: string): string => {
+        switch (grade) {
+            case 'A':
+                return 'bg-green-500/20 text-green-400 border-green-500/30';
+            case 'B':
+                return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+            case 'C':
+                return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
+            case 'D':
+                return 'bg-orange-500/20 text-orange-400 border-orange-500/30';
+            case 'F':
+                return 'bg-red-500/20 text-red-400 border-red-500/30';
+            default:
+                return 'bg-slate-500/20 text-slate-400 border-slate-500/30';
+        }
+    };
+
+    return (
+        <section className="space-y-4">
+            <h2 className="text-xl sm:text-2xl font-bold">Weekly Overview</h2>
+
+            {/* Weekly Goals Header */}
+            {weeklyGoals.length > 0 && (
+                <div className="mb-4 p-3 rounded-lg border border-slate-700 bg-slate-900/50">
+                    <h3 className="text-sm font-semibold text-slate-300 mb-2">Weekly Goals</h3>
+                    <div className="space-y-1.5">
+                        {weeklyGoals.map(goal => (
+                            <div key={goal.id} className="flex items-center gap-2 text-xs text-slate-400">
+                                <span className="font-medium text-slate-300">{goal.name}</span>
+                                {goal.deadline && (
+                                    <span className="text-slate-500">
+                                        • {new Date(goal.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                    </span>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Day Cards - Horizontal scroll on mobile, grid on desktop */}
+            <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0 md:overflow-visible">
+                <div className="flex md:grid md:grid-cols-7 gap-3 md:gap-2 min-w-max md:min-w-0">
+                    {nextSevenDays.map((day) => {
+                        const dateStr = formatDate(day);
+                        const score = dailyScores.get(dateStr);
+                        const dayPriorities = weekPriorities.get(dateStr) || [];
+                        const dayTodos = weekTodos.get(dateStr) || [];
+                        const dayHabitsCount = weekHabits.get(dateStr) || 0;
+                        const isToday = isSameDay(day, today);
+
+                        // Get top 1-2 priorities (non-completed, sorted by completion status, then by creation)
+                        const topPriorities = dayPriorities
+                            .filter(p => !p.completed)
+                            .slice(0, 2);
+
+                        return (
+                            <button
+                                key={dateStr}
+                                onClick={() => onDateSelect(day)}
+                                className={`flex-shrink-0 w-[140px] md:w-auto rounded-lg border p-3 text-left transition-colors hover:border-amber-500/50 active:bg-slate-800 ${
+                                    isToday
+                                        ? 'border-amber-500 bg-amber-950/30 ring-2 ring-amber-400/50'
+                                        : 'border-slate-700 bg-slate-900/50'
+                                }`}
+                            >
+                                {/* Date and Day Name */}
+                                <div className="flex items-center justify-between mb-2">
+                                    <div>
+                                        <div className="text-xs font-medium text-slate-400">
+                                            {day.toLocaleDateString('en-US', { weekday: 'short' })}
+                                        </div>
+                                        <div className="text-base font-bold text-white">
+                                            {day.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                        </div>
+                                    </div>
+                                    {/* Grade Badge */}
+                                    {score && (
+                                        <div className={`px-2 py-0.5 rounded text-xs font-semibold border ${getGradeColor(score.grade)}`}>
+                                            {score.grade}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Top Priorities or "No priority" */}
+                                <div className="mb-2 min-h-[2.5rem]">
+                                    {topPriorities.length > 0 ? (
+                                        <div className="space-y-1">
+                                            {topPriorities.map(priority => (
+                                                <div key={priority.id} className="text-xs text-slate-300 truncate">
+                                                    {priority.text}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="text-xs text-slate-500 italic">No priority</div>
+                                    )}
+                                </div>
+
+                                {/* H/P/T Counts */}
+                                {(dayHabitsCount > 0 || dayPriorities.length > 0 || dayTodos.length > 0) && (
+                                    <div className="flex flex-wrap gap-1.5 text-xs font-medium text-slate-400">
+                                        {dayHabitsCount > 0 && (
+                                            <span className="text-blue-400 font-semibold">H{dayHabitsCount}</span>
+                                        )}
+                                        {dayPriorities.length > 0 && (
+                                            <span className="text-purple-400 font-semibold">P{dayPriorities.length}</span>
+                                        )}
+                                        {dayTodos.length > 0 && (
+                                            <span className="text-green-400 font-semibold">T{dayTodos.length}</span>
+                                        )}
+                                    </div>
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+        </section>
+    );
+}
+
 // Daily Plan Section Component
 function DailyPlanSection({
     date,
@@ -944,6 +1166,10 @@ function DailyPlanSection({
         const nextStatus: HabitStatus = currentStatus === 'missed' ? 'checked' : 'missed';
         const checkedAt = nextStatus === 'checked' ? new Date().toISOString() : null;
         
+        // Get habit template for name and category
+        const habitTemplate = localHabitTemplates.find(t => t.id === templateId);
+        if (!habitTemplate) return;
+        
         // Optimistic update: update local state immediately
         const existingEntry = dateEntries.find(e => e.habit_template_id === templateId);
         if (existingEntry) {
@@ -994,6 +1220,51 @@ function DailyPlanSection({
                 
                 if (newEntry) {
                     setLocalHabitEntries(prev => [...prev, newEntry]);
+                }
+            }
+            
+            // Sync with to-do list: add when checked, remove when unchecked
+            if (nextStatus === 'checked') {
+                // Check if todo already exists for this habit
+                const existingTodo = localTodos.find(t => 
+                    t.title === habitTemplate.name && t.is_done === true
+                );
+                
+                if (!existingTodo) {
+                    // Create todo marked as complete
+                    const { data: newTodo } = await supabase
+                        .from('habit_daily_todos')
+                        .insert({
+                            user_id: user.id,
+                            date: dateStr,
+                            title: habitTemplate.name,
+                            category: habitTemplate.category,
+                            time_of_day: habitTemplate.time_of_day,
+                            is_done: true,
+                            completed_at: checkedAt,
+                        })
+                        .select()
+                        .single();
+                    
+                    if (newTodo) {
+                        setLocalTodos(prev => [...prev, newTodo]);
+                    }
+                }
+            } else {
+                // Remove todo when habit is unchecked
+                const todoToRemove = localTodos.find(t => 
+                    t.title === habitTemplate.name && t.is_done === true
+                );
+                
+                if (todoToRemove) {
+                    // Optimistically remove from local state
+                    setLocalTodos(prev => prev.filter(t => t.id !== todoToRemove.id));
+                    
+                    // Delete from database
+                    await supabase
+                        .from('habit_daily_todos')
+                        .delete()
+                        .eq('id', todoToRemove.id);
                 }
             }
             
@@ -1058,11 +1329,22 @@ function DailyPlanSection({
         
         // Optimistic update: update local state immediately
         const existingPriority = localPriorities.find(p => p.id === id);
+        if (!existingPriority) return;
+        
         setLocalPriorities(prev => prev.map(p => 
             p.id === id ? { ...p, completed: newCompleted, completed_at: completedAt } : p
         ));
         
         try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                // Revert on error
+                setLocalPriorities(prev => prev.map(p => 
+                    p.id === id ? { ...p, completed, completed_at: existingPriority.completed_at } : p
+                ));
+                return;
+            }
+            
             const { data: updatedPriority } = await supabase
                 .from('habit_daily_priorities')
                 .update({ completed: newCompleted, completed_at: completedAt })
@@ -1076,16 +1358,59 @@ function DailyPlanSection({
                 ));
             }
             
+            // Sync with to-do list: add when checked, remove when unchecked
+            if (newCompleted) {
+                // Check if todo already exists for this priority
+                const existingTodo = localTodos.find(t => 
+                    t.title === existingPriority.text && t.is_done === true
+                );
+                
+                if (!existingTodo) {
+                    // Create todo marked as complete
+                    const { data: newTodo } = await supabase
+                        .from('habit_daily_todos')
+                        .insert({
+                            user_id: user.id,
+                            date: dateStr,
+                            title: existingPriority.text,
+                            category: existingPriority.category,
+                            time_of_day: existingPriority.time_of_day,
+                            is_done: true,
+                            completed_at: completedAt,
+                        })
+                        .select()
+                        .single();
+                    
+                    if (newTodo) {
+                        setLocalTodos(prev => [...prev, newTodo]);
+                    }
+                }
+            } else {
+                // Remove todo when priority is unchecked
+                const todoToRemove = localTodos.find(t => 
+                    t.title === existingPriority.text && t.is_done === true
+                );
+                
+                if (todoToRemove) {
+                    // Optimistically remove from local state
+                    setLocalTodos(prev => prev.filter(t => t.id !== todoToRemove.id));
+                    
+                    // Delete from database
+                    await supabase
+                        .from('habit_daily_todos')
+                        .delete()
+                        .eq('id', todoToRemove.id);
+                }
+            }
+            
             // Update score in background without blocking UI
             saveDailyScore().catch(err => console.error('Error saving score:', err));
         } catch (error) {
             console.error('Error updating priority:', error);
             // Revert optimistic update on error
-            if (existingPriority) {
-                setLocalPriorities(prev => prev.map(p => 
-                    p.id === id ? { ...p, completed, completed_at: existingPriority.completed_at } : p
-                ));
-            }
+            setLocalPriorities(prev => prev.map(p => 
+                p.id === id ? { ...p, completed, completed_at: existingPriority.completed_at } : p
+            ));
         }
     };
 

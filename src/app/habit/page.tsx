@@ -18,6 +18,7 @@ import {
     type HabitStatus,
 } from '@/lib/habitHelpers';
 import LifeTrackerHome from './components/LifeTrackerHome';
+import WeeklyPlanView from './components/WeeklyPlanView';
 
 // Hook to calculate habits per page based on screen width
 // Matches the grid breakpoints: 5, 4, 3, 2 columns
@@ -52,7 +53,7 @@ function useHabitsPerPage() {
     return habitsPerPage;
 }
 
-type Tab = 'home' | 'calendar' | 'daily' | 'statistics' | 'goals' | 'habits';
+type Tab = 'home' | 'calendar' | 'daily' | 'statistics' | 'goals' | 'habits' | 'weekly-plan';
 
 type HabitTemplate = {
     id: string;
@@ -198,6 +199,105 @@ export default function HabitPage() {
                 .eq('date', dateStr)
                 .order('created_at');
 
+            // Sync weekly plan items: ensure todos exist for all weekly items assigned to this date
+            // First, get all weekly item days for this date
+            const { data: weeklyItemDaysData } = await supabase
+                .from('habit_weekly_item_days')
+                .select('*')
+                .eq('date', dateStr);
+
+            if (weeklyItemDaysData && weeklyItemDaysData.length > 0) {
+                // Get the weekly items for these item days
+                const itemIds = weeklyItemDaysData.map(d => d.weekly_item_id);
+                const { data: weeklyItemsData } = await supabase
+                    .from('habit_weekly_items')
+                    .select('*')
+                    .in('id', itemIds)
+                    .eq('user_id', user.id);
+
+                if (weeklyItemsData) {
+                    let needsReload = false;
+                    for (const itemDay of weeklyItemDaysData) {
+                        const weeklyItem = weeklyItemsData.find(i => i.id === itemDay.weekly_item_id);
+                        if (!weeklyItem) continue;
+
+                        // Check if todo already exists
+                        const existingTodo = todosData?.find(t => 
+                            t.title === weeklyItem.title && 
+                            t.user_id === user.id
+                        );
+
+                        if (!existingTodo) {
+                            // Create todo if it doesn't exist
+                                // Map weekly plan categories to todo categories
+                                const mapCategory = (weeklyCategory: string | null): 'physical' | 'mental' | 'spiritual' | null => {
+                                    if (!weeklyCategory) return null;
+                                    const categoryMap: Record<string, 'physical' | 'mental' | 'spiritual' | null> = {
+                                        'health': 'physical',
+                                        'family': 'mental',
+                                        'relationships': 'mental',
+                                        'work': 'mental',
+                                        'business': 'mental',
+                                        'education': 'mental',
+                                        'finance': 'mental',
+                                        'personal': 'mental',
+                                        'other': null,
+                                    };
+                                    return categoryMap[weeklyCategory.toLowerCase()] || null;
+                                };
+
+                                await supabase
+                                    .from('habit_daily_todos')
+                                    .insert({
+                                        user_id: user.id,
+                                        date: dateStr,
+                                        title: weeklyItem.title,
+                                        category: mapCategory(weeklyItem.category),
+                                        time_of_day: null,
+                                        is_done: itemDay.completed || false,
+                                        completed_at: itemDay.completed_at || null,
+                                        goal_id: weeklyItem.goal_id,
+                                    });
+                            needsReload = true;
+                        } else {
+                            // Sync completion status if todo exists
+                            if (existingTodo.is_done !== (itemDay.completed || false)) {
+                                await supabase
+                                    .from('habit_daily_todos')
+                                    .update({
+                                        is_done: itemDay.completed || false,
+                                        completed_at: itemDay.completed_at || null,
+                                    })
+                                    .eq('id', existingTodo.id);
+                                needsReload = true;
+                            }
+                        }
+                    }
+
+                    // Reload todos after syncing if needed
+                    if (needsReload) {
+                        const { data: updatedTodosData } = await supabase
+                            .from('habit_daily_todos')
+                            .select('*')
+                            .eq('user_id', user.id)
+                            .eq('date', dateStr)
+                            .order('created_at');
+                        
+                        if (updatedTodosData) {
+                            setTodos(updatedTodosData);
+                        } else {
+                            setTodos(todosData || []);
+                        }
+                    } else {
+                        setTodos(todosData || []);
+                    }
+                } else {
+                    setTodos(todosData || []);
+                }
+            } else {
+                setTodos(todosData || []);
+            }
+
             // Load priorities for the entire month (for calendar)
             const { data: monthPrioritiesData } = await supabase
                 .from('habit_daily_priorities')
@@ -279,7 +379,7 @@ export default function HabitPage() {
             setHabitTemplates(templates || []);
             setHabitEntries(entries || []);
             setPriorities(prioritiesData || []);
-            setTodos(todosData || []);
+            // Todos are set in the sync logic above
             setDailyContent(contentData || null);
             setGoals(goalsData || []);
 
@@ -399,14 +499,14 @@ export default function HabitPage() {
                             </svg>
                         </button>
                         <span className="text-sm font-medium text-slate-700 dark:text-slate-300 capitalize">
-                            {activeTab === 'home' ? 'Home' : activeTab === 'calendar' ? 'Calendar' : activeTab === 'daily' ? 'Daily' : activeTab === 'statistics' ? 'Statistics' : activeTab === 'goals' ? 'Goals' : 'Habits'}
+                            {activeTab === 'home' ? 'Home' : activeTab === 'calendar' ? 'Calendar' : activeTab === 'daily' ? 'Daily' : activeTab === 'weekly-plan' ? 'Weekly Plan' : activeTab === 'statistics' ? 'Statistics' : activeTab === 'goals' ? 'Goals' : 'Habits'}
                         </span>
                         <div className="w-10" /> {/* Spacer for centering */}
                     </div>
                     
                     {/* Desktop: Horizontal tabs (visible only on desktop) */}
                     <div className="hidden md:flex gap-1 px-4 sm:px-6">
-                        {(['home', 'calendar', 'daily', 'statistics', 'goals', 'habits'] as Tab[]).map(tab => (
+                        {(['home', 'calendar', 'daily', 'weekly-plan', 'statistics', 'goals', 'habits'] as Tab[]).map(tab => (
                                 <button
                                 key={tab}
                                 onClick={() => setActiveTab(tab)}
@@ -416,7 +516,7 @@ export default function HabitPage() {
                                         : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
                                 }`}
                             >
-                                {tab === 'home' ? 'Home' : tab === 'calendar' ? 'Calendar' : tab === 'daily' ? 'Daily' : tab === 'statistics' ? 'Statistics/Streaks' : tab === 'goals' ? 'Goals & Milestones' : 'Habits/Bad Habits'}
+                                {tab === 'home' ? 'Home' : tab === 'calendar' ? 'Calendar' : tab === 'daily' ? 'Daily' : tab === 'weekly-plan' ? 'Weekly Plan' : tab === 'statistics' ? 'Statistics/Streaks' : tab === 'goals' ? 'Goals & Milestones' : 'Habits/Bad Habits'}
                                 </button>
                         ))}
                     </div>
@@ -462,6 +562,7 @@ export default function HabitPage() {
                                         home: 'Home',
                                         calendar: 'Calendar',
                                         daily: 'Daily',
+                                        'weekly-plan': 'Weekly Plan',
                                         statistics: 'Statistics/Streaks',
                                         goals: 'Goals & Milestones',
                                         habits: 'Habits/Bad Habits',
@@ -495,7 +596,15 @@ export default function HabitPage() {
                 {loading ? (
                     <div className="text-center py-12 text-slate-400">Loading...</div>
                 ) : activeTab === 'home' ? (
-                    <LifeTrackerHome />
+                    <LifeTrackerHome 
+                        onNavigateToDaily={(date) => {
+                            setSelectedDate(date);
+                            setActiveTab('daily');
+                        }}
+                        onNavigateToWeeklyPlan={() => {
+                            setActiveTab('weekly-plan');
+                        }}
+                    />
                 ) : activeTab === 'calendar' ? (
                     <CalendarView
                         currentMonth={currentMonth}
@@ -519,7 +628,10 @@ export default function HabitPage() {
                         scoringSettings={scoringSettings}
                         onDataChange={loadData}
                         onScoringSettingsChange={loadData}
+                        onDateChange={setSelectedDate}
                     />
+                ) : activeTab === 'weekly-plan' ? (
+                    <WeeklyPlanView />
                 ) : activeTab === 'statistics' ? (
                     <StatisticsView dailyScores={dailyScores} />
                 ) : activeTab === 'goals' ? (
@@ -653,6 +765,7 @@ function DailyView({
     scoringSettings,
     onDataChange,
     onScoringSettingsChange,
+    onDateChange,
 }: {
     date: Date;
     habitTemplates: HabitTemplate[];
@@ -664,6 +777,7 @@ function DailyView({
     scoringSettings: { habits_weight: number; priorities_weight: number; todos_weight: number };
     onDataChange: () => void;
     onScoringSettingsChange: () => void;
+    onDateChange: (date: Date) => void;
 }) {
     const [newHabitName, setNewHabitName] = useState('');
     const [newHabitIcon, setNewHabitIcon] = useState('📝');
@@ -723,6 +837,28 @@ function DailyView({
 
     const dateStr = formatDate(date);
     const todayStr = formatDate(new Date());
+
+    // Navigation functions
+    const navigateToYesterday = () => {
+        const yesterday = new Date(date);
+        yesterday.setDate(yesterday.getDate() - 1);
+        onDateChange(yesterday);
+    };
+
+    const navigateToTomorrow = () => {
+        const tomorrow = new Date(date);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        onDateChange(tomorrow);
+    };
+
+    // Format date for display
+    const dateDisplay = date.toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+    });
+    const isToday = dateStr === todayStr;
 
     // Get entries for selected date
     const dateEntries = localHabitEntries.filter(e => e.date === dateStr);
@@ -830,6 +966,10 @@ function DailyView({
         const nextStatus: HabitStatus = currentStatus === 'missed' ? 'checked' : 'missed';
         const checkedAt = nextStatus === 'checked' ? new Date().toISOString() : null;
         
+        // Get habit template for name and category
+        const habitTemplate = localHabitTemplates.find(t => t.id === templateId);
+        if (!habitTemplate) return;
+        
         // Optimistic update: update local state immediately
             const existingEntry = dateEntries.find(e => e.habit_template_id === templateId);
         if (existingEntry) {
@@ -878,6 +1018,51 @@ function DailyView({
                 
                 if (newEntry) {
                     setLocalHabitEntries(prev => [...prev, newEntry]);
+                }
+            }
+            
+            // Sync with to-do list: add when checked, remove when unchecked
+            if (nextStatus === 'checked') {
+                // Check if todo already exists for this habit
+                const existingTodo = localTodos.find(t => 
+                    t.title === habitTemplate.name && t.is_done === true
+                );
+                
+                if (!existingTodo) {
+                    // Create todo marked as complete
+                    const { data: newTodo } = await supabase
+                        .from('habit_daily_todos')
+                        .insert({
+                            user_id: user.id,
+                            date: dateStr,
+                            title: habitTemplate.name,
+                            category: habitTemplate.category,
+                            time_of_day: habitTemplate.time_of_day,
+                            is_done: true,
+                            completed_at: checkedAt,
+                        })
+                        .select()
+                        .single();
+                    
+                    if (newTodo) {
+                        setLocalTodos(prev => [...prev, newTodo]);
+                    }
+                }
+            } else {
+                // Remove todo when habit is unchecked
+                const todoToRemove = localTodos.find(t => 
+                    t.title === habitTemplate.name && t.is_done === true
+                );
+                
+                if (todoToRemove) {
+                    // Optimistically remove from local state
+                    setLocalTodos(prev => prev.filter(t => t.id !== todoToRemove.id));
+                    
+                    // Delete from database
+                    await supabase
+                        .from('habit_daily_todos')
+                        .delete()
+                        .eq('id', todoToRemove.id);
                 }
             }
             
@@ -1105,11 +1290,22 @@ function DailyView({
         
         // Optimistic update: update local state immediately
         const existingPriority = localPriorities.find(p => p.id === id);
+        if (!existingPriority) return;
+        
         setLocalPriorities(prev => prev.map(p => 
             p.id === id ? { ...p, completed: newCompleted, completed_at: completedAt } : p
         ));
         
         try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                // Revert on error
+                setLocalPriorities(prev => prev.map(p => 
+                    p.id === id ? { ...p, completed, completed_at: existingPriority.completed_at } : p
+                ));
+                return;
+            }
+            
             const { data: updatedPriority } = await supabase
                 .from('habit_daily_priorities')
                 .update({ completed: newCompleted, completed_at: completedAt })
@@ -1123,16 +1319,59 @@ function DailyView({
                 ));
             }
             
+            // Sync with to-do list: add when checked, remove when unchecked
+            if (newCompleted) {
+                // Check if todo already exists for this priority
+                const existingTodo = localTodos.find(t => 
+                    t.title === existingPriority.text && t.is_done === true
+                );
+                
+                if (!existingTodo) {
+                    // Create todo marked as complete
+                    const { data: newTodo } = await supabase
+                        .from('habit_daily_todos')
+                        .insert({
+                            user_id: user.id,
+                            date: dateStr,
+                            title: existingPriority.text,
+                            category: existingPriority.category,
+                            time_of_day: existingPriority.time_of_day,
+                            is_done: true,
+                            completed_at: completedAt,
+                        })
+                        .select()
+                        .single();
+                    
+                    if (newTodo) {
+                        setLocalTodos(prev => [...prev, newTodo]);
+                    }
+                }
+            } else {
+                // Remove todo when priority is unchecked
+                const todoToRemove = localTodos.find(t => 
+                    t.title === existingPriority.text && t.is_done === true
+                );
+                
+                if (todoToRemove) {
+                    // Optimistically remove from local state
+                    setLocalTodos(prev => prev.filter(t => t.id !== todoToRemove.id));
+                    
+                    // Delete from database
+                    await supabase
+                        .from('habit_daily_todos')
+                        .delete()
+                        .eq('id', todoToRemove.id);
+                }
+            }
+            
             // Update score in background without blocking UI
             saveDailyScore().catch(err => console.error('Error saving score:', err));
         } catch (error) {
             console.error('Error updating priority:', error);
             // Revert optimistic update on error
-            if (existingPriority) {
-                setLocalPriorities(prev => prev.map(p => 
-                    p.id === id ? { ...p, completed, completed_at: existingPriority.completed_at } : p
-                ));
-            }
+            setLocalPriorities(prev => prev.map(p => 
+                p.id === id ? { ...p, completed, completed_at: existingPriority.completed_at } : p
+            ));
         }
     };
 
@@ -1203,6 +1442,9 @@ function DailyView({
         ));
         
         try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
             const { data: updatedTodo } = await supabase
                 .from('habit_daily_todos')
                 .update({ is_done: newIsDone, completed_at: completedAt })
@@ -1214,6 +1456,37 @@ function DailyView({
                 setLocalTodos(prev => prev.map(t => 
                     t.id === id ? updatedTodo : t
                 ));
+
+                // Sync with weekly plan: update corresponding weekly item day if it exists
+                // First get all weekly items for this user
+                const { data: weeklyItems } = await supabase
+                    .from('habit_weekly_items')
+                    .select('id')
+                    .eq('user_id', user.id)
+                    .eq('title', updatedTodo.title);
+
+                if (weeklyItems && weeklyItems.length > 0) {
+                    const weeklyItemIds = weeklyItems.map(i => i.id);
+                    // Find weekly item days for this date and item
+                    const { data: weeklyItemDays } = await supabase
+                        .from('habit_weekly_item_days')
+                        .select('*')
+                        .in('weekly_item_id', weeklyItemIds)
+                        .eq('date', dateStr);
+
+                    if (weeklyItemDays && weeklyItemDays.length > 0) {
+                        // Update all matching weekly item days
+                        for (const itemDay of weeklyItemDays) {
+                            await supabase
+                                .from('habit_weekly_item_days')
+                                .update({
+                                    completed: newIsDone,
+                                    completed_at: completedAt,
+                                })
+                                .eq('id', itemDay.id);
+                        }
+                    }
+                }
             }
             
             // Update score in background without blocking UI
@@ -1277,14 +1550,44 @@ function DailyView({
 
     return (
         <div className="space-y-6">
+            {/* Date Navigation */}
+            <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-700">
+                <button
+                    onClick={navigateToYesterday}
+                    className="flex items-center gap-2 px-4 py-2 rounded-md border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors min-h-[44px]"
+                >
+                    <svg className="w-5 h-5" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                        <path d="M15 19l-7-7 7-7" />
+                    </svg>
+                    <span className="hidden sm:inline">Yesterday</span>
+                </button>
+                
+                <div className="flex flex-col items-center">
+                    <h2 className="text-lg font-semibold text-slate-200">{dateDisplay}</h2>
+                    {isToday && (
+                        <span className="text-xs text-amber-400 mt-1">Today</span>
+                    )}
+                </div>
+                
+                <button
+                    onClick={navigateToTomorrow}
+                    className="flex items-center gap-2 px-4 py-2 rounded-md border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors min-h-[44px]"
+                >
+                    <span className="hidden sm:inline">Tomorrow</span>
+                    <svg className="w-5 h-5" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                        <path d="M9 5l7 7-7 7" />
+                    </svg>
+                </button>
+            </div>
+
             {/* Score Card */}
             <div className="rounded-lg border border-amber-500/30 bg-gradient-to-br from-amber-950/30 to-slate-950 p-6">
                 <div className="flex items-center justify-between mb-4">
                     <div>
                         <h2 className="text-2xl font-bold text-white">
-                            {date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                            Daily Progress
                         </h2>
-                        <p className="text-sm text-slate-400 mt-1">Daily Progress</p>
+                        <p className="text-sm text-slate-400 mt-1">Overall Score</p>
                     </div>
                     <div className="text-right relative group">
                         <div className="flex items-center justify-end gap-2">
