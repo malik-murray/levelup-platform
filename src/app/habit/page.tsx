@@ -407,7 +407,7 @@ export default function HabitPage() {
                     {/* Desktop: Horizontal tabs (visible only on desktop) */}
                     <div className="hidden md:flex gap-1 px-4 sm:px-6">
                         {(['home', 'calendar', 'daily', 'statistics', 'goals', 'habits'] as Tab[]).map(tab => (
-                            <button
+                                <button
                                 key={tab}
                                 onClick={() => setActiveTab(tab)}
                                 className={`px-4 py-4 text-sm font-medium capitalize transition-colors whitespace-nowrap min-h-[48px] flex items-center ${
@@ -417,7 +417,7 @@ export default function HabitPage() {
                                 }`}
                             >
                                 {tab === 'home' ? 'Home' : tab === 'calendar' ? 'Calendar' : tab === 'daily' ? 'Daily' : tab === 'statistics' ? 'Statistics/Streaks' : tab === 'goals' ? 'Goals & Milestones' : 'Habits/Bad Habits'}
-                            </button>
+                                </button>
                         ))}
                     </div>
                 </div>
@@ -501,7 +501,10 @@ export default function HabitPage() {
                         currentMonth={currentMonth}
                         calendarDays={calendarDays}
                         selectedDate={selectedDate}
-                        onDateSelect={setSelectedDate}
+                        onDateSelect={(date) => {
+                            setSelectedDate(date);
+                            setActiveTab('daily');
+                        }}
                         onMonthChange={navigateMonth}
                     />
                 ) : activeTab === 'daily' ? (
@@ -799,7 +802,7 @@ function DailyView({
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
-            
+
             // Batch update all affected habits
             for (const update of updates) {
                 await supabase
@@ -828,18 +831,18 @@ function DailyView({
         const checkedAt = nextStatus === 'checked' ? new Date().toISOString() : null;
         
         // Optimistic update: update local state immediately
-        const existingEntry = dateEntries.find(e => e.habit_template_id === templateId);
+            const existingEntry = dateEntries.find(e => e.habit_template_id === templateId);
         if (existingEntry) {
             setLocalHabitEntries(prev => prev.map(e => 
                 e.id === existingEntry.id ? { ...e, status: nextStatus, checked_at: checkedAt } : e
             ));
         }
-        
+            
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
                 // Revert on error
-                if (existingEntry) {
+            if (existingEntry) {
                     setLocalHabitEntries(prev => prev.map(e => 
                         e.id === existingEntry.id ? { ...e, status: currentStatus, checked_at: existingEntry.checked_at } : e
                     ));
@@ -1319,7 +1322,7 @@ function DailyView({
                         <div className="text-xs text-blue-300 mb-1">
                             Habit Score
                             <span className="ml-1 text-blue-400 cursor-help" title="Percentage of completed habits = (completed habits / total habits) × 100">ℹ️</span>
-                        </div>
+                    </div>
                         <div className="text-2xl font-bold text-blue-400">{habitsScore}%</div>
                         <div className="absolute left-1/2 transform -translate-x-1/2 bottom-full mb-2 hidden group-hover:block bg-slate-800 text-xs text-slate-200 p-2 rounded shadow-lg z-10 whitespace-nowrap">
                             Formula: (completed / total) × 100
@@ -2035,10 +2038,10 @@ function HabitsSection({
                                 >
                                     <span className="text-slate-500 text-lg select-none cursor-move" title="Drag to reorder">☰</span>
                                     <button
-                                        onClick={() => onToggle(habit.id, habit.status)}
+                                    onClick={() => onToggle(habit.id, habit.status)}
                                         className="flex-1 flex items-center gap-2 p-2 rounded hover:bg-slate-900/50 transition-colors text-left"
-                                    >
-                                        <span className="text-lg">{habit.icon}</span>
+                                >
+                                    <span className="text-lg">{habit.icon}</span>
                                         <div className="flex-1 flex items-center gap-2">
                                             <span className="text-sm text-slate-200">{habit.name}</span>
                                             {upNextHabitIds.has(habit.id) && habit.status !== 'checked' && (
@@ -2052,11 +2055,11 @@ function HabitsSection({
                                                 </span>
                                             )}
                                         </div>
-                                        {habit.time_of_day && (
-                                            <span className="text-xs text-slate-400 capitalize">{habit.time_of_day}</span>
-                                        )}
-                                        <span className="text-lg">{getStatusEmoji(habit.status)}</span>
-                                    </button>
+                                    {habit.time_of_day && (
+                                        <span className="text-xs text-slate-400 capitalize">{habit.time_of_day}</span>
+                                    )}
+                                    <span className="text-lg">{getStatusEmoji(habit.status)}</span>
+                                </button>
                                     {onEdit && (
                                         <button
                                             onClick={(e) => {
@@ -2105,11 +2108,11 @@ function HabitsSection({
                                             const displayStatus = habit.status === 'missed' ? 'checked' : 'missed';
                                             return (
                                                 <div key={habit.id} className="flex items-center gap-2">
-                                                    <button
-                                                        onClick={() => onToggle(habit.id, habit.status)}
+                                                <button
+                                                    onClick={() => onToggle(habit.id, habit.status)}
                                                         className="flex-1 flex items-center gap-2 p-2 rounded hover:bg-slate-900/50 transition-colors text-left"
-                                                    >
-                                                        <span className="text-lg">{habit.icon}</span>
+                                                >
+                                                    <span className="text-lg">{habit.icon}</span>
                                                         <div className="flex-1 flex items-center gap-2">
                                                             <span className="text-sm text-slate-200">{habit.name}</span>
                                                             {habit.checked_at && habit.status === 'checked' && (
@@ -2118,13 +2121,13 @@ function HabitsSection({
                                                                 </span>
                                                             )}
                                                         </div>
-                                                        {habit.time_of_day && (
-                                                            <span className="text-xs text-slate-400 capitalize">{habit.time_of_day}</span>
-                                                        )}
-                                                        <span className="text-lg" title={habit.status === 'missed' ? 'Avoided ✓' : habit.status === 'checked' ? 'Did it ✗' : 'Partial'}>
-                                                            {getStatusEmoji(displayStatus)}
-                                                        </span>
-                                                    </button>
+                                                    {habit.time_of_day && (
+                                                        <span className="text-xs text-slate-400 capitalize">{habit.time_of_day}</span>
+                                                    )}
+                                                    <span className="text-lg" title={habit.status === 'missed' ? 'Avoided ✓' : habit.status === 'checked' ? 'Did it ✗' : 'Partial'}>
+                                                        {getStatusEmoji(displayStatus)}
+                                                    </span>
+                                                </button>
                                                     {onEdit && (
                                                         <button
                                                             onClick={(e) => {
@@ -2327,7 +2330,7 @@ function PrioritiesSection({
                         {goals.map((goal: any) => (
                             <option key={goal.id} value={goal.id}>{goal.name}</option>
                         ))}
-                    </select>
+                </select>
                 <button
                     onClick={onAdd}
                         disabled={isLimitReached}
@@ -2462,64 +2465,139 @@ function DailyContentSection({
     setContent: (content: DailyContent) => void;
     onSave: () => void;
 }) {
+    const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+
+    // Auto-resize textareas when content changes or sections expand
+    useEffect(() => {
+        expandedSections.forEach(sectionKey => {
+            const textarea = document.getElementById(`daily-content-${sectionKey}`) as HTMLTextAreaElement;
+            if (textarea) {
+                textarea.style.height = 'auto';
+                textarea.style.height = textarea.scrollHeight + 'px';
+            }
+        });
+    }, [content, expandedSections]);
+
+    const toggleSection = (section: string) => {
+        setExpandedSections(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(section)) {
+                newSet.delete(section);
+            } else {
+                newSet.add(section);
+            }
+            return newSet;
+        });
+    };
+
+    const getTextSummary = (text: string | null | undefined): string => {
+        if (!text || text.trim().length === 0) {
+            return 'Empty';
+        }
+        const length = text.trim().length;
+        if (length < 100) {
+            return `${length} characters`;
+        }
+        const wordCount = text.trim().split(/\s+/).filter(w => w.length > 0).length;
+        return `${wordCount} words`;
+    };
+
+    const sections = [
+        {
+            key: 'lessons',
+            title: 'Lessons of the Day',
+            field: 'lessons' as keyof DailyContent,
+            placeholder: 'What did you learn today?',
+            minHeight: '60px',
+        },
+        {
+            key: 'ideas',
+            title: 'Ideas',
+            field: 'ideas' as keyof DailyContent,
+            placeholder: 'Any ideas or insights?',
+            minHeight: '60px',
+        },
+        {
+            key: 'notes',
+            title: 'Notes',
+            field: 'notes' as keyof DailyContent,
+            placeholder: 'General notes...',
+            minHeight: '60px',
+        },
+        {
+            key: 'distractions',
+            title: 'Distractions/Bad Habits',
+            field: 'distractions' as keyof DailyContent,
+            placeholder: 'What distracted you or what bad habits did you notice?',
+            minHeight: '60px',
+        },
+        {
+            key: 'reflection',
+            title: 'Reflection',
+            field: 'reflection' as keyof DailyContent,
+            placeholder: 'End of day reflection...',
+            minHeight: '80px',
+        },
+    ];
+
     return (
-        <div className="rounded-lg border border-slate-800 bg-slate-950 p-4 space-y-4">
+        <div className="rounded-lg border border-slate-800 bg-slate-950 p-4 space-y-2">
             <h3 className="text-sm font-semibold mb-3">Daily Content</h3>
             
-            <div>
-                <label className="text-xs text-slate-400 mb-1 block">Lessons of the Day</label>
-                <textarea
-                    value={content.lessons || ''}
-                    onChange={e => setContent({ ...content, lessons: e.target.value })}
-                    onBlur={onSave}
-                    placeholder="What did you learn today?"
-                    className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm min-h-[60px]"
-                />
-            </div>
+            {sections.map(section => {
+                const isExpanded = expandedSections.has(section.key);
+                const textValue = content[section.field] || '';
+                const summary = getTextSummary(textValue);
 
-            <div>
-                <label className="text-xs text-slate-400 mb-1 block">Ideas</label>
-                <textarea
-                    value={content.ideas || ''}
-                    onChange={e => setContent({ ...content, ideas: e.target.value })}
-                    onBlur={onSave}
-                    placeholder="Any ideas or insights?"
-                    className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm min-h-[60px]"
-                />
+                return (
+                    <div key={section.key} className="border border-slate-700 rounded-lg overflow-hidden">
+                        {/* Collapsible Header */}
+                        <button
+                            onClick={() => toggleSection(section.key)}
+                            className="w-full flex items-center justify-between px-3 py-3 hover:bg-slate-900/50 transition-colors text-left"
+                        >
+                            <div className="flex items-center gap-2 flex-1">
+                                <span className="text-sm font-medium text-slate-200">{section.title}</span>
+                                <span className="text-xs text-slate-500">({summary})</span>
             </div>
+                            <svg
+                                className={`w-5 h-5 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                                fill="none"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="2"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </button>
 
-            <div>
-                <label className="text-xs text-slate-400 mb-1 block">Notes</label>
+                        {/* Expanded Content */}
+                        {isExpanded && (
+                            <div className="px-3 pb-3 border-t border-slate-700">
                 <textarea
-                    value={content.notes || ''}
-                    onChange={e => setContent({ ...content, notes: e.target.value })}
+                                    id={`daily-content-${section.key}`}
+                                    value={textValue}
+                                    onChange={(e) => {
+                                        setContent({ ...content, [section.field]: e.target.value });
+                                        // Auto-resize textarea
+                                        e.target.style.height = 'auto';
+                                        e.target.style.height = e.target.scrollHeight + 'px';
+                                    }}
                     onBlur={onSave}
-                    placeholder="General notes..."
-                    className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm min-h-[60px]"
+                                    placeholder={section.placeholder}
+                                    className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-2 text-sm resize-none overflow-hidden"
+                                    style={{ 
+                                        minHeight: section.minHeight,
+                                        height: 'auto',
+                                    }}
                 />
             </div>
-
-            <div>
-                <label className="text-xs text-slate-400 mb-1 block">Distractions/Bad Habits</label>
-                <textarea
-                    value={content.distractions || ''}
-                    onChange={e => setContent({ ...content, distractions: e.target.value })}
-                    onBlur={onSave}
-                    placeholder="What distracted you or what bad habits did you notice?"
-                    className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm min-h-[60px]"
-                />
+                        )}
             </div>
-
-            <div>
-                <label className="text-xs text-slate-400 mb-1 block">Reflection</label>
-                <textarea
-                    value={content.reflection || ''}
-                    onChange={e => setContent({ ...content, reflection: e.target.value })}
-                    onBlur={onSave}
-                    placeholder="End of day reflection..."
-                    className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm min-h-[80px]"
-                />
-            </div>
+                );
+            })}
         </div>
     );
 }
