@@ -126,11 +126,27 @@ type CalendarDay = {
 };
 
 export default function HabitPage() {
-    const [activeTab, setActiveTab] = useState<Tab>('home');
+    // Restore activeTab from localStorage on mount to preserve state across refreshes
+    const [activeTab, setActiveTab] = useState<Tab>(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('habitActiveTab');
+            if (saved && ['home', 'calendar', 'daily', 'weekly-plan', 'statistics', 'goals', 'habits'].includes(saved)) {
+                return saved as Tab;
+            }
+        }
+        return 'home';
+    });
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [loading, setLoading] = useState(true);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    
+    // Save activeTab to localStorage whenever it changes
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('habitActiveTab', activeTab);
+        }
+    }, [activeTab]);
     
     // Data
     const [habitTemplates, setHabitTemplates] = useState<HabitTemplate[]>([]);
@@ -148,6 +164,20 @@ export default function HabitPage() {
     const [monthPriorities, setMonthPriorities] = useState<any[]>([]);
     const [monthTodos, setMonthTodos] = useState<any[]>([]);
 
+    // Restore activeTab after login if user was redirected
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const returnAfterLogin = localStorage.getItem('habitReturnAfterLogin');
+            if (returnAfterLogin === 'true') {
+                localStorage.removeItem('habitReturnAfterLogin');
+                const savedTab = localStorage.getItem('habitActiveTab');
+                if (savedTab && ['home', 'calendar', 'daily', 'weekly-plan', 'statistics', 'goals', 'habits'].includes(savedTab)) {
+                    setActiveTab(savedTab as Tab);
+                }
+            }
+        }
+    }, []);
+
     // Load data
     useEffect(() => {
         loadData();
@@ -158,6 +188,11 @@ export default function HabitPage() {
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
+                // Save current tab before redirecting to login
+                if (typeof window !== 'undefined') {
+                    localStorage.setItem('habitActiveTab', activeTab);
+                    localStorage.setItem('habitReturnAfterLogin', 'true');
+                }
                 window.location.href = '/login';
                 return;
             }
@@ -2388,41 +2423,55 @@ function DoNextSection({
                     return (
                         <div
                             key={itemKey}
-                            draggable
-                            onDragStart={(e) => handleDragStart(e, itemKey)}
-                            onDragOver={(e) => handleDragOver(e, index)}
-                            onDragLeave={handleDragLeave}
-                            onDrop={(e) => handleDrop(e, index)}
-                            onDragEnd={handleDragEnd}
-                            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all min-h-[48px] ${
-                                isDragging 
-                                    ? 'opacity-50 cursor-move' 
-                                    : isDragOver
-                                    ? 'border-amber-500/50 bg-amber-950/20'
-                                    : isCompleted
+                            className={`flex items-center gap-2 sm:gap-3 px-2 sm:px-3 py-2.5 rounded-lg border transition-all min-h-[56px] sm:min-h-[48px] ${
+                                isCompleted
                                     ? 'border-slate-700/30 bg-slate-900/30 opacity-60'
                                     : 'border-slate-700/50 bg-slate-900/50 hover:bg-slate-800/50'
-                            } cursor-move`}
+                            }`}
                         >
-                            <span className="text-slate-500 text-sm select-none flex-shrink-0" title="Drag to reorder">☰</span>
+                            {/* Large drag handle area for mobile - entire left side */}
+                            <div
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, itemKey)}
+                                onDragOver={(e) => handleDragOver(e, index)}
+                                onDragLeave={handleDragLeave}
+                                onDrop={(e) => handleDrop(e, index)}
+                                onDragEnd={handleDragEnd}
+                                className={`flex items-center justify-center flex-shrink-0 touch-none ${
+                                    isDragging 
+                                        ? 'opacity-50' 
+                                        : isDragOver
+                                        ? 'bg-amber-950/20'
+                                        : 'hover:bg-slate-700/30 active:bg-slate-700/40'
+                                } rounded transition-colors`}
+                                style={{
+                                    width: '48px',
+                                    height: '48px',
+                                    minWidth: '48px',
+                                    minHeight: '48px',
+                                }}
+                            >
+                                <span className="text-slate-400 text-xl sm:text-lg select-none" title="Drag to reorder">☰</span>
+                            </div>
                             <input
                                 type="checkbox"
                                 checked={isCompleted || false}
                                 onChange={() => handleToggle(item)}
                                 onClick={(e) => e.stopPropagation()}
-                                className="w-5 h-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500 cursor-pointer flex-shrink-0"
+                                className="w-6 h-6 sm:w-5 sm:h-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500 cursor-pointer flex-shrink-0 touch-manipulation"
+                                style={{ minWidth: '24px', minHeight: '24px' }}
                             />
                             <span className={`px-2 py-0.5 rounded text-xs font-medium border ${getTypeColor(item.type)}`}>
                                 {getTypeLabel(item.type)}
                             </span>
                             {item.icon && (
-                                <span className="text-lg flex-shrink-0">{item.icon}</span>
+                                <span className="text-lg sm:text-base flex-shrink-0">{item.icon}</span>
                             )}
-                            <span className={`flex-1 text-sm ${isCompleted ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                            <span className={`flex-1 text-sm sm:text-sm ${isCompleted ? 'line-through text-slate-500' : 'text-slate-200'}`}>
                                 {item.label}
                             </span>
                             {item.category && (
-                                <span className="text-xs text-slate-400 capitalize flex-shrink-0">{item.category}</span>
+                                <span className="text-xs text-slate-400 capitalize flex-shrink-0 hidden sm:inline">{item.category}</span>
                             )}
                         </div>
                     );
