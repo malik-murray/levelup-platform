@@ -400,7 +400,31 @@ export default function WeeklyPlanView() {
                     .eq('date', dateStr)
                     .eq('title', item.title);
             } else {
-                // Add assignment
+                // Before adding assignment, remove any existing assignments for this item to other days
+                const otherDayAssignments = itemDays.filter(d => d.weekly_item_id === itemId && d.date !== dateStr);
+                
+                if (otherDayAssignments.length > 0) {
+                    // Delete all other assignments
+                    for (const otherDay of otherDayAssignments) {
+                        await supabase
+                            .from('habit_weekly_item_days')
+                            .delete()
+                            .eq('id', otherDay.id);
+
+                        // Delete corresponding todos from other days
+                        await supabase
+                            .from('habit_daily_todos')
+                            .delete()
+                            .eq('user_id', user.id)
+                            .eq('date', otherDay.date)
+                            .eq('title', item.title);
+                    }
+
+                    // Update local state to remove other assignments
+                    setItemDays(prev => prev.filter(d => !(d.weekly_item_id === itemId && d.date !== dateStr)));
+                }
+
+                // Add assignment to the new day
                 const { data: newDay, error: dayError } = await supabase
                     .from('habit_weekly_item_days')
                     .insert({
@@ -417,7 +441,7 @@ export default function WeeklyPlanView() {
                 }
 
                 if (newDay) {
-                    setItemDays([...itemDays, newDay]);
+                    setItemDays(prev => [...prev.filter(d => !(d.weekly_item_id === itemId && d.date !== dateStr)), newDay]);
 
                     // Verify item exists before creating todo
                     if (!item) {
@@ -618,8 +642,14 @@ export default function WeeklyPlanView() {
 
             {/* This Week's Focus */}
             <section className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-                <h2 className="text-lg font-semibold mb-3">This Week's Focus</h2>
-                <div className="space-y-3">
+                <details open className="group">
+                    <summary className="text-lg font-semibold mb-3 cursor-pointer list-none flex items-center justify-between">
+                        <span>This Week's Focus</span>
+                        <svg className="w-5 h-5 text-slate-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </summary>
+                    <div className="space-y-3 mt-3">
                     <div>
                         <label className="text-xs text-slate-400 mb-1 block">Weekly Intention / Theme</label>
                         <textarea
@@ -642,24 +672,31 @@ export default function WeeklyPlanView() {
                             rows={3}
                         />
                     </div>
-                </div>
+                    </div>
+                </details>
             </section>
 
             {/* What I want to accomplish this week */}
             <section className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-                <h2 className="text-lg font-semibold mb-3">What I want to accomplish this week</h2>
-                
-                {/* Add new item */}
-                <div className="mb-4 p-3 rounded border border-slate-700 bg-slate-900/50 space-y-2">
-                    <input
-                        type="text"
-                        value={newItemTitle}
-                        onChange={(e) => setNewItemTitle(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleAddItem()}
-                        placeholder="Add a weekly goal/task..."
-                        className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-                    />
-                    <div className="flex gap-2 flex-wrap">
+                <details open className="group">
+                    <summary className="text-lg font-semibold mb-3 cursor-pointer list-none flex items-center justify-between">
+                        <span>What I want to accomplish this week</span>
+                        <svg className="w-5 h-5 text-slate-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </summary>
+                    <div className="mt-3">
+                        {/* Add new item */}
+                        <div className="mb-4 p-3 rounded border border-slate-700 bg-slate-900/50 space-y-2">
+                            <input
+                                type="text"
+                                value={newItemTitle}
+                                onChange={(e) => setNewItemTitle(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleAddItem()}
+                                placeholder="Add a weekly goal/task..."
+                                className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                            />
+                            <div className="flex gap-2 flex-wrap">
                         <div className="flex-1 min-w-[120px] relative">
                             <select
                                 value={newItemGoalId || ''}
@@ -797,8 +834,8 @@ export default function WeeklyPlanView() {
                     </div>
                 </div>
 
-                {/* Weekly items list */}
-                <div className="space-y-2">
+                        {/* Weekly items list */}
+                        <div className="space-y-2">
                     {weeklyItems.map(item => {
                         const linkedGoal = goals.find(g => g.id === item.goal_id);
                         const isEditing = editingItemId === item.id;
@@ -1023,26 +1060,33 @@ export default function WeeklyPlanView() {
                             </div>
                         );
                     })}
-                    {weeklyItems.length === 0 && (
-                        <div className="text-center py-8 text-slate-500 text-sm">
-                            No items yet. Add one above to get started.
+                        {weeklyItems.length === 0 && (
+                            <div className="text-center py-8 text-slate-500 text-sm">
+                                No items yet. Add one above to get started.
+                            </div>
+                        )}
                         </div>
-                    )}
-                </div>
+                    </div>
+                </details>
             </section>
 
             {/* Break it into days */}
             <section className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-                <h2 className="text-lg font-semibold mb-3">Break it into days</h2>
-                
-                {/* Mobile: Stacked layout, Desktop: Columns */}
+                <details open className="group">
+                    <summary className="text-lg font-semibold mb-3 cursor-pointer list-none flex items-center justify-between">
+                        <span>Break it into days</span>
+                        <svg className="w-5 h-5 text-slate-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </summary>
+                    <div className="mt-3">
+                        {/* Mobile: Stacked layout, Desktop: Columns */}
                 <div className="space-y-4 md:grid md:grid-cols-7 md:gap-3 md:space-y-0">
                     {weekDays.map((day) => {
                         const dateStr = formatDate(day);
                         const isToday = isSameDay(day, new Date());
                         const dayItems = itemDays.filter(d => d.date === dateStr);
                         const assignedItemIds = dayItems.map(d => d.weekly_item_id);
-                        const unassignedItems = weeklyItems.filter(item => !assignedItemIds.includes(item.id));
 
                         return (
                             <div
@@ -1091,40 +1135,58 @@ export default function WeeklyPlanView() {
                                 </div>
 
                                 {/* Assign items to this day */}
-                                {weeklyItems.length > 0 && (
-                                    <details className="group">
-                                        <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-300 list-none">
-                                            <span className="flex items-center gap-1">
-                                                {dayItems.length > 0 ? 'Reassign items' : '+ Assign item'}
-                                                <svg className="w-3 h-3 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                                </svg>
-                                            </span>
-                                        </summary>
-                                        <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
-                                            {weeklyItems.map(item => {
-                                                const isAssigned = assignedItemIds.includes(item.id);
-                                                return (
-                                                    <button
-                                                        key={item.id}
-                                                        onClick={() => handleToggleDayAssignment(item.id, day)}
-                                                        className={`w-full text-left px-2 py-1 rounded text-xs transition-colors ${
-                                                            isAssigned
-                                                                ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
-                                                                : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                                                        }`}
-                                                    >
-                                                        {isAssigned ? '✓ ' : '+ '}{item.title}
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    </details>
-                                )}
+                                {weeklyItems.length > 0 && (() => {
+                                    // Get all item IDs that are assigned to OTHER days (not this day)
+                                    const assignedToOtherDays = new Set(
+                                        itemDays
+                                            .filter(d => d.date !== dateStr)
+                                            .map(d => d.weekly_item_id)
+                                    );
+                                    
+                                    // Filter to only show items that are either:
+                                    // 1. Assigned to this day (so they can be unassigned), OR
+                                    // 2. Not assigned to any day
+                                    const availableItems = weeklyItems.filter(item => 
+                                        assignedItemIds.includes(item.id) || !assignedToOtherDays.has(item.id)
+                                    );
+                                    
+                                    return availableItems.length > 0 ? (
+                                        <details className="group">
+                                            <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-300 list-none">
+                                                <span className="flex items-center gap-1">
+                                                    {dayItems.length > 0 ? 'Reassign items' : '+ Assign item'}
+                                                    <svg className="w-3 h-3 group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                                    </svg>
+                                                </span>
+                                            </summary>
+                                            <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+                                                {availableItems.map(item => {
+                                                    const isAssigned = assignedItemIds.includes(item.id);
+                                                    return (
+                                                        <button
+                                                            key={item.id}
+                                                            onClick={() => handleToggleDayAssignment(item.id, day)}
+                                                            className={`w-full text-left px-2 py-1 rounded text-xs transition-colors ${
+                                                                isAssigned
+                                                                    ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
+                                                                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                                                            }`}
+                                                        >
+                                                            {isAssigned ? '✓ ' : '+ '}{item.title}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </details>
+                                    ) : null;
+                                })()}
                             </div>
                         );
                     })}
-                </div>
+                        </div>
+                    </div>
+                </details>
             </section>
         </div>
     );

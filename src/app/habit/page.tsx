@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import logo from '../logo.png';
@@ -817,8 +817,6 @@ function DailyView({
     const [showEditDailyFlow, setShowEditDailyFlow] = useState(false);
     const [draggedFlowHabitId, setDraggedFlowHabitId] = useState<string | null>(null);
     const [dragOverFlowHabitId, setDragOverFlowHabitId] = useState<string | null>(null);
-    const [upNextPage, setUpNextPage] = useState(0);
-
     // Local state for optimistic updates
     const [localHabitEntries, setLocalHabitEntries] = useState<HabitEntry[]>(habitEntries);
     const [localPriorities, setLocalPriorities] = useState<Priority[]>(priorities);
@@ -831,8 +829,6 @@ function DailyView({
         setLocalPriorities(priorities);
         setLocalTodos(todos);
         setLocalHabitTemplates(habitTemplates);
-        // Reset Up Next pagination when date changes
-        setUpNextPage(0);
     }, [habitEntries, priorities, todos, habitTemplates, date]);
 
     const dateStr = formatDate(date);
@@ -1686,6 +1682,17 @@ function DailyView({
                 </div>
             </div>
 
+            {/* Do Next Section - Unified queue */}
+            <DoNextSection
+                date={dateStr}
+                habits={habitsWithEntries}
+                priorities={localPriorities}
+                todos={localTodos}
+                onToggleHabit={handleHabitToggle}
+                onTogglePriority={handleTogglePriority}
+                onToggleTodo={handleToggleTodo}
+            />
+
             {/* Habits Section */}
             <HabitsSection
                 habits={habitsWithEntries}
@@ -1704,8 +1711,6 @@ function DailyView({
                 setNewHabitTimeOfDay={setNewHabitTimeOfDay}
                 onReorder={handleHabitReorder}
                 onEditDailyFlow={() => setShowEditDailyFlow(true)}
-                upNextPage={upNextPage}
-                setUpNextPage={setUpNextPage}
             />
 
             {/* Priorities Section */}
@@ -2139,6 +2144,295 @@ function calculateTimeOfDayScore(
     return Math.round((points / timeItems.length) * 100);
 }
 
+// Do Next Section - Unified queue for habits, priorities, and todos
+function DoNextSection({
+    date,
+    habits,
+    priorities,
+    todos,
+    onToggleHabit,
+    onTogglePriority,
+    onToggleTodo,
+}: {
+    date: string;
+    habits: any[];
+    priorities: Priority[];
+    todos: Todo[];
+    onToggleHabit: (id: string, status: HabitStatus) => void;
+    onTogglePriority: (id: string, completed: boolean) => void;
+    onToggleTodo: (id: string, isDone: boolean) => void;
+}) {
+    // Get ALL items (including completed ones)
+    const allHabits = habits
+        .filter(h => !h.is_bad_habit)
+        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    
+    // Create default ordered list: Priorities first, then Habits (by execution order), then Todos
+    const defaultItems: Array<{
+        type: 'priority' | 'habit' | 'todo';
+        id: string;
+        label: string;
+        completed: boolean;
+        icon?: string;
+        category?: string;
+    }> = [
+        ...priorities.map(p => ({
+            type: 'priority' as const,
+            id: p.id,
+            label: p.text,
+            completed: p.completed,
+            category: p.category || undefined,
+        })),
+        ...allHabits.map(h => ({
+            type: 'habit' as const,
+            id: h.id,
+            label: h.name,
+            completed: h.status === 'checked',
+            icon: h.icon,
+            category: h.category,
+        })),
+        ...todos.map(t => ({
+            type: 'todo' as const,
+            id: t.id,
+            label: t.title,
+            completed: t.is_done,
+            category: t.category || undefined,
+        })),
+    ];
+    
+    // Load custom order from localStorage (keyed by date)
+    const storageKey = `doNextOrder_${date}`;
+    const [customOrder, setCustomOrder] = useState<string[]>(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem(storageKey);
+            return saved ? JSON.parse(saved) : [];
+        }
+        return [];
+    });
+    
+    // Reset custom order when date changes
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem(storageKey);
+            setCustomOrder(saved ? JSON.parse(saved) : []);
+        }
+    }, [date]);
+    
+    // Merge custom order with default items (handle items added/removed since last save)
+    const orderedItems = useMemo(() => {
+        if (customOrder.length === 0) {
+            return defaultItems;
+        }
+        
+        // Create a map for quick lookup
+        const itemMap = new Map(defaultItems.map(item => [`${item.type}-${item.id}`, item]));
+        const ordered: typeof defaultItems = [];
+        const used = new Set<string>();
+        
+        // Add items in custom order
+        for (const key of customOrder) {
+            const item = itemMap.get(key);
+            if (item) {
+                ordered.push(item);
+                used.add(key);
+            }
+        }
+        
+        // Add any new items that weren't in the custom order
+        for (const item of defaultItems) {
+            const key = `${item.type}-${item.id}`;
+            if (!used.has(key)) {
+                ordered.push(item);
+            }
+        }
+        
+        return ordered;
+    }, [defaultItems, customOrder]);
+    
+    // Save custom order to localStorage
+    const saveOrder = (newOrder: string[]) => {
+        setCustomOrder(newOrder);
+        if (typeof window !== 'undefined') {
+            localStorage.setItem(storageKey, JSON.stringify(newOrder));
+        }
+    };
+    
+    // Drag and drop state
+    const [draggedItemKey, setDraggedItemKey] = useState<string | null>(null);
+    const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+    
+    const handleDragStart = (e: React.DragEvent, itemKey: string) => {
+        setDraggedItemKey(itemKey);
+        e.dataTransfer.effectAllowed = 'move';
+    };
+    
+    const handleDragOver = (e: React.DragEvent, index: number) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        setDragOverIndex(index);
+    };
+    
+    const handleDragLeave = () => {
+        setDragOverIndex(null);
+    };
+    
+    const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+        e.preventDefault();
+        if (!draggedItemKey) return;
+        
+        const currentOrder = customOrder.length > 0 
+            ? customOrder 
+            : orderedItems.map(item => `${item.type}-${item.id}`);
+        
+        const draggedIndex = currentOrder.indexOf(draggedItemKey);
+        if (draggedIndex === -1 || draggedIndex === targetIndex) {
+            setDraggedItemKey(null);
+            setDragOverIndex(null);
+            return;
+        }
+        
+        const newOrder = [...currentOrder];
+        const [removed] = newOrder.splice(draggedIndex, 1);
+        newOrder.splice(targetIndex, 0, removed);
+        
+        saveOrder(newOrder);
+        setDraggedItemKey(null);
+        setDragOverIndex(null);
+    };
+    
+    const handleDragEnd = () => {
+        setDraggedItemKey(null);
+        setDragOverIndex(null);
+    };
+    
+    if (orderedItems.length === 0) {
+        return null;
+    }
+    
+    const getTypeColor = (type: string) => {
+        switch (type) {
+            case 'priority': return 'text-purple-400 bg-purple-500/20 border-purple-500/30';
+            case 'habit': return 'text-blue-400 bg-blue-500/20 border-blue-500/30';
+            case 'todo': return 'text-green-400 bg-green-500/20 border-green-500/30';
+            default: return 'text-slate-400 bg-slate-500/20 border-slate-500/30';
+        }
+    };
+    
+    const getTypeLabel = (type: string) => {
+        switch (type) {
+            case 'priority': return 'Priority';
+            case 'habit': return 'Habit';
+            case 'todo': return 'To-Do';
+            default: return '';
+        }
+    };
+    
+    const handleToggle = (item: typeof orderedItems[0]) => {
+        if (item.type === 'priority') {
+            onTogglePriority(item.id, item.completed);
+        } else if (item.type === 'habit') {
+            const habit = habits.find(h => h.id === item.id);
+            if (habit) {
+                onToggleHabit(item.id, habit.status);
+            }
+        } else if (item.type === 'todo') {
+            const todo = todos.find(t => t.id === item.id);
+            if (todo) {
+                onToggleTodo(item.id, todo.is_done);
+            }
+        }
+    };
+    
+    const [isCollapsed, setIsCollapsed] = useState(false);
+    const incompleteCount = orderedItems.filter(item => {
+        const isCompleted = item.type === 'priority'
+            ? priorities.find(p => p.id === item.id)?.completed
+            : item.type === 'habit'
+            ? habits.find(h => h.id === item.id)?.status === 'checked'
+            : todos.find(t => t.id === item.id)?.is_done;
+        return !isCompleted;
+    }).length;
+    
+    return (
+        <div className="rounded-lg border border-amber-500/30 bg-gradient-to-br from-amber-950/30 to-slate-950 p-4">
+            <details open={!isCollapsed} className="group">
+                <summary 
+                    className="flex items-center justify-between mb-3 cursor-pointer list-none"
+                    onClick={(e) => {
+                        e.preventDefault();
+                        setIsCollapsed(!isCollapsed);
+                    }}
+                >
+                    <div className="flex items-center gap-2">
+                        <h3 className="text-lg font-semibold text-amber-400">Do Next</h3>
+                        {isCollapsed && (
+                            <span className="text-xs text-slate-400">({incompleteCount} remaining)</span>
+                        )}
+                    </div>
+                    <svg className="w-5 h-5 text-slate-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                </summary>
+                <div className="space-y-2">
+                {orderedItems.map((item, index) => {
+                    const itemKey = `${item.type}-${item.id}`;
+                    const isCompleted = item.type === 'priority'
+                        ? priorities.find(p => p.id === item.id)?.completed
+                        : item.type === 'habit'
+                        ? habits.find(h => h.id === item.id)?.status === 'checked'
+                        : todos.find(t => t.id === item.id)?.is_done;
+                    
+                    const isDragging = draggedItemKey === itemKey;
+                    const isDragOver = dragOverIndex === index;
+                    
+                    return (
+                        <div
+                            key={itemKey}
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, itemKey)}
+                            onDragOver={(e) => handleDragOver(e, index)}
+                            onDragLeave={handleDragLeave}
+                            onDrop={(e) => handleDrop(e, index)}
+                            onDragEnd={handleDragEnd}
+                            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all min-h-[48px] ${
+                                isDragging 
+                                    ? 'opacity-50 cursor-move' 
+                                    : isDragOver
+                                    ? 'border-amber-500/50 bg-amber-950/20'
+                                    : isCompleted
+                                    ? 'border-slate-700/30 bg-slate-900/30 opacity-60'
+                                    : 'border-slate-700/50 bg-slate-900/50 hover:bg-slate-800/50'
+                            } cursor-move`}
+                        >
+                            <span className="text-slate-500 text-sm select-none flex-shrink-0" title="Drag to reorder">☰</span>
+                            <input
+                                type="checkbox"
+                                checked={isCompleted || false}
+                                onChange={() => handleToggle(item)}
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-5 h-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500 cursor-pointer flex-shrink-0"
+                            />
+                            <span className={`px-2 py-0.5 rounded text-xs font-medium border ${getTypeColor(item.type)}`}>
+                                {getTypeLabel(item.type)}
+                            </span>
+                            {item.icon && (
+                                <span className="text-lg flex-shrink-0">{item.icon}</span>
+                            )}
+                            <span className={`flex-1 text-sm ${isCompleted ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                                {item.label}
+                            </span>
+                            {item.category && (
+                                <span className="text-xs text-slate-400 capitalize flex-shrink-0">{item.category}</span>
+                            )}
+                        </div>
+                    );
+                })}
+                </div>
+            </details>
+        </div>
+    );
+}
+
 // Section Components
 function HabitsSection({
     habits,
@@ -2157,14 +2451,9 @@ function HabitsSection({
     setNewHabitTimeOfDay,
     onReorder,
     onEditDailyFlow,
-    upNextPage,
-    setUpNextPage,
 }: any) {
     const [draggedHabitId, setDraggedHabitId] = useState<string | null>(null);
     const [dragOverHabitId, setDragOverHabitId] = useState<string | null>(null);
-    
-    // Calculate habits per page based on screen width (matches grid columns)
-    const HABITS_PER_PAGE = useHabitsPerPage();
     
     const categoryColors = {
         physical: 'border-blue-500/30 bg-blue-950/30',
@@ -2180,29 +2469,11 @@ function HabitsSection({
     const goodHabits = habits.filter((h: any) => !h.is_bad_habit);
     const badHabits = habits.filter((h: any) => h.is_bad_habit);
     
-    // Sort all good habits by GLOBAL execution order (sort_order)
-    const allGoodHabitsSorted = goodHabits.sort((a: any, b: any) => {
-        return (a.sort_order || 0) - (b.sort_order || 0);
-    });
-    
-    // Get next incomplete habits for "Up Next" section (dynamic pagination based on screen width)
-    const incompleteHabits = allGoodHabitsSorted.filter((h: any) => h.status !== 'checked');
-    const totalPages = Math.ceil(incompleteHabits.length / HABITS_PER_PAGE);
-    const startIndex = upNextPage * HABITS_PER_PAGE;
-    const endIndex = startIndex + HABITS_PER_PAGE;
-    const upNextHabits = incompleteHabits.slice(startIndex, endIndex);
-    
-    // Find the next incomplete habit globally (for highlighting)
-    const nextHabitGlobally = incompleteHabits[0] || null;
-    
     const habitsByCategory = {
         physical: goodHabits.filter((h: any) => h.category === 'physical').sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)),
         mental: goodHabits.filter((h: any) => h.category === 'mental').sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)),
         spiritual: goodHabits.filter((h: any) => h.category === 'spiritual').sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)),
     };
-    
-    // Create a Set of habit IDs currently in Up Next for efficient lookup
-    const upNextHabitIds = new Set(upNextHabits.map((h: any) => h.id));
     
     const badHabitsByCategory = {
         physical: badHabits.filter((h: any) => h.category === 'physical'),
@@ -2210,83 +2481,41 @@ function HabitsSection({
         spiritual: badHabits.filter((h: any) => h.category === 'spiritual'),
     };
 
+    const [isCollapsed, setIsCollapsed] = useState(false);
+    const incompleteCount = habits.filter((h: any) => h.status !== 'checked' && !h.is_bad_habit).length;
+    const totalCount = habits.filter((h: any) => !h.is_bad_habit).length;
+    
     return (
         <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-            <div className="flex items-center justify-between mb-3">
-                <h3 className="text-base font-semibold text-blue-400">Habits</h3>
-                {onEditDailyFlow && (
-                    <button
-                        onClick={onEditDailyFlow}
-                        className="text-xs text-slate-400 hover:text-amber-400 transition-colors px-2 py-1 rounded hover:bg-slate-800"
-                    >
-                        Edit Daily Flow
-                    </button>
-                )}
-            </div>
-            
-            {/* Up Next Execution Lane */}
-            {incompleteHabits.length > 0 && (
-                <div className="mb-6 pb-5 border-b border-slate-700/50">
-                    {/* Header with navigation */}
-                    <div className="flex items-center mb-3">
-                        <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex-shrink-0">Up Next</h4>
-                        {totalPages > 1 && (
-                            <>
-                                {/* Prev button on left */}
-                                <button
-                                    onClick={() => setUpNextPage(Math.max(0, upNextPage - 1))}
-                                    disabled={upNextPage === 0}
-                                    className={`ml-4 px-3 py-1.5 text-xs font-medium rounded transition-colors min-h-[36px] flex-shrink-0 ${
-                                        upNextPage === 0
-                                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                                            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                                    }`}
-                                >
-                                    ← Prev
-                                </button>
-                                {/* Pager centered */}
-                                <span className="flex-1 text-center text-xs text-slate-400 px-2">
-                                    {upNextPage + 1} / {totalPages}
-                                </span>
-                                {/* Next button on right */}
-                                <button
-                                    onClick={() => setUpNextPage(Math.min(totalPages - 1, upNextPage + 1))}
-                                    disabled={upNextPage >= totalPages - 1}
-                                    className={`px-3 py-1.5 text-xs font-medium rounded transition-colors min-h-[36px] flex-shrink-0 ${
-                                        upNextPage >= totalPages - 1
-                                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                                            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                                    }`}
-                                >
-                                    Next →
-                                </button>
-                            </>
+            <details open={!isCollapsed} className="group">
+                <summary 
+                    className="flex items-center justify-between mb-3 cursor-pointer list-none"
+                    onClick={(e) => {
+                        e.preventDefault();
+                        setIsCollapsed(!isCollapsed);
+                    }}
+                >
+                    <div className="flex items-center gap-2">
+                        <h3 className="text-base font-semibold text-blue-400">Habits</h3>
+                        {isCollapsed && (
+                            <span className="text-xs text-slate-400">({incompleteCount} remaining)</span>
                         )}
                     </div>
-                    {/* Responsive grid that fits perfectly - matches HABITS_PER_PAGE */}
-                    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${HABITS_PER_PAGE}, minmax(0, 1fr))` }}>
-                        {upNextHabits.map((habit: any) => (
-                            <div
-                                key={habit.id}
-                                className="flex items-center gap-2.5 px-3 py-3 rounded-lg border border-amber-500/30 bg-gradient-to-br from-amber-950/40 to-slate-950/60 hover:border-amber-500/50 hover:from-amber-950/50 hover:to-slate-950/70 transition-all min-h-[52px] group"
+                    <svg className="w-5 h-5 text-slate-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                </summary>
+                <div>
+                    <div className="flex items-center justify-between mb-3">
+                        {onEditDailyFlow && (
+                            <button
+                                onClick={onEditDailyFlow}
+                                className="text-xs text-slate-400 hover:text-amber-400 transition-colors px-2 py-1 rounded hover:bg-slate-800"
                             >
-                                <input
-                                    type="checkbox"
-                                    checked={habit.status === 'checked'}
-                                    onChange={() => onToggle(habit.id, habit.status)}
-                                    className="h-5 w-5 sm:h-5 sm:w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500 flex-shrink-0 cursor-pointer"
-                                    onClick={(e) => e.stopPropagation()}
-                                />
-                                <span className="text-xl flex-shrink-0">{habit.icon}</span>
-                                <div className="flex flex-col min-w-0 flex-1">
-                                    <span className="text-sm font-medium text-white group-hover:text-amber-100 transition-colors truncate">{habit.name}</span>
-                                    <span className="text-xs text-slate-400 capitalize">{habit.category}</span>
-                                </div>
-                            </div>
-                        ))}
+                                Edit Daily Flow
+                            </button>
+                        )}
                     </div>
-                </div>
-            )}
             
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
                 {(['physical', 'mental', 'spiritual'] as Category[]).map(category => (
@@ -2333,10 +2562,6 @@ function HabitsSection({
                                         isDragging ? 'opacity-50' : ''
                                     } ${
                                         isDragOver ? 'bg-amber-500/20 border-2 border-amber-500/50' : ''
-                                    } ${
-                                        upNextHabitIds.has(habit.id) && habit.status !== 'checked'
-                                            ? 'bg-amber-950/30 border border-amber-500/40 shadow-[0_0_12px_rgba(245,158,11,0.2)] ring-1 ring-amber-500/20' 
-                                            : ''
                                     }`}
                                 >
                                     <span className="text-slate-500 text-lg select-none cursor-move" title="Drag to reorder">☰</span>
@@ -2347,11 +2572,6 @@ function HabitsSection({
                                     <span className="text-lg">{habit.icon}</span>
                                         <div className="flex-1 flex items-center gap-2">
                                             <span className="text-sm text-slate-200">{habit.name}</span>
-                                            {upNextHabitIds.has(habit.id) && habit.status !== 'checked' && (
-                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-medium">
-                                                    Up Next
-                                                </span>
-                                            )}
                                             {habit.checked_at && habit.status === 'checked' && (
                                                 <span className="text-xs text-slate-500 opacity-60">
                                                     {new Date(habit.checked_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
@@ -2513,6 +2733,8 @@ function HabitsSection({
                     </button>
                 </div>
             </div>
+                </div>
+            </details>
         </div>
     );
 }
@@ -2532,10 +2754,30 @@ function PrioritiesSection({
     setNewPriorityGoalId,
 }: any) {
     const isLimitReached = priorities.length >= 5;
+    const [isCollapsed, setIsCollapsed] = useState(false);
+    const incompleteCount = priorities.filter((p: Priority) => !p.completed).length;
     
     return (
         <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-            <h3 className="text-base font-semibold mb-3 text-purple-400">Priorities (Max 5)</h3>
+            <details open={!isCollapsed} className="group">
+                <summary 
+                    className="flex items-center justify-between mb-3 cursor-pointer list-none"
+                    onClick={(e) => {
+                        e.preventDefault();
+                        setIsCollapsed(!isCollapsed);
+                    }}
+                >
+                    <div className="flex items-center gap-2">
+                        <h3 className="text-base font-semibold text-purple-400">Priorities (Max 5)</h3>
+                        {isCollapsed && (
+                            <span className="text-xs text-slate-400">({incompleteCount} remaining)</span>
+                        )}
+                    </div>
+                    <svg className="w-5 h-5 text-slate-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                </summary>
+                <div>
             <div className="space-y-2 mb-3">
                 {priorities.map((priority: Priority) => {
                     const linkedGoal = goals.find((g: any) => g.id === priority.goal_id);
@@ -2571,10 +2813,10 @@ function PrioritiesSection({
                     </div>
                     );
                 })}
-            </div>
-            <div className="mt-4">
-                <h4 className="text-sm font-medium text-purple-300 mb-2">Add Priority</h4>
-                <div className="flex gap-2 items-center">
+                    </div>
+                    <div className="mt-4">
+                        <h4 className="text-sm font-medium text-purple-300 mb-2">Add Priority</h4>
+                        <div className="flex gap-2 items-center">
                 <input
                     type="text"
                     placeholder="Add priority..."
@@ -2645,11 +2887,13 @@ function PrioritiesSection({
                 >
                     Add
                 </button>
+                        </div>
+                        {isLimitReached && (
+                            <p className="text-xs text-slate-400 mt-2">Maximum of 5 priorities per day allowed</p>
+                        )}
+                    </div>
                 </div>
-                {isLimitReached && (
-                    <p className="text-xs text-slate-400 mt-2">Maximum of 5 priorities per day allowed</p>
-                )}
-            </div>
+            </details>
         </div>
     );
 }
@@ -2668,9 +2912,30 @@ function TodosSection({
     newTodoGoalId,
     setNewTodoGoalId,
 }: any) {
+    const [isCollapsed, setIsCollapsed] = useState(false);
+    const incompleteCount = todos.filter((t: Todo) => !t.is_done).length;
+    
     return (
         <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-            <h3 className="text-base font-semibold mb-3 text-green-400">To-Do List</h3>
+            <details open={!isCollapsed} className="group">
+                <summary 
+                    className="flex items-center justify-between mb-3 cursor-pointer list-none"
+                    onClick={(e) => {
+                        e.preventDefault();
+                        setIsCollapsed(!isCollapsed);
+                    }}
+                >
+                    <div className="flex items-center gap-2">
+                        <h3 className="text-base font-semibold text-green-400">To-Do List</h3>
+                        {isCollapsed && (
+                            <span className="text-xs text-slate-400">({incompleteCount} remaining)</span>
+                        )}
+                    </div>
+                    <svg className="w-5 h-5 text-slate-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                </summary>
+                <div>
             <div className="space-y-2 mb-3">
                 {todos.map((todo: Todo) => {
                     const linkedGoal = goals.find((g: any) => g.id === todo.goal_id);
@@ -2704,10 +2969,10 @@ function TodosSection({
                     </div>
                     );
                 })}
-            </div>
-            <div className="mt-4">
-                <h4 className="text-sm font-medium text-green-300 mb-2">Add Todo</h4>
-                <div className="flex gap-2 items-center">
+                    </div>
+                    <div className="mt-4">
+                        <h4 className="text-sm font-medium text-green-300 mb-2">Add Todo</h4>
+                        <div className="flex gap-2 items-center">
                 <input
                     type="text"
                     placeholder="Add task..."
@@ -2753,8 +3018,10 @@ function TodosSection({
                 >
                     Add
                 </button>
+                        </div>
+                    </div>
                 </div>
-            </div>
+            </details>
         </div>
     );
 }
