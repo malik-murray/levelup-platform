@@ -11,9 +11,10 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
  */
 export async function POST(
     request: NextRequest,
-    { params }: { params: { articleId: string } }
-) {
+    context: { params: Promise<{ articleId: string }> }
+): Promise<NextResponse> {
     try {
+        const params = await context.params;
         const cookieStore = await cookies();
         const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
             cookies: {
