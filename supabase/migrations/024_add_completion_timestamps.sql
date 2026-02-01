@@ -13,3 +13,8 @@ ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
 ALTER TABLE habit_daily_todos
 ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
 
+
+
+
+
+

@@ -79,3 +79,8 @@ export function getAvailableModes(): AnalysisMode[] {
 
 
 
+
+
+
+
+

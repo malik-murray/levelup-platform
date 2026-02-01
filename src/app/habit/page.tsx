@@ -126,27 +126,32 @@ type CalendarDay = {
 };
 
 export default function HabitPage() {
-    // Restore activeTab from localStorage on mount to preserve state across refreshes
-    const [activeTab, setActiveTab] = useState<Tab>(() => {
-        if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem('habitActiveTab');
-            if (saved && ['home', 'calendar', 'daily', 'weekly-plan', 'statistics', 'goals', 'habits'].includes(saved)) {
-                return saved as Tab;
-            }
-        }
-        return 'home';
-    });
+    // Use constant default to ensure server/client match on first render
+    const [activeTab, setActiveTab] = useState<Tab>('home');
+    const [mounted, setMounted] = useState(false);
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [loading, setLoading] = useState(true);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     
+    // Restore activeTab from localStorage after mount to preserve state across refreshes
+    // This runs only on client after hydration, preventing mismatch
+    useEffect(() => {
+        setMounted(true);
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('habitActiveTab');
+            if (saved && ['home', 'calendar', 'daily', 'weekly-plan', 'statistics', 'goals', 'habits'].includes(saved)) {
+                setActiveTab(saved as Tab);
+            }
+        }
+    }, []);
+    
     // Save activeTab to localStorage whenever it changes
     useEffect(() => {
-        if (typeof window !== 'undefined') {
+        if (mounted && typeof window !== 'undefined') {
             localStorage.setItem('habitActiveTab', activeTab);
         }
-    }, [activeTab]);
+    }, [activeTab, mounted]);
     
     // Data
     const [habitTemplates, setHabitTemplates] = useState<HabitTemplate[]>([]);
@@ -1406,6 +1411,65 @@ function DailyView({
         }
     };
 
+    const handleEditPriority = async (id: string, text: string, category: Category | null, timeOfDay: TimeOfDay | null, goalId: string | null) => {
+        // Optimistic update
+        setLocalPriorities(prev => prev.map(p => 
+            p.id === id ? { ...p, text, category, time_of_day: timeOfDay, goal_id: goalId } : p
+        ));
+        
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                onDataChange(); // Reload on error
+                return;
+            }
+            
+            await supabase
+                .from('habit_daily_priorities')
+                .update({ text, category, time_of_day: timeOfDay, goal_id: goalId })
+                .eq('id', id)
+                .eq('user_id', user.id);
+            
+            // Update score in background
+            saveDailyScore().catch(err => console.error('Error saving score:', err));
+        } catch (error) {
+            console.error('Error editing priority:', error);
+            onDataChange(); // Reload on error
+        }
+    };
+
+    const handleDeletePriority = async (id: string) => {
+        // Optimistic update
+        const priorityToDelete = localPriorities.find(p => p.id === id);
+        setLocalPriorities(prev => prev.filter(p => p.id !== id));
+        
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                // Revert on error
+                if (priorityToDelete) {
+                    setLocalPriorities(prev => [...prev, priorityToDelete]);
+                }
+                return;
+            }
+            
+            await supabase
+                .from('habit_daily_priorities')
+                .delete()
+                .eq('id', id)
+                .eq('user_id', user.id);
+            
+            // Update score in background
+            saveDailyScore().catch(err => console.error('Error saving score:', err));
+        } catch (error) {
+            console.error('Error deleting priority:', error);
+            // Revert on error
+            if (priorityToDelete) {
+                setLocalPriorities(prev => [...prev, priorityToDelete]);
+            }
+        }
+    };
+
     const handleAddTodo = async () => {
         if (!newTodo.trim()) return;
 
@@ -1529,6 +1593,65 @@ function DailyView({
                 setLocalTodos(prev => prev.map(t => 
                     t.id === id ? { ...t, is_done: isDone, completed_at: existingTodo.completed_at } : t
                 ));
+            }
+        }
+    };
+
+    const handleEditTodo = async (id: string, title: string, category: Category | null, timeOfDay: TimeOfDay | null, goalId: string | null) => {
+        // Optimistic update
+        setLocalTodos(prev => prev.map(t => 
+            t.id === id ? { ...t, title, category, time_of_day: timeOfDay, goal_id: goalId } : t
+        ));
+        
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                onDataChange(); // Reload on error
+                return;
+            }
+            
+            await supabase
+                .from('habit_daily_todos')
+                .update({ title, category, time_of_day: timeOfDay, goal_id: goalId })
+                .eq('id', id)
+                .eq('user_id', user.id);
+            
+            // Update score in background
+            saveDailyScore().catch(err => console.error('Error saving score:', err));
+        } catch (error) {
+            console.error('Error editing todo:', error);
+            onDataChange(); // Reload on error
+        }
+    };
+
+    const handleDeleteTodo = async (id: string) => {
+        // Optimistic update
+        const todoToDelete = localTodos.find(t => t.id === id);
+        setLocalTodos(prev => prev.filter(t => t.id !== id));
+        
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                // Revert on error
+                if (todoToDelete) {
+                    setLocalTodos(prev => [...prev, todoToDelete]);
+                }
+                return;
+            }
+            
+            await supabase
+                .from('habit_daily_todos')
+                .delete()
+                .eq('id', id)
+                .eq('user_id', user.id);
+            
+            // Update score in background
+            saveDailyScore().catch(err => console.error('Error saving score:', err));
+        } catch (error) {
+            console.error('Error deleting todo:', error);
+            // Revert on error
+            if (todoToDelete) {
+                setLocalTodos(prev => [...prev, todoToDelete]);
             }
         }
     };
@@ -1753,6 +1876,8 @@ function DailyView({
                 priorities={localPriorities}
                 goals={goals}
                 onToggle={handleTogglePriority}
+                onEdit={handleEditPriority}
+                onDelete={handleDeletePriority}
                 onAdd={handleAddPriority}
                 newPriority={newPriority}
                 setNewPriority={setNewPriority}
@@ -1769,6 +1894,8 @@ function DailyView({
                 todos={localTodos}
                 goals={goals}
                 onToggle={handleToggleTodo}
+                onEdit={handleEditTodo}
+                onDelete={handleDeleteTodo}
                 onAdd={handleAddTodo}
                 newTodo={newTodo}
                 setNewTodo={setNewTodo}
@@ -2179,6 +2306,82 @@ function calculateTimeOfDayScore(
     return Math.round((points / timeItems.length) * 100);
 }
 
+/**
+ * Safe error serializer - always returns a non-empty object with meaningful error information
+ * This ensures we never log {} when errors occur
+ */
+function safeSerializeError(err: unknown): Record<string, any> {
+    const result: Record<string, any> = {
+        type: typeof err,
+        string: String(err),
+    };
+
+    // Add constructor/class name if available
+    if (err && typeof err === 'object') {
+        try {
+            result.constructor = (err as any).constructor?.name || 'unknown';
+        } catch (e) {
+            result.constructorError = String(e);
+        }
+    }
+
+    // Add keys if it's an object
+    if (err && typeof err === 'object' && err !== null) {
+        try {
+            const keys = Object.keys(err);
+            result.keys = keys;
+            result.keysCount = keys.length;
+        } catch (e) {
+            result.keysError = String(e);
+        }
+    }
+
+    // Try to stringify
+    try {
+        result.json = JSON.stringify(err);
+    } catch (e) {
+        result.jsonError = String(e);
+        result.jsonFallback = String(err);
+    }
+
+    // Add stack if it's an Error
+    if (err instanceof Error) {
+        result.message = err.message;
+        result.name = err.name;
+        if (err.stack) {
+            result.stack = err.stack;
+        }
+    }
+
+    // Check for Supabase/PostgREST error shape
+    if (err && typeof err === 'object' && err !== null) {
+        const supabaseFields = ['message', 'details', 'hint', 'code', 'status', 'statusText'];
+        const supabaseData: Record<string, any> = {};
+        let hasSupabaseFields = false;
+
+        supabaseFields.forEach(field => {
+            const value = (err as any)[field];
+            if (value !== undefined && value !== null && value !== '') {
+                supabaseData[field] = value;
+                hasSupabaseFields = true;
+            }
+        });
+
+        if (hasSupabaseFields) {
+            result.supabaseFields = supabaseData;
+            result.isSupabaseError = true;
+        }
+    }
+
+    // Ensure we always have at least one meaningful field
+    if (Object.keys(result).length === 0) {
+        result.fallback = 'Error serialization produced empty result';
+        result.rawValue = err;
+    }
+
+    return result;
+}
+
 // Do Next Section - Unified queue for habits, priorities, and todos
 function DoNextSection({
     date,
@@ -2188,6 +2391,10 @@ function DoNextSection({
     onToggleHabit,
     onTogglePriority,
     onToggleTodo,
+    onEditPriority,
+    onDeletePriority,
+    onEditTodo,
+    onDeleteTodo,
 }: {
     date: string;
     habits: any[];
@@ -2196,6 +2403,10 @@ function DoNextSection({
     onToggleHabit: (id: string, status: HabitStatus) => void;
     onTogglePriority: (id: string, completed: boolean) => void;
     onToggleTodo: (id: string, isDone: boolean) => void;
+    onEditPriority?: (id: string, text: string, category: Category | null, timeOfDay: TimeOfDay | null, goalId: string | null) => void;
+    onDeletePriority?: (id: string) => void;
+    onEditTodo?: (id: string, title: string, category: Category | null, timeOfDay: TimeOfDay | null, goalId: string | null) => void;
+    onDeleteTodo?: (id: string) => void;
 }) {
     // Get ALL items (including completed ones)
     const allHabits = habits
@@ -2235,22 +2446,169 @@ function DoNextSection({
         })),
     ];
     
-    // Load custom order from localStorage (keyed by date)
-    const storageKey = `doNextOrder_${date}`;
-    const [customOrder, setCustomOrder] = useState<string[]>(() => {
-        if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem(storageKey);
-            return saved ? JSON.parse(saved) : [];
-        }
-        return [];
-    });
+    // Load custom order from database (keyed by date and user)
+    const [customOrder, setCustomOrder] = useState<string[]>([]);
+    const [loadingOrder, setLoadingOrder] = useState(true);
+    const [isCollapsed, setIsCollapsed] = useState(false);
     
-    // Reset custom order when date changes
+    // Load custom order from database when date changes
     useEffect(() => {
-        if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem(storageKey);
-            setCustomOrder(saved ? JSON.parse(saved) : []);
-        }
+        const loadOrder = async () => {
+            setLoadingOrder(true);
+            
+            try {
+                // Step C: Ensure we have a valid user before querying
+                const { data: { user }, error: authError } = await supabase.auth.getUser();
+                
+                if (authError) {
+                    // Auth error - log with source identification
+                    const info = {
+                        source: 'auth_error',
+                        when: 'load_do_next_order',
+                        userId: null,
+                        serializedError: safeSerializeError(authError),
+                        timestamp: new Date().toISOString(),
+                    };
+                    console.error('Error getting user for do next order:', info);
+                    setCustomOrder([]);
+                    setLoadingOrder(false);
+                    return;
+                }
+                
+                // Step C: Skip if no user - not an error
+                if (!user?.id) {
+                    if (process.env.NODE_ENV === 'development') {
+                        console.log('[Do Next Order] Skipping - no user:', {
+                            source: 'do_next_order_skip_no_user',
+                            hasUser: !!user,
+                            userId: user?.id ?? null,
+                            authState: { user: !!user, userId: user?.id ?? null }
+                        });
+                    }
+                    setCustomOrder([]);
+                    setLoadingOrder(false);
+                    return;
+                }
+
+                // Path 1: Supabase response error (res.error)
+                // Run the query and capture full response - do not destructure immediately
+                let res;
+                try {
+                    res = await supabase
+                        .from('habit_do_next_order')
+                        .select('item_type, item_id, sort_order')
+                        .eq('user_id', user.id)
+                        .eq('date', date)
+                        .order('sort_order', { ascending: true });
+                } catch (queryException) {
+                    // Path 2: Thrown exception during query execution
+                    const info = {
+                        source: 'thrown_exception',
+                        when: 'load_do_next_order',
+                        userId: user.id,
+                        serializedError: safeSerializeError(queryException),
+                        query: {
+                            table: 'habit_do_next_order',
+                            user_id: user.id,
+                            date: date
+                        },
+                        timestamp: new Date().toISOString(),
+                    };
+                    console.error('Error loading do next order:', info);
+                    setCustomOrder([]);
+                    setLoadingOrder(false);
+                    return;
+                }
+
+                // Extract data and error from response
+                const orderData = res.data;
+                const error = res.error;
+
+                // Step D: "No rows" is not an error - handle success cases
+                if (!error || error === null) {
+                    // No error - success path
+                    if (orderData && Array.isArray(orderData) && orderData.length > 0) {
+                        // Has data: Convert database records to array of keys
+                        const order = orderData.map(record => `${record.item_type}-${record.item_id}`);
+                        setCustomOrder(order);
+                    } else {
+                        // No rows found - not an error, just no custom order set yet
+                        setCustomOrder([]);
+                    }
+                    setLoadingOrder(false);
+                    return;
+                }
+
+                // Path 1: Supabase response error detected
+                // Check if error has meaningful content (not empty object)
+                const errorKeys = error && typeof error === 'object' ? Object.keys(error) : [];
+                const hasMeaningfulError = error !== null && 
+                                         error !== undefined && 
+                                         (errorKeys.length > 0 || typeof error !== 'object');
+
+                if (hasMeaningfulError) {
+                    const info = {
+                        source: 'supabase_res_error',
+                        when: 'load_do_next_order',
+                        userId: user.id,
+                        serializedError: safeSerializeError(error),
+                        query: {
+                            table: 'habit_do_next_order',
+                            user_id: user.id,
+                            date: date
+                        },
+                        response: {
+                            hasData: !!orderData,
+                            dataLength: Array.isArray(orderData) ? orderData.length : 0,
+                            dataType: typeof orderData,
+                            status: (res as any).status ?? null,
+                            statusText: (res as any).statusText ?? null,
+                        },
+                        timestamp: new Date().toISOString(),
+                    };
+                    console.error('Error loading do next order:', info);
+                    setCustomOrder([]);
+                } else {
+                    // Error object exists but is empty - this shouldn't happen, but log it
+                    const info = {
+                        source: 'supabase_res_error_empty',
+                        when: 'load_do_next_order',
+                        userId: user.id,
+                        serializedError: safeSerializeError(error),
+                        note: 'Error object exists but appears empty',
+                        query: {
+                            table: 'habit_do_next_order',
+                            user_id: user.id,
+                            date: date
+                        },
+                        response: {
+                            hasData: !!orderData,
+                            dataLength: Array.isArray(orderData) ? orderData.length : 0,
+                            dataType: typeof orderData,
+                        },
+                        rawError: error,
+                        timestamp: new Date().toISOString(),
+                    };
+                    console.warn('Error loading do next order (empty error object):', info);
+                    setCustomOrder([]);
+                }
+            } catch (error) {
+                // Path 2: Thrown exception in try block (catch)
+                const info = {
+                    source: 'thrown_exception',
+                    when: 'load_do_next_order',
+                    userId: null, // May not be available if error occurred before user fetch
+                    serializedError: safeSerializeError(error),
+                    timestamp: new Date().toISOString(),
+                };
+                console.error('Unexpected error loading do next order:', info);
+                setCustomOrder([]);
+            } finally {
+                setLoadingOrder(false);
+            }
+        };
+
+        loadOrder();
     }, [date]);
     
     // Merge custom order with default items (handle items added/removed since last save)
@@ -2284,11 +2642,76 @@ function DoNextSection({
         return ordered;
     }, [defaultItems, customOrder]);
     
-    // Save custom order to localStorage
-    const saveOrder = (newOrder: string[]) => {
+    // Save custom order to database
+    const saveOrder = async (newOrder: string[]) => {
+        // Optimistically update local state
         setCustomOrder(newOrder);
-        if (typeof window !== 'undefined') {
-            localStorage.setItem(storageKey, JSON.stringify(newOrder));
+        
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            // Delete existing order for this date
+            await supabase
+                .from('habit_do_next_order')
+                .delete()
+                .eq('user_id', user.id)
+                .eq('date', date);
+
+            // Insert new order
+            if (newOrder.length > 0) {
+                const orderRecords = newOrder.map((key, index) => {
+                    const [itemType, itemId] = key.split('-', 2);
+                    return {
+                        user_id: user.id,
+                        date: date,
+                        item_type: itemType,
+                        item_id: itemId,
+                        sort_order: index,
+                    };
+                });
+
+                const { error } = await supabase
+                    .from('habit_do_next_order')
+                    .insert(orderRecords);
+
+                if (error) {
+                    console.error('Error saving do next order:', error);
+                    // Revert on error - reload from database
+                    const { data: orderData } = await supabase
+                        .from('habit_do_next_order')
+                        .select('item_type, item_id, sort_order')
+                        .eq('user_id', user.id)
+                        .eq('date', date)
+                        .order('sort_order', { ascending: true });
+                    
+                    if (orderData && orderData.length > 0) {
+                        const order = orderData.map(record => `${record.item_type}-${record.item_id}`);
+                        setCustomOrder(order);
+                    } else {
+                        setCustomOrder([]);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error saving do next order:', error);
+            // On error, try to reload from database to revert
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const { data: orderData } = await supabase
+                    .from('habit_do_next_order')
+                    .select('item_type, item_id, sort_order')
+                    .eq('user_id', user.id)
+                    .eq('date', date)
+                    .order('sort_order', { ascending: true });
+                
+                if (orderData && orderData.length > 0) {
+                    const order = orderData.map(record => `${record.item_type}-${record.item_id}`);
+                    setCustomOrder(order);
+                } else {
+                    setCustomOrder([]);
+                }
+            }
         }
     };
     
@@ -2340,6 +2763,15 @@ function DoNextSection({
         setDragOverIndex(null);
     };
     
+    // Don't render until order is loaded to avoid flash of wrong order
+    if (loadingOrder) {
+        return (
+            <div className="rounded-lg border border-amber-500/30 bg-gradient-to-br from-amber-950/30 to-slate-950 p-4">
+                <div className="text-center py-4 text-slate-400">Loading...</div>
+            </div>
+        );
+    }
+    
     if (orderedItems.length === 0) {
         return null;
     }
@@ -2378,7 +2810,6 @@ function DoNextSection({
         }
     };
     
-    const [isCollapsed, setIsCollapsed] = useState(false);
     const incompleteCount = orderedItems.filter(item => {
         const isCompleted = item.type === 'priority'
             ? priorities.find(p => p.id === item.id)?.completed
@@ -2423,7 +2854,7 @@ function DoNextSection({
                     return (
                         <div
                             key={itemKey}
-                            className={`flex items-center gap-2 sm:gap-3 px-2 sm:px-3 py-2.5 rounded-lg border transition-all min-h-[56px] sm:min-h-[48px] ${
+                            className={`group flex items-center gap-2 sm:gap-3 px-2 sm:px-3 py-2.5 rounded-lg border transition-all min-h-[56px] sm:min-h-[48px] ${
                                 isCompleted
                                     ? 'border-slate-700/30 bg-slate-900/30 opacity-60'
                                     : 'border-slate-700/50 bg-slate-900/50 hover:bg-slate-800/50'
@@ -2472,6 +2903,77 @@ function DoNextSection({
                             </span>
                             {item.category && (
                                 <span className="text-xs text-slate-400 capitalize flex-shrink-0 hidden sm:inline">{item.category}</span>
+                            )}
+                            {(onEditPriority || onDeletePriority || onEditTodo || onDeleteTodo) && (
+                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                                    {item.type === 'priority' && onEditPriority && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                const priority = priorities.find(p => p.id === item.id);
+                                                if (priority) {
+                                                    // For DoNext, we'll just trigger edit in the main section
+                                                    // You could also open a modal here
+                                                }
+                                            }}
+                                            className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition-colors"
+                                            title="Edit priority"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                            </svg>
+                                        </button>
+                                    )}
+                                    {item.type === 'priority' && onDeletePriority && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (confirm('Are you sure you want to delete this priority?')) {
+                                                    onDeletePriority(item.id);
+                                                }
+                                            }}
+                                            className="p-1 rounded text-slate-400 hover:text-red-400 hover:bg-slate-800 transition-colors"
+                                            title="Delete priority"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                        </button>
+                                    )}
+                                    {item.type === 'todo' && onEditTodo && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                const todo = todos.find(t => t.id === item.id);
+                                                if (todo) {
+                                                    // For DoNext, we'll just trigger edit in the main section
+                                                }
+                                            }}
+                                            className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition-colors"
+                                            title="Edit todo"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                            </svg>
+                                        </button>
+                                    )}
+                                    {item.type === 'todo' && onDeleteTodo && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (confirm('Are you sure you want to delete this todo?')) {
+                                                    onDeleteTodo(item.id);
+                                                }
+                                            }}
+                                            className="p-1 rounded text-slate-400 hover:text-red-400 hover:bg-slate-800 transition-colors"
+                                            title="Delete todo"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                        </button>
+                                    )}
+                                </div>
                             )}
                         </div>
                     );
@@ -2792,6 +3294,8 @@ function PrioritiesSection({
     priorities,
     goals,
     onToggle,
+    onEdit,
+    onDelete,
     onAdd,
     newPriority,
     setNewPriority,
@@ -2804,7 +3308,35 @@ function PrioritiesSection({
 }: any) {
     const isLimitReached = priorities.length >= 5;
     const [isCollapsed, setIsCollapsed] = useState(false);
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editText, setEditText] = useState('');
+    const [editCategory, setEditCategory] = useState<Category | null>(null);
+    const [editTimeOfDay, setEditTimeOfDay] = useState<TimeOfDay | null>(null);
+    const [editGoalId, setEditGoalId] = useState<string | null>(null);
     const incompleteCount = priorities.filter((p: Priority) => !p.completed).length;
+    
+    const startEdit = (priority: Priority) => {
+        setEditingId(priority.id);
+        setEditText(priority.text);
+        setEditCategory(priority.category);
+        setEditTimeOfDay(priority.time_of_day);
+        setEditGoalId(priority.goal_id);
+    };
+    
+    const cancelEdit = () => {
+        setEditingId(null);
+        setEditText('');
+        setEditCategory(null);
+        setEditTimeOfDay(null);
+        setEditGoalId(null);
+    };
+    
+    const saveEdit = () => {
+        if (editingId && editText.trim()) {
+            onEdit(editingId, editText.trim(), editCategory, editTimeOfDay, editGoalId);
+            cancelEdit();
+        }
+    };
     
     return (
         <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
@@ -2830,11 +3362,13 @@ function PrioritiesSection({
             <div className="space-y-2 mb-3">
                 {priorities.map((priority: Priority) => {
                     const linkedGoal = goals.find((g: any) => g.id === priority.goal_id);
+                    const isEditing = editingId === priority.id;
+                    
                     return (
-                    <div key={priority.id} className="flex items-center gap-2">
+                    <div key={priority.id} className="flex items-center gap-2 group">
                         <button
                             onClick={() => onToggle(priority.id, priority.completed)}
-                            className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                            className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 ${
                                 priority.completed
                                     ? 'bg-amber-400 border-amber-400'
                                     : 'border-slate-600'
@@ -2842,22 +3376,108 @@ function PrioritiesSection({
                         >
                             {priority.completed && <span className="text-black text-xs">✓</span>}
                         </button>
-                        <span className={`flex-1 text-sm ${priority.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
-                            {priority.text}
-                                {linkedGoal && (
-                                    <span className="ml-2 text-xs text-slate-400">→ {linkedGoal.name}</span>
+                        {isEditing ? (
+                            <div className="flex-1 flex flex-col gap-2">
+                                <input
+                                    type="text"
+                                    value={editText}
+                                    onChange={e => setEditText(e.target.value)}
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter') saveEdit();
+                                        if (e.key === 'Escape') cancelEdit();
+                                    }}
+                                    className="flex-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-200"
+                                    autoFocus
+                                />
+                                <div className="flex gap-2">
+                                    <select
+                                        value={editCategory || ''}
+                                        onChange={e => setEditCategory(e.target.value as Category || null)}
+                                        className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                                    >
+                                        <option value="">No Category</option>
+                                        <option value="physical">Physical</option>
+                                        <option value="mental">Mental</option>
+                                        <option value="spiritual">Spiritual</option>
+                                    </select>
+                                    <select
+                                        value={editTimeOfDay || ''}
+                                        onChange={e => setEditTimeOfDay(e.target.value as TimeOfDay || null)}
+                                        className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                                    >
+                                        <option value="">Any Time</option>
+                                        <option value="morning">Morning</option>
+                                        <option value="afternoon">Afternoon</option>
+                                        <option value="evening">Evening</option>
+                                    </select>
+                                    <select
+                                        value={editGoalId || ''}
+                                        onChange={e => setEditGoalId(e.target.value || null)}
+                                        className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                                    >
+                                        <option value="">No Goal</option>
+                                        {goals.map((goal: any) => (
+                                            <option key={goal.id} value={goal.id}>{goal.name}</option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        onClick={saveEdit}
+                                        className="rounded-md bg-amber-400 px-2 py-1 text-xs font-semibold text-black hover:bg-amber-300"
+                                    >
+                                        Save
+                                    </button>
+                                    <button
+                                        onClick={cancelEdit}
+                                        className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <>
+                                <span className={`flex-1 text-sm ${priority.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                                    {priority.text}
+                                    {linkedGoal && (
+                                        <span className="ml-2 text-xs text-slate-400">→ {linkedGoal.name}</span>
+                                    )}
+                                    {priority.completed_at && priority.completed && (
+                                        <span className="ml-2 text-xs text-slate-500 opacity-60">
+                                            {new Date(priority.completed_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                        </span>
+                                    )}
+                                </span>
+                                {priority.category && (
+                                    <span className="text-xs text-slate-400 capitalize">{priority.category}</span>
                                 )}
-                                {priority.completed_at && priority.completed && (
-                                    <span className="ml-2 text-xs text-slate-500 opacity-60">
-                                        {new Date(priority.completed_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
-                                    </span>
+                                {priority.time_of_day && (
+                                    <span className="text-xs text-slate-400 capitalize">{priority.time_of_day}</span>
                                 )}
-                        </span>
-                        {priority.category && (
-                            <span className="text-xs text-slate-400 capitalize">{priority.category}</span>
-                        )}
-                        {priority.time_of_day && (
-                            <span className="text-xs text-slate-400 capitalize">{priority.time_of_day}</span>
+                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button
+                                        onClick={() => startEdit(priority)}
+                                        className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition-colors"
+                                        title="Edit priority"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            if (confirm('Are you sure you want to delete this priority?')) {
+                                                onDelete(priority.id);
+                                            }
+                                        }}
+                                        className="p-1 rounded text-slate-400 hover:text-red-400 hover:bg-slate-800 transition-colors"
+                                        title="Delete priority"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </>
                         )}
                     </div>
                     );
@@ -2951,6 +3571,8 @@ function TodosSection({
     todos,
     goals,
     onToggle,
+    onEdit,
+    onDelete,
     onAdd,
     newTodo,
     setNewTodo,
@@ -2962,7 +3584,35 @@ function TodosSection({
     setNewTodoGoalId,
 }: any) {
     const [isCollapsed, setIsCollapsed] = useState(false);
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editTitle, setEditTitle] = useState('');
+    const [editCategory, setEditCategory] = useState<Category | null>(null);
+    const [editTimeOfDay, setEditTimeOfDay] = useState<TimeOfDay | null>(null);
+    const [editGoalId, setEditGoalId] = useState<string | null>(null);
     const incompleteCount = todos.filter((t: Todo) => !t.is_done).length;
+    
+    const startEdit = (todo: Todo) => {
+        setEditingId(todo.id);
+        setEditTitle(todo.title);
+        setEditCategory(todo.category);
+        setEditTimeOfDay(todo.time_of_day);
+        setEditGoalId(todo.goal_id);
+    };
+    
+    const cancelEdit = () => {
+        setEditingId(null);
+        setEditTitle('');
+        setEditCategory(null);
+        setEditTimeOfDay(null);
+        setEditGoalId(null);
+    };
+    
+    const saveEdit = () => {
+        if (editingId && editTitle.trim()) {
+            onEdit(editingId, editTitle.trim(), editCategory, editTimeOfDay, editGoalId);
+            cancelEdit();
+        }
+    };
     
     return (
         <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
@@ -2988,32 +3638,120 @@ function TodosSection({
             <div className="space-y-2 mb-3">
                 {todos.map((todo: Todo) => {
                     const linkedGoal = goals.find((g: any) => g.id === todo.goal_id);
+                    const isEditing = editingId === todo.id;
+                    
                     return (
-                    <div key={todo.id} className="flex items-center gap-2">
+                    <div key={todo.id} className="flex items-center gap-2 group">
                         <button
                             onClick={() => onToggle(todo.id, todo.is_done)}
-                            className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                            className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 ${
                                 todo.is_done ? 'bg-amber-400 border-amber-400' : 'border-slate-600'
                             }`}
                         >
                             {todo.is_done && <span className="text-black text-xs">✓</span>}
                         </button>
-                        <span className={`flex-1 text-sm ${todo.is_done ? 'line-through text-slate-500' : 'text-slate-200'}`}>
-                            {todo.title}
-                                {linkedGoal && (
-                                    <span className="ml-2 text-xs text-slate-400">→ {linkedGoal.name}</span>
+                        {isEditing ? (
+                            <div className="flex-1 flex flex-col gap-2">
+                                <input
+                                    type="text"
+                                    value={editTitle}
+                                    onChange={e => setEditTitle(e.target.value)}
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter') saveEdit();
+                                        if (e.key === 'Escape') cancelEdit();
+                                    }}
+                                    className="flex-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-200"
+                                    autoFocus
+                                />
+                                <div className="flex gap-2">
+                                    <select
+                                        value={editCategory || ''}
+                                        onChange={e => setEditCategory(e.target.value as Category || null)}
+                                        className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                                    >
+                                        <option value="">No Category</option>
+                                        <option value="physical">Physical</option>
+                                        <option value="mental">Mental</option>
+                                        <option value="spiritual">Spiritual</option>
+                                    </select>
+                                    <select
+                                        value={editTimeOfDay || ''}
+                                        onChange={e => setEditTimeOfDay(e.target.value as TimeOfDay || null)}
+                                        className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                                    >
+                                        <option value="">Any Time</option>
+                                        <option value="morning">Morning</option>
+                                        <option value="afternoon">Afternoon</option>
+                                        <option value="evening">Evening</option>
+                                    </select>
+                                    <select
+                                        value={editGoalId || ''}
+                                        onChange={e => setEditGoalId(e.target.value || null)}
+                                        className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                                    >
+                                        <option value="">No Goal</option>
+                                        {goals.map((goal: any) => (
+                                            <option key={goal.id} value={goal.id}>{goal.name}</option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        onClick={saveEdit}
+                                        className="rounded-md bg-amber-400 px-2 py-1 text-xs font-semibold text-black hover:bg-amber-300"
+                                    >
+                                        Save
+                                    </button>
+                                    <button
+                                        onClick={cancelEdit}
+                                        className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <>
+                                <span className={`flex-1 text-sm ${todo.is_done ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                                    {todo.title}
+                                    {linkedGoal && (
+                                        <span className="ml-2 text-xs text-slate-400">→ {linkedGoal.name}</span>
+                                    )}
+                                    {todo.completed_at && todo.is_done && (
+                                        <span className="ml-2 text-xs text-slate-500 opacity-60">
+                                            {new Date(todo.completed_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                        </span>
+                                    )}
+                                </span>
+                                {todo.category && (
+                                    <span className="text-xs text-slate-400 capitalize">{todo.category}</span>
                                 )}
-                                {todo.completed_at && todo.is_done && (
-                                    <span className="ml-2 text-xs text-slate-500 opacity-60">
-                                        {new Date(todo.completed_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
-                                    </span>
+                                {todo.time_of_day && (
+                                    <span className="text-xs text-slate-400 capitalize">{todo.time_of_day}</span>
                                 )}
-                        </span>
-                        {todo.category && (
-                            <span className="text-xs text-slate-400 capitalize">{todo.category}</span>
-                        )}
-                        {todo.time_of_day && (
-                            <span className="text-xs text-slate-400 capitalize">{todo.time_of_day}</span>
+                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button
+                                        onClick={() => startEdit(todo)}
+                                        className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition-colors"
+                                        title="Edit todo"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            if (confirm('Are you sure you want to delete this todo?')) {
+                                                onDelete(todo.id);
+                                            }
+                                        }}
+                                        className="p-1 rounded text-slate-400 hover:text-red-400 hover:bg-slate-800 transition-colors"
+                                        title="Delete todo"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </>
                         )}
                     </div>
                     );

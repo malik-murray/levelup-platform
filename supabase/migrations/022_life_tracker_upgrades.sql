@@ -48,3 +48,8 @@ CREATE POLICY "Users can manage their own scoring settings"
     USING (auth.uid() = user_id);
 
 
+
+
+
+
+

@@ -36,3 +36,8 @@ CREATE POLICY "Users can view their own category_budgets"
 
 
 
+
+
+
+
+

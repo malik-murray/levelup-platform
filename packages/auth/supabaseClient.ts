@@ -1,4 +1,6 @@
-import { createClient } from '@supabase/supabase-js';
+'use client';
+
+import { createBrowserClient } from '@supabase/ssr';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -31,10 +33,13 @@ try {
     );
 }
 
-console.log('SUPABASE CLIENT INIT', {
+console.log('SUPABASE CLIENT INIT (SSR-compatible browser client)', {
     supabaseUrl,
     hasKey: !!supabaseAnonKey,
+    clientType: 'createBrowserClient (cookie-based SSR)',
 });
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Use createBrowserClient from @supabase/ssr for SSR cookie compatibility
+// This ensures auth sessions are stored in cookies that server routes can read
+export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
 

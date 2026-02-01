@@ -240,3 +240,8 @@ export interface SignalLog extends AnalysisResult {
 
 
 
+
+
+
+
+

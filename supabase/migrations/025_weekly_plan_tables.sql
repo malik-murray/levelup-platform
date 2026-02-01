@@ -50,3 +50,8 @@ CREATE INDEX IF NOT EXISTS idx_habit_weekly_items_user_id ON habit_weekly_items(
 CREATE INDEX IF NOT EXISTS idx_habit_weekly_item_days_item_id ON habit_weekly_item_days(weekly_item_id);
 CREATE INDEX IF NOT EXISTS idx_habit_weekly_item_days_date ON habit_weekly_item_days(date);
 
+
+
+
+
+

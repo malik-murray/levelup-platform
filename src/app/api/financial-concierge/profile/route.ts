@@ -11,8 +11,46 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
  * Get user's financial profile
  */
 export async function GET(request: NextRequest) {
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // COMPREHENSIVE REQUEST LOGGING (for comparison)
+    const requestUrl = request.url;
+    const method = request.method;
+    const host = request.headers.get('host');
+    const origin = request.headers.get('origin');
+    const referer = request.headers.get('referer');
+    const cookieHeader = request.headers.get('cookie');
+    const hasCookieHeader = !!cookieHeader;
+    const cookieHeaderLength = cookieHeader?.length || 0;
+    
+    console.log(`[${requestId}] ===== GET /api/financial-concierge/profile - Request received =====`);
+    console.log(`[${requestId}] Request URL: ${requestUrl}`);
+    console.log(`[${requestId}] Method: ${method}`);
+    console.log(`[${requestId}] Host: ${host}`);
+    console.log(`[${requestId}] Origin: ${origin}`);
+    console.log(`[${requestId}] Referer: ${referer}`);
+    console.log(`[${requestId}] Cookie header exists: ${hasCookieHeader}`);
+    console.log(`[${requestId}] Cookie header length: ${cookieHeaderLength}`);
+    
     try {
         const cookieStore = await cookies();
+        const allCookies = cookieStore.getAll();
+        const cookieNames = allCookies.map(c => c.name);
+        const authCookieNames = allCookies
+            .filter(c => 
+                c.name.includes('supabase') || 
+                c.name.includes('auth') || 
+                c.name.includes('sb-') ||
+                c.name.startsWith('sb-')
+            )
+            .map(c => c.name);
+        
+        console.log(`[${requestId}] Total cookies from cookieStore: ${allCookies.length}`);
+        console.log(`[${requestId}] All cookie names: ${cookieNames.join(', ')}`);
+        console.log(`[${requestId}] Auth cookie names: ${authCookieNames.join(', ')}`);
+        console.log(`[${requestId}] Supabase URL: ${supabaseUrl}`);
+        console.log(`[${requestId}] Supabase anon key present: ${!!supabaseAnonKey}`);
+        
         const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
             cookies: {
                 get(name: string) {
@@ -36,14 +74,32 @@ export async function GET(request: NextRequest) {
             },
         });
 
+        console.log(`[${requestId}] Calling supabase.auth.getUser()...`);
         const { data: { user }, error: authError } = await supabase.auth.getUser();
+        
+        console.log(`[${requestId}] getUser() result:`, {
+            hasUser: !!user,
+            userId: user?.id || null,
+            userEmail: user?.email || null,
+            hasAuthError: !!authError,
+            authErrorMessage: authError?.message || null,
+            authErrorStatus: authError?.status || null,
+        });
+        
         if (authError || !user) {
+            console.error(`[${requestId}] ===== AUTH FAILED - Returning 401 =====`);
+            console.error(`[${requestId}] Auth error:`, authError);
+            console.error(`[${requestId}] User:`, user);
             return NextResponse.json(
                 { error: 'Unauthorized' },
                 { status: 401 }
             );
         }
 
+        console.log(`[${requestId}] ===== AUTH SUCCESS =====`);
+        console.log(`[${requestId}] User authenticated: ${user.id}`);
+        console.log(`[${requestId}] User email: ${user.email}`);
+        
         const { data, error } = await supabase
             .from('user_profile')
             .select('*')
@@ -58,6 +114,7 @@ export async function GET(request: NextRequest) {
             throw error;
         }
 
+        console.log(`[${requestId}] Profile fetched successfully`);
         return NextResponse.json({ profile: data as UserProfile });
     } catch (error) {
         console.error('Error fetching profile:', error);
