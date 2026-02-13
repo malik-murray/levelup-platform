@@ -52,6 +52,7 @@ export default function NewsfeedPage() {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [filter, setFilter] = useState<Filter>('feed');
     const [hasPreferences, setHasPreferences] = useState<boolean | null>(null);
+    const [preferencesLoading, setPreferencesLoading] = useState(true);
     const [sources, setSources] = useState<Source[]>([]);
     const [topics, setTopics] = useState<Topic[]>([]);
     const [selectedSourceFilter, setSelectedSourceFilter] = useState<string | null>(null);
@@ -69,6 +70,7 @@ export default function NewsfeedPage() {
 
     const checkPreferences = async () => {
         try {
+            setPreferencesLoading(true);
             const response = await fetch('/api/newsfeed/preferences');
             const data = await response.json();
             const prefs = data.preferences;
@@ -80,6 +82,8 @@ export default function NewsfeedPage() {
         } catch (error) {
             console.error('Error checking preferences:', error);
             setHasPreferences(false);
+        } finally {
+            setPreferencesLoading(false);
         }
     };
 
@@ -402,6 +406,40 @@ export default function NewsfeedPage() {
         );
     }
 
+    // Show loading state while checking preferences
+    if (preferencesLoading || hasPreferences === null) {
+        return (
+            <main className="min-h-screen bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
+                <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-black transition-colors">
+                    <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+                        <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+                            <div className="relative h-8 w-8">
+                                <Image src={logo} alt="LevelUpSolutions logo" className="h-full w-full object-contain" fill />
+                            </div>
+                            <div>
+                                <h1 className="text-xl font-semibold text-amber-400">Newsfeed</h1>
+                                <p className="text-xs text-slate-400 mt-0.5">The Daily Edge</p>
+                            </div>
+                        </Link>
+                        <div className="flex items-center gap-2">
+                            <ThemeToggle />
+                            <Link
+                                href="/dashboard"
+                                className="rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 hover:text-amber-300 transition-colors"
+                            >
+                                ← Dashboard
+                            </Link>
+                        </div>
+                    </div>
+                </header>
+                <div className="mx-auto max-w-4xl px-6 py-12 text-center">
+                    <p className="text-slate-600 dark:text-slate-400">Loading...</p>
+                </div>
+            </main>
+        );
+    }
+
+    // Show setup screen if no preferences are set
     if (hasPreferences === false) {
         return (
             <main className="min-h-screen bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
@@ -583,9 +621,7 @@ export default function NewsfeedPage() {
                 ) : filteredArticles.length === 0 ? (
                     <div className="text-center py-12 text-slate-500">
                         <p className="mb-4">
-                            {hasPreferences === false 
-                                ? "No articles found. Please select your topics and sources in settings."
-                                : selectedSourceFilter || selectedTopicFilter
+                            {selectedSourceFilter || selectedTopicFilter
                                 ? "No articles match the selected filters."
                                 : `No articles found for ${formatDate(currentDate)}`
                             }
@@ -595,7 +631,7 @@ export default function NewsfeedPage() {
                                 href="/newsfeed/settings"
                                 className="inline-block mt-4 rounded-md bg-amber-400 px-6 py-3 text-sm font-semibold text-black hover:bg-amber-300 transition-colors"
                             >
-                                {hasPreferences === false ? 'Set Up Preferences' : 'Update Preferences'}
+                                Update Preferences
                             </Link>
                         )}
                     </div>
