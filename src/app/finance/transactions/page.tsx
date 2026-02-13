@@ -649,6 +649,13 @@ export default function TransactionsPage() {
                     }
                 }
 
+                // Get authenticated user
+                const { data: { user }, error: userError } = await supabase.auth.getUser();
+                if (userError || !user) {
+                    setNotification('Authentication error. Please log in again.');
+                    return;
+                }
+
                 // Create new regular transaction
                 const { error: insertError } = await supabase.from('transactions').insert({
                     date,
@@ -660,6 +667,7 @@ export default function TransactionsPage() {
                     note: null, // Clear note since we're using name
                     is_transfer: false,
                     transfer_group_id: null,
+                    user_id: user.id,
                 });
 
                 if (insertError) {
@@ -703,6 +711,14 @@ export default function TransactionsPage() {
                 setNotification('Please select or create a category.');
                 return;
             }
+
+            // Get authenticated user
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) {
+                setNotification('Authentication error. Please log in again.');
+                return;
+            }
+
             const { error } = await supabase.from('transactions').insert({
                 date,
                 account_id: accountId,
@@ -713,6 +729,7 @@ export default function TransactionsPage() {
                 note: null, // Clear note since we're using name
                 is_transfer: false,
                 transfer_group_id: null,
+                user_id: user.id,
             });
 
             if (error) {
@@ -752,6 +769,13 @@ export default function TransactionsPage() {
         
         setNotification(null);
         
+        // Get authenticated user
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        if (userError || !user) {
+            setNotification('Authentication error. Please log in again.');
+            return;
+        }
+        
         // Process each transaction, creating categories as needed
         const transactionsToInsert = [];
         for (const tx of validTransactions) {
@@ -790,6 +814,7 @@ export default function TransactionsPage() {
                 note: null,
                 is_transfer: false,
                 transfer_group_id: null,
+                user_id: user.id,
             });
         }
         
@@ -1074,6 +1099,13 @@ export default function TransactionsPage() {
         setNotification(null);
 
         try {
+            // Get authenticated user
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) {
+                setNotification('Authentication error. Please log in again.');
+                return;
+            }
+
             // Get account names for the person field
             const fromAccount = accounts.find(a => a.id === transferFromAccount);
             const toAccount = accounts.find(a => a.id === transferToAccount);
@@ -1114,6 +1146,7 @@ export default function TransactionsPage() {
                             category_id: null,
                             is_transfer: true,
                             transfer_group_id: transferGroupId,
+                            user_id: user.id,
                         },
                         {
                             date,
@@ -1124,6 +1157,7 @@ export default function TransactionsPage() {
                             category_id: null,
                             is_transfer: true,
                             transfer_group_id: transferGroupId,
+                            user_id: user.id,
                         },
                     ]);
 
@@ -1180,6 +1214,7 @@ export default function TransactionsPage() {
                             category_id: null,
                             is_transfer: true,
                             transfer_group_id: editingTx.transfer_group_id, // Keep same group ID
+                            user_id: user.id,
                         },
                         {
                             date,
@@ -1190,6 +1225,7 @@ export default function TransactionsPage() {
                             category_id: null,
                             is_transfer: true,
                             transfer_group_id: editingTx.transfer_group_id, // Keep same group ID
+                            user_id: user.id,
                         },
                     ]);
 
@@ -1223,6 +1259,7 @@ export default function TransactionsPage() {
                         category_id: null,
                         is_transfer: true,
                         transfer_group_id: transferGroupId,
+                        user_id: user.id,
                     },
                     {
                         date,
@@ -1233,6 +1270,7 @@ export default function TransactionsPage() {
                         category_id: null,
                         is_transfer: true,
                         transfer_group_id: transferGroupId,
+                        user_id: user.id,
                     },
                 ]);
 
