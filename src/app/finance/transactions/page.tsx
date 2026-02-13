@@ -185,6 +185,104 @@ export default function TransactionsPage() {
         return rel.name ?? null;
     };
 
+    // 🔧 Helper: format error for logging and user display
+    const formatError = (err: unknown): { message: string; debug: string } => {
+        // Handle Supabase errors (PostgrestError)
+        if (err && typeof err === 'object') {
+            const errorObj = err as Record<string, any>;
+            
+            // Check for Supabase error structure
+            if ('message' in errorObj || 'code' in errorObj || 'details' in errorObj) {
+                const message = errorObj.message || 'Database error';
+                const code = errorObj.code || '';
+                const details = errorObj.details || '';
+                const hint = errorObj.hint || '';
+                
+                // Build debug info with all available fields
+                const debugParts: string[] = [];
+                if (code) debugParts.push(`Code: ${code}`);
+                if (message) debugParts.push(`Message: ${message}`);
+                if (details) debugParts.push(`Details: ${details}`);
+                if (hint) debugParts.push(`Hint: ${hint}`);
+                
+                // Include all enumerable and non-enumerable properties
+                const allProps = Object.getOwnPropertyNames(errorObj);
+                const extraProps = allProps.filter(p => !['message', 'code', 'details', 'hint'].includes(p));
+                if (extraProps.length > 0) {
+                    const extraPropsObj = extraProps.reduce((acc, key) => {
+                        acc[key] = errorObj[key];
+                        return acc;
+                    }, {} as Record<string, any>);
+                    debugParts.push(`Other props: ${JSON.stringify(extraPropsObj)}`);
+                }
+                
+                // Generate user-friendly message based on error code
+                let userMessage = message;
+                if (code === '42501') {
+                    // Check if it's an RLS violation
+                    if (message.toLowerCase().includes('row-level security') || message.toLowerCase().includes('rls')) {
+                        userMessage = 'Permission denied: This action is not allowed by your account permissions. Please contact support if you believe this is an error.';
+                    } else {
+                        userMessage = 'Permission denied. You may not have access to perform this action.';
+                    }
+                } else if (code === '23502') {
+                    userMessage = 'Validation failed: required field is missing.';
+                } else if (code === '23505') {
+                    userMessage = 'This record already exists.';
+                } else if (code === '23503') {
+                    userMessage = 'Invalid reference: related record not found.';
+                } else if (code === '42P01') {
+                    userMessage = 'Database table not found.';
+                } else if (code && message) {
+                    userMessage = `${message}${code ? ` (${code})` : ''}`;
+                }
+                
+                return {
+                    message: userMessage,
+                    debug: debugParts.join(' | ') || JSON.stringify(errorObj, null, 2)
+                };
+            }
+            
+            // Handle standard Error objects
+            if (err instanceof Error) {
+                return {
+                    message: err.message || 'An error occurred',
+                    debug: `Error: ${err.name} | ${err.message}${err.stack ? `\nStack: ${err.stack}` : ''}`
+                };
+            }
+            
+            // Handle Response objects (fetch errors)
+            if ('status' in errorObj && 'statusText' in errorObj) {
+                const status = errorObj.status;
+                const statusText = errorObj.statusText;
+                return {
+                    message: `Network error: ${status} ${statusText}`,
+                    debug: `Response error: ${status} ${statusText} | ${JSON.stringify(errorObj, Object.getOwnPropertyNames(errorObj), 2)}`
+                };
+            }
+            
+            // Generic object - try to serialize with all properties
+            try {
+                const serialized = JSON.stringify(errorObj, Object.getOwnPropertyNames(errorObj), 2);
+                return {
+                    message: 'An unexpected error occurred',
+                    debug: `Object error: ${serialized}`
+                };
+            } catch {
+                return {
+                    message: 'An error occurred (could not serialize)',
+                    debug: `Non-serializable error: ${String(err)}`
+                };
+            }
+        }
+        
+        // Handle primitives
+        return {
+            message: String(err) || 'An unknown error occurred',
+            debug: `Primitive error: ${String(err)}`
+        };
+    };
+
     // Load accounts and categories
     useEffect(() => {
         const loadData = async () => {
@@ -543,8 +641,9 @@ export default function TransactionsPage() {
                             .in('id', transferGroup.map(t => t.id));
 
                         if (deleteError) {
-                            console.error('Error deleting old transfer:', deleteError);
-                            setNotification('Error converting transfer. Check console/logs.');
+                            const { message, debug } = formatError(deleteError);
+                            console.error('Error deleting old transfer:', debug);
+                            setNotification(`Error converting transfer: ${message}`);
                             return;
                         }
                     }
@@ -564,8 +663,9 @@ export default function TransactionsPage() {
                 });
 
                 if (insertError) {
-                    console.error('Error creating transaction:', insertError);
-                    setNotification('Error converting transfer. Check console/logs.');
+                    const { message, debug } = formatError(insertError);
+                    console.error('Error creating transaction:', debug);
+                    setNotification(`Error converting transfer: ${message}`);
                     return;
                 }
 
@@ -590,8 +690,9 @@ export default function TransactionsPage() {
                     .eq('id', editingId);
 
                 if (error) {
-                    console.error(error);
-                    setNotification('Error updating transaction. Check console/logs.');
+                    const { message, debug } = formatError(error);
+                    console.error('Error updating transaction:', debug);
+                    setNotification(`Error updating transaction: ${message}`);
                     return;
                 }
                 setNotification('Transaction updated.');
@@ -615,8 +716,9 @@ export default function TransactionsPage() {
             });
 
             if (error) {
-                console.error(error);
-                setNotification('Error saving transaction. Check console/logs.');
+                const { message, debug } = formatError(error);
+                console.error('Error saving transaction:', debug);
+                setNotification(`Error saving transaction: ${message}`);
                 return;
             }
             setNotification('Transaction saved.');
