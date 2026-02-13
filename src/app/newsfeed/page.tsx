@@ -16,6 +16,7 @@ type Topic = {
     id: string;
     name: string;
     display_name: string;
+    description?: string | null;
 };
 
 type ArticleSummary = {
