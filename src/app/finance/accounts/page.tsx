@@ -21,6 +21,8 @@ type TxRow = {
     person: string | null;
     note: string | null;
     name: string | null;
+    is_transfer?: boolean;
+    transfer_group_id?: string | null;
 };
 
 type Category = {
@@ -42,6 +44,7 @@ export default function AccountsPage() {
     const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
     
     // Transaction form state
+    const [editingTxId, setEditingTxId] = useState<string | null>(null);
     const [showAddTransaction, setShowAddTransaction] = useState(false);
     const [txDate, setTxDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
     const [txAccountId, setTxAccountId] = useState<string>('');
@@ -133,7 +136,7 @@ export default function AccountsPage() {
                 supabase.from('categories').select('id, name, kind, parent_id, type').eq('user_id', user.id).order('name'),
                 supabase
                     .from('transactions')
-                    .select('id, date, amount, account_id, category_id, person, note, name')
+                    .select('id, date, amount, account_id, category_id, person, note, name, is_transfer, transfer_group_id')
                     .eq('user_id', user.id)
                     .gte('date', startStr)
                     .lt('date', endStr),
@@ -484,6 +487,82 @@ export default function AccountsPage() {
         }
     };
     
+    const handleEditTransaction = (tx: TxRow) => {
+        setEditingTxId(tx.id);
+        setTxDate(tx.date.slice(0, 10));
+        setTxAccountId(tx.account_id ?? '');
+        setTxCategoryId(tx.category_id ?? '');
+        const cat = categories.find(c => c.id === tx.category_id);
+        setTxCategoryName(cat?.name ?? '');
+        setTxType(tx.amount >= 0 ? 'income' : 'expense');
+        setTxAmount(Math.abs(tx.amount).toString());
+        setTxPerson(tx.person ?? 'Malik');
+        setTxNote(tx.note ?? '');
+        setShowAddTransaction(true);
+        setNotification(null);
+    };
+
+    const handleCancelEditTransaction = () => {
+        setEditingTxId(null);
+        setShowAddTransaction(false);
+        setTxDate(new Date().toISOString().slice(0, 10));
+        setTxAccountId(selectedAccountId ?? '');
+        setTxCategoryId('');
+        setTxCategoryName('');
+        setTxType('expense');
+        setTxAmount('');
+        setTxPerson('Malik');
+        setTxNote('');
+    };
+
+    const handleDeleteTransaction = async (id: string) => {
+        const tx = transactions.find(t => t.id === id);
+        if (!tx) {
+            setNotification('Transaction not found.');
+            return;
+        }
+
+        const ok = window.confirm(
+            tx.is_transfer
+                ? 'Delete this transfer? This will delete both transactions in the transfer.'
+                : 'Delete this transaction?'
+        );
+        if (!ok) return;
+
+        setNotification(null);
+
+        if (tx.is_transfer && tx.transfer_group_id) {
+            const transferGroup = transactions.filter(
+                t => t.transfer_group_id === tx.transfer_group_id && t.is_transfer
+            );
+            if (transferGroup.length > 0) {
+                const { error } = await supabase
+                    .from('transactions')
+                    .delete()
+                    .in('id', transferGroup.map(t => t.id));
+
+                if (error) {
+                    console.error(error);
+                    setNotification('Error deleting transfer. Check console/logs.');
+                    return;
+                }
+                setTransactions(prev => prev.filter(t => !transferGroup.some(tg => tg.id === t.id)));
+                setNotification('Transfer deleted.');
+                return;
+            }
+        }
+
+        const { error } = await supabase.from('transactions').delete().eq('id', id);
+        if (error) {
+            console.error(error);
+            setNotification('Error deleting transaction. Check console/logs.');
+            return;
+        }
+
+        setTransactions(prev => prev.filter(t => t.id !== id));
+        setNotification('Transaction deleted.');
+    };
+
     const handleAddTransaction = async (e: FormEvent, addAnother: boolean = false) => {
         e.preventDefault();
         
@@ -515,13 +594,62 @@ export default function AccountsPage() {
         
         setNotification(null);
         
-        // Get authenticated user
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
             setNotification('You must be logged in to save transactions.');
             return;
         }
+
+        if (editingTxId) {
+            // UPDATE existing transaction
+            const { error } = await supabase
+                .from('transactions')
+                .update({
+                    date: txDate,
+                    account_id: txAccountId,
+                    category_id: finalCategoryId,
+                    amount: finalAmount,
+                    person: txPerson,
+                    note: txNote || null,
+                })
+                .eq('id', editingTxId);
+
+            if (error) {
+                console.error(error);
+                setNotification('Error updating transaction. Check console/logs.');
+                return;
+            }
+
+            setTransactions(prev =>
+                prev.map(t =>
+                    t.id === editingTxId
+                        ? {
+                              ...t,
+                              date: txDate,
+                              account_id: txAccountId,
+                              category_id: finalCategoryId,
+                              amount: finalAmount,
+                              person: txPerson,
+                              note: txNote || null,
+                          }
+                        : t
+                )
+            );
+            setNotification('Transaction updated.');
+            setEditingTxId(null);
+            setShowAddTransaction(false);
+            setTxDate(new Date().toISOString().slice(0, 10));
+            setTxAccountId(selectedAccountId ?? '');
+            setTxCategoryId('');
+            setTxCategoryName('');
+            setTxType('expense');
+            setTxAmount('');
+            setTxPerson('Malik');
+            setTxNote('');
+            return;
+        }
         
+        // INSERT new transaction
         const { error } = await supabase.from('transactions').insert({
             date: txDate,
             account_id: txAccountId,
@@ -538,7 +666,6 @@ export default function AccountsPage() {
             return;
         }
         
-        // Reload transactions
         const startOfMonth = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
         const endOfMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
         const startStr = startOfMonth.toISOString().slice(0, 10);
@@ -546,7 +673,8 @@ export default function AccountsPage() {
         
         const { data: txData } = await supabase
             .from('transactions')
-            .select('id, date, amount, account_id, category_id, person, note, name')
+            .select('id, date, amount, account_id, category_id, person, note, name, is_transfer, transfer_group_id')
+            .eq('user_id', user.id)
             .gte('date', startStr)
             .lt('date', endStr);
         
@@ -559,14 +687,10 @@ export default function AccountsPage() {
             setTxAmount('');
             setTxNote('');
             setTxType('expense');
-            // Keep account and date for quick entry
         } else {
             setShowAddTransaction(false);
             setTxDate(new Date().toISOString().slice(0, 10));
-            // Keep selected account if one is selected, otherwise clear
-            if (!selectedAccountId) {
-                setTxAccountId('');
-            }
+            if (!selectedAccountId) setTxAccountId('');
             setTxCategoryId('');
             setTxCategoryName('');
             setTxType('expense');
@@ -577,99 +701,20 @@ export default function AccountsPage() {
     };
 
     return (
-        <section className="space-y-4 px-6 py-4">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h2 className="text-lg font-semibold">Accounts</h2>
-                    <p className="text-xs text-slate-400">
-                        Track account balances, credit cards, and overall net worth.
-                    </p>
-                </div>
-
-                <div className="flex items-center gap-2 text-xs text-slate-300">
-                    <button
-                        type="button"
-                        onClick={goToPrevMonth}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 hover:bg-slate-800"
-                    >
-                        ◀
-                    </button>
-                    <span>{monthLabel}</span>
-                    <button
-                        type="button"
-                        onClick={goToNextMonth}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 hover:bg-slate-800"
-                    >
-                        ▶
-                    </button>
-                </div>
-            </div>
-
+        <section className="relative flex flex-col lg:flex-row gap-4 py-4 -mx-2 sm:mx-0">
             {notification && (
-                <div className="rounded-md border border-emerald-600 bg-emerald-950 px-4 py-2 text-xs text-emerald-200">
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 rounded-md border border-emerald-600 bg-emerald-950 px-4 py-2 text-xs text-emerald-200 shadow-lg">
                     {notification}
                 </div>
             )}
 
-            {/* Summary card */}
-            <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
-                <h3 className="mb-2 text-sm font-semibold">Overview</h3>
-                <p className="text-[11px] text-slate-400">
-                    Net change across all accounts this month:{' '}
-                    <span
-                        className={
-                            totalNetChange >= 0
-                                ? 'text-emerald-400 font-semibold'
-                                : 'text-red-400 font-semibold'
-                        }
-                    >
-                        {formatCurrency(totalNetChange)}
-                    </span>
-                </p>
-                <p className="mt-1 text-[11px] text-slate-400">
-                    Net worth (assets minus credit card balances):{' '}
-                    <span
-                        className={
-                            netWorth >= 0
-                                ? 'text-emerald-400 font-semibold'
-                                : 'text-red-400 font-semibold'
-                        }
-                    >
-                        {formatCurrency(netWorth)}
-                    </span>
-                </p>
-            </div>
-
-            {/* Account Selector */}
-            <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
-                <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-sm font-semibold">Select Account</h3>
-                </div>
-                <select
-                    value={selectedAccountId || ''}
-                    onChange={e => {
-                        const accountId = e.target.value || null;
-                        setSelectedAccountId(accountId);
-                        // Pre-populate transaction form with selected account
-                        if (accountId) {
-                            setTxAccountId(accountId);
-                        }
-                    }}
-                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                >
-                    <option value="">All Accounts</option>
-                    {accounts.map(acc => (
-                        <option key={acc.id} value={acc.id}>
-                            {acc.name} ({formatAccountType(acc.type)})
-                        </option>
-                    ))}
-                </select>
-            </div>
-
-            {/* Accounts list */}
-            <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs space-y-4">
-                <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold">Accounts</h3>
+            {/* Left sidebar - Accounts */}
+            <aside className="w-full lg:w-72 flex-shrink-0 space-y-4">
+                <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
+                    <h2 className="text-sm font-semibold mb-2">Accounts</h2>
+                    <p className="text-[11px] text-slate-400 mb-2">
+                        Net worth: <span className={netWorth >= 0 ? 'text-emerald-400 font-semibold' : 'text-red-400 font-semibold'}>{formatCurrency(netWorth)}</span>
+                    </p>
                 </div>
 
                 {loading ? (
@@ -679,137 +724,78 @@ export default function AccountsPage() {
                         No accounts found. Add one below to get started.
                     </p>
                 ) : (
-                    <div className="space-y-2">
+                    <div className="space-y-1 max-h-[40vh] overflow-y-auto">
                         {accounts.map(acc => {
-                            const { starting, netChange, signedBalance } =
-                                getAccountBalance(acc);
+                            const { signedBalance } = getAccountBalance(acc);
                             const isPositive = signedBalance >= 0;
                             const isEditing = editingAccountId === acc.id;
                             const isBusy = actionLoadingId === acc.id;
+                            const isSelected = selectedAccountId === acc.id;
 
                             return (
                                 <div
                                     key={acc.id}
-                                    className="rounded-md border border-slate-800 bg-slate-950 px-3 py-2"
+                                    className={`rounded-md border px-3 py-2 cursor-pointer transition-colors ${
+                                        isSelected
+                                            ? 'border-emerald-600 bg-emerald-950/50'
+                                            : 'border-slate-800 bg-slate-950 hover:bg-slate-800/50'
+                                    }`}
                                 >
                                     {isEditing ? (
                                         <form
                                             onSubmit={e => handleSaveEdit(e, acc.id)}
-                                            className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+                                            onClick={e => e.stopPropagation()}
+                                            className="flex flex-col gap-2"
                                         >
-                                            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-                                                <input
-                                                    value={editName}
-                                                    onChange={e => setEditName(e.target.value)}
-                                                    className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                                                    placeholder="Account name"
-                                                />
-                                                <select
-                                                    value={editType}
-                                                    onChange={e =>
-                                                        setEditType(
-                                                            (e.target.value || '') as AccountType | ''
-                                                        )
-                                                    }
-                                                    className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                                                >
-                                                    <option value="">Select type</option>
-                                                    {accountTypeOptions.map(t => (
-                                                        <option key={t} value={t}>
-                                                            {formatAccountType(t)}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                                <input
-                                                    value={editStartingBalance}
-                                                    onChange={e =>
-                                                        setEditStartingBalance(e.target.value)
-                                                    }
-                                                    className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                                                    placeholder="Starting balance"
-                                                />
-                                            </div>
-
-                                            <div className="flex items-center gap-2">
-                                                <button
-                                                    type="submit"
-                                                    disabled={isBusy}
-                                                    className="rounded-md border border-emerald-600 bg-emerald-900 px-2 py-1 text-[11px] font-medium text-emerald-100 hover:bg-emerald-800 disabled:opacity-50"
-                                                >
+                                            <input
+                                                value={editName}
+                                                onChange={e => setEditName(e.target.value)}
+                                                className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                                                placeholder="Account name"
+                                            />
+                                            <select
+                                                value={editType}
+                                                onChange={e => setEditType((e.target.value || '') as AccountType | '')}
+                                                className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                                            >
+                                                {accountTypeOptions.map(t => (
+                                                    <option key={t} value={t}>{formatAccountType(t)}</option>
+                                                ))}
+                                            </select>
+                                            <input
+                                                value={editStartingBalance}
+                                                onChange={e => setEditStartingBalance(e.target.value)}
+                                                className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                                                placeholder="Starting balance"
+                                            />
+                                            <div className="flex gap-2">
+                                                <button type="submit" disabled={isBusy} className="flex-1 rounded-md border border-emerald-600 bg-emerald-900 px-2 py-1 text-[11px]">
                                                     {isBusy ? 'Saving…' : 'Save'}
                                                 </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={cancelEditing}
-                                                    disabled={isBusy}
-                                                    className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-50"
-                                                >
+                                                <button type="button" onClick={cancelEditing} className="flex-1 rounded-md border border-slate-700 px-2 py-1 text-[11px]">
                                                     Cancel
                                                 </button>
                                             </div>
                                         </form>
                                     ) : (
-                                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                            <div>
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                    <div className="font-medium text-slate-100">
-                                                        {acc.name}
-                                                    </div>
-                                                    <span className="rounded-full bg-slate-800 px-2 py-[2px] text-[10px] uppercase tracking-wide text-slate-300">
-                                                        {formatAccountType(acc.type)}
-                                                    </span>
-                                                </div>
-                                                <div className="text-[11px] text-slate-400">
-                                                    Starting balance:{' '}
-                                                    <span className="font-semibold text-slate-200">
-                                                        {formatCurrency(starting)}
-                                                    </span>
-                                                </div>
-                                                <div className="text-[11px] text-slate-400">
-                                                    Net change this month:{' '}
-                                                    <span
-                                                        className={`font-semibold ${
-                                                            netChange >= 0
-                                                                ? 'text-emerald-400'
-                                                                : 'text-red-400'
-                                                        }`}
-                                                    >
-                                                        {formatCurrency(netChange)}
-                                                    </span>
-                                                </div>
-                                                <div className="text-[11px] text-slate-400">
-                                                    Current balance:{' '}
-                                                    <span
-                                                        className={`font-semibold ${
-                                                            isPositive
-                                                                ? 'text-emerald-400'
-                                                                : 'text-red-400'
-                                                        }`}
-                                                    >
-                                                        {formatCurrency(signedBalance)}
-                                                    </span>
+                                        <div
+                                            onClick={() => {
+                                                setSelectedAccountId(acc.id);
+                                                setTxAccountId(acc.id);
+                                            }}
+                                            className="flex items-center justify-between gap-2"
+                                        >
+                                            <div className="min-w-0 flex-1">
+                                                <div className="font-medium text-slate-100 truncate">{acc.name}</div>
+                                                <div className={`text-[10px] font-semibold ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
+                                                    {formatCurrency(signedBalance)}
                                                 </div>
                                             </div>
-
-                                            <div className="flex items-center gap-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setSelectedAccountId(acc.id);
-                                                        setTxAccountId(acc.id);
-                                                    }}
-                                                    className={`rounded-md border px-2 py-1 text-[11px] ${
-                                                        selectedAccountId === acc.id
-                                                            ? 'border-emerald-600 bg-emerald-900 text-emerald-100'
-                                                            : 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
-                                                    }`}
-                                                >
-                                                    {selectedAccountId === acc.id ? 'Selected' : 'View Transactions'}
-                                                </button>
+                                            <div className="flex gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
                                                 <button
                                                     type="button"
                                                     onClick={() => startEditing(acc)}
-                                                    className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800"
+                                                    className="rounded px-1.5 py-0.5 text-[10px] text-slate-400 hover:bg-slate-700 hover:text-slate-200"
                                                 >
                                                     Edit
                                                 </button>
@@ -817,9 +803,9 @@ export default function AccountsPage() {
                                                     type="button"
                                                     onClick={() => handleDeleteAccount(acc.id)}
                                                     disabled={isBusy}
-                                                    className="rounded-md border border-red-700 bg-red-950 px-2 py-1 text-[11px] text-red-200 hover:bg-red-900 disabled:opacity-50"
+                                                    className="rounded px-1.5 py-0.5 text-[10px] text-red-400 hover:bg-red-950 disabled:opacity-50"
                                                 >
-                                                    {isBusy ? 'Deleting…' : 'Delete'}
+                                                    Del
                                                 </button>
                                             </div>
                                         </div>
@@ -830,7 +816,7 @@ export default function AccountsPage() {
                     </div>
                 )}
 
-                {/* 🔹 Add new account */}
+                {/* Add new account */}
                 <div className="mt-4 border-t border-slate-800 pt-4">
                     <h4 className="mb-2 text-[11px] font-semibold text-slate-200">
                         Add new account
@@ -874,98 +860,113 @@ export default function AccountsPage() {
                         </button>
                     </form>
                     <p className="mt-1 text-[10px] text-slate-500">
-                        For credit cards, starting balance can be your current card balance. New
-                        spending will push this more negative and reduce your net worth.
+                        For credit cards, starting balance can be your current card balance.
                     </p>
                 </div>
-                
-                {/* Transactions List for Selected Account */}
-                {selectedAccountId && (
-                    <div className="mt-4 border-t border-slate-800 pt-4">
-                        <div className="mb-2 flex items-center justify-between">
-                            <h4 className="text-[11px] font-semibold text-slate-200">
-                                Transactions for {selectedAccount?.name || 'Selected Account'}
-                            </h4>
-                            <button
-                                type="button"
-                                onClick={() => setSelectedAccountId(null)}
-                                className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700"
-                            >
-                                Clear Selection
-                            </button>
-                        </div>
-                        {filteredTransactions.length === 0 ? (
-                            <p className="text-[11px] text-slate-400">
-                                No transactions found for this account in {monthLabel}.
-                            </p>
-                        ) : (
-                            <div className="space-y-1 max-h-96 overflow-y-auto">
-                                {filteredTransactions
-                                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                                    .map(tx => {
-                                        const category = tx.category_id 
-                                            ? categories.find(c => c.id === tx.category_id)
-                                            : null;
-                                        const isPositive = tx.amount >= 0;
-                                        return (
-                                            <div
-                                                key={tx.id}
-                                                className="rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-[11px]"
-                                            >
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex-1">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className={`font-semibold ${
-                                                                isPositive ? 'text-emerald-400' : 'text-red-400'
-                                                            }`}>
+            </aside>
+
+            {/* Main content - Transactions for selected account */}
+            <main className="flex-1 min-w-0 space-y-4">
+                {!selectedAccountId ? (
+                    <div className="rounded-lg border border-slate-800 bg-slate-900 p-8 text-center">
+                        <p className="text-slate-400 text-sm">Select an account from the sidebar to view and manage transactions.</p>
+                    </div>
+                ) : (
+                    <>
+                        <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+                            <div className="flex items-center justify-between mb-4">
+                                <h2 className="text-base font-semibold">
+                                    {selectedAccount?.name} — Transactions
+                                </h2>
+                                <div className="flex items-center gap-2 text-xs text-slate-300">
+                                    <button
+                                        type="button"
+                                        onClick={goToPrevMonth}
+                                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 hover:bg-slate-800"
+                                    >
+                                        ◀
+                                    </button>
+                                    <span>{monthLabel}</span>
+                                    <button
+                                        type="button"
+                                        onClick={goToNextMonth}
+                                        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 hover:bg-slate-800"
+                                    >
+                                        ▶
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Transactions list with Edit/Delete */}
+                            {filteredTransactions.length === 0 ? (
+                                <p className="text-[11px] text-slate-400 py-4">
+                                    No transactions for this account in {monthLabel}.
+                                </p>
+                            ) : (
+                                <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+                                    {[...filteredTransactions]
+                                        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                                        .map(tx => {
+                                            const category = tx.category_id ? categories.find(c => c.id === tx.category_id) : null;
+                                            const isPositive = tx.amount >= 0;
+                                            return (
+                                                <div
+                                                    key={tx.id}
+                                                    className="rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-[11px] flex items-center justify-between gap-3"
+                                                >
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <span className={`font-semibold ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
                                                                 {formatCurrency(tx.amount)}
                                                             </span>
-                                                            {category && (
-                                                                <span className="text-slate-400">
-                                                                    {category.name}
-                                                                </span>
-                                                            )}
+                                                            {category && <span className="text-slate-400">{category.name}</span>}
+                                                            {tx.is_transfer && <span className="text-blue-400 text-[10px]">↔ Transfer</span>}
                                                         </div>
                                                         <div className="text-[10px] text-slate-500 mt-0.5">
-                                                            {new Date(tx.date).toLocaleDateString('en-US', {
-                                                                month: 'short',
-                                                                day: 'numeric',
-                                                                year: 'numeric'
-                                                            })}
+                                                            {new Date(tx.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                                                             {tx.name && ` • ${tx.name}`}
                                                             {tx.person && ` • ${tx.person}`}
                                                         </div>
-                                                        {tx.note && (
-                                                            <div className="text-[10px] text-slate-500 mt-0.5">
-                                                                {tx.note}
-                                                            </div>
-                                                        )}
+                                                        {tx.note && <div className="text-[10px] text-slate-500 mt-0.5">{tx.note}</div>}
+                                                    </div>
+                                                    <div className="flex gap-2 flex-shrink-0">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleEditTransaction(tx)}
+                                                            className="rounded px-2 py-1 text-[10px] text-slate-400 hover:bg-slate-800 hover:text-amber-400"
+                                                        >
+                                                            Edit
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleDeleteTransaction(tx.id)}
+                                                            className="rounded px-2 py-1 text-[10px] text-slate-400 hover:bg-slate-800 hover:text-red-400"
+                                                        >
+                                                            Delete
+                                                        </button>
                                                     </div>
                                                 </div>
-                                            </div>
-                                        );
-                                    })}
-                            </div>
-                        )}
-                    </div>
-                )}
+                                            );
+                                        })}
+                                </div>
+                            )}
 
-                {/* Add Transaction Section */}
-                <div className="mt-4 border-t border-slate-800 pt-4">
-                    <div className="mb-2 flex items-center justify-between">
-                        <h4 className="text-[11px] font-semibold text-slate-200">
-                            Add Transaction{selectedAccount ? ` (${selectedAccount.name})` : ''}
-                        </h4>
-                        <button
-                            type="button"
-                            onClick={() => setShowAddTransaction(!showAddTransaction)}
-                            className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700"
-                        >
-                            {showAddTransaction ? 'Hide' : 'Show'}
-                        </button>
-                    </div>
+                            {/* Add Transaction */}
+                            <div className="mt-4 pt-4 border-t border-slate-800">
+                                <div className="mb-2 flex items-center justify-between">
+                                    <h4 className="text-[11px] font-semibold text-slate-200">
+                                        {editingTxId ? 'Edit Transaction' : 'Add Transaction'}
+                                    </h4>
+                                    <button
+                                        type="button"
+                                        onClick={() => editingTxId ? handleCancelEditTransaction() : setShowAddTransaction(!showAddTransaction)}
+                                        className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700"
+                                    >
+                                        {editingTxId ? 'Cancel' : showAddTransaction ? 'Hide' : 'Show'}
+                                    </button>
+                                </div>
                     
-                    {showAddTransaction && (
+                                {showAddTransaction && (
                         <form onSubmit={(e) => handleAddTransaction(e, false)} className="space-y-2 text-xs">
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <div>
@@ -1123,24 +1124,29 @@ export default function AccountsPage() {
                             </div>
                             
                             <div className="flex gap-2 pt-2">
-                                <button
-                                    type="button"
-                                    onClick={(e) => handleAddTransaction(e, true)}
-                                    className="flex-1 rounded-md border border-amber-400 bg-amber-950 py-1.5 text-[11px] font-semibold text-amber-200 hover:bg-amber-900"
-                                >
-                                    Save & Add Another
-                                </button>
+                                {!editingTxId && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => handleAddTransaction(e, true)}
+                                        className="flex-1 rounded-md border border-amber-400 bg-amber-950 py-1.5 text-[11px] font-semibold text-amber-200 hover:bg-amber-900"
+                                    >
+                                        Save & Add Another
+                                    </button>
+                                )}
                                 <button
                                     type="submit"
                                     className="flex-1 rounded-md bg-amber-400 py-1.5 text-[11px] font-semibold text-black hover:bg-amber-300"
                                 >
-                                    Save Transaction
+                                    {editingTxId ? 'Update Transaction' : 'Save Transaction'}
                                 </button>
                             </div>
                         </form>
-                    )}
-                </div>
-            </div>
+                                )}
+                            </div>
+                        </div>
+                    </>
+                )}
+            </main>
         </section>
     );
 }
