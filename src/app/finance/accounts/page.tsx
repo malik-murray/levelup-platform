@@ -953,18 +953,25 @@ export default function AccountsPage() {
 
                             {/* Add Transaction */}
                             <div className="mt-4 pt-4 border-t border-slate-800">
-                                <div className="mb-2 flex items-center justify-between">
-                                    <h4 className="text-[11px] font-semibold text-slate-200">
-                                        {editingTxId ? 'Edit Transaction' : 'Add Transaction'}
-                                    </h4>
-                                    <button
-                                        type="button"
-                                        onClick={() => editingTxId ? handleCancelEditTransaction() : setShowAddTransaction(!showAddTransaction)}
-                                        className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-200 hover:bg-slate-700"
-                                    >
-                                        {editingTxId ? 'Cancel' : showAddTransaction ? 'Hide' : 'Show'}
-                                    </button>
-                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (editingTxId) {
+                                            handleCancelEditTransaction();
+                                        } else {
+                                            setShowAddTransaction(prev => !prev);
+                                        }
+                                    }}
+                                    className="w-full flex items-center justify-center gap-2 rounded-md border border-amber-500 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-400 hover:bg-amber-500/20 transition-colors"
+                                >
+                                    {editingTxId ? (
+                                        <>Cancel Edit</>
+                                    ) : showAddTransaction ? (
+                                        <>− Hide form</>
+                                    ) : (
+                                        <>+ Add Transaction</>
+                                    )}
+                                </button>
                     
                                 {showAddTransaction && (
                         <form onSubmit={(e) => handleAddTransaction(e, false)} className="space-y-2 text-xs">
