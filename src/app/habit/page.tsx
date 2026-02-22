@@ -1703,7 +1703,7 @@ function DailyView({
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 overflow-x-hidden min-w-0">
             {/* Date Navigation */}
             <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-700">
                 <button
@@ -1774,7 +1774,7 @@ function DailyView({
                 </div>
                 
                 {/* Component Scores */}
-                <div className="grid grid-cols-3 gap-4 mt-4 mb-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-4 mt-4 mb-4">
                     <div className="rounded-md border border-blue-500/30 bg-blue-950/20 p-3 text-center relative group">
                         <div className="text-xs text-blue-300 mb-1">
                             Habit Score
@@ -1808,7 +1808,7 @@ function DailyView({
                 </div>
 
                 {/* Category Scores */}
-                <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-4 mb-4">
                     <div className="rounded-md border border-blue-500/30 bg-blue-950/20 p-3 text-center">
                         <div className="text-xs text-blue-300 mb-1">Physical Score</div>
                         <div className="text-xl font-bold text-blue-400">{physicalScore}%</div>
@@ -1824,7 +1824,7 @@ function DailyView({
                 </div>
 
                 {/* Time of Day Scores */}
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-4">
                     <div className="rounded-md border border-slate-500/30 bg-slate-950/20 p-3 text-center">
                         <div className="text-xs text-slate-300 mb-1">Morning Score</div>
                         <div className="text-xl font-bold text-slate-200">{morningScore}%</div>
@@ -3037,7 +3037,7 @@ function HabitsSection({
     const totalCount = habits.filter((h: any) => !h.is_bad_habit).length;
     
     return (
-        <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
+        <div className="rounded-lg border border-slate-800 bg-slate-950 p-4 min-w-0 overflow-hidden">
             <details open={!isCollapsed} className="group">
                 <summary 
                     className="flex items-center justify-between mb-3 cursor-pointer list-none"
@@ -3240,48 +3240,52 @@ function HabitsSection({
             {/* Add New Habit */}
             <div className="mt-4 space-y-2">
                 <h4 className="text-sm font-medium text-blue-300 mb-2">Add New Habit</h4>
-                <div className="flex gap-2 items-center">
-                    <input
-                        type="text"
-                        placeholder="Icon (emoji)"
-                        value={newHabitIcon}
-                        onChange={e => setNewHabitIcon(e.target.value)}
-                        className="w-16 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
-                        maxLength={2}
-                    />
-                    <input
-                        type="text"
-                        placeholder="Habit name..."
-                        value={newHabitName}
-                        onChange={e => setNewHabitName(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && onAdd()}
-                        className="flex-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
-                    />
-                    <select
-                        value={newHabitCategory}
-                        onChange={e => setNewHabitCategory(e.target.value as Category)}
-                        className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
-                    >
-                        <option value="physical">Physical</option>
-                        <option value="mental">Mental</option>
-                        <option value="spiritual">Spiritual</option>
-                    </select>
-                    <select
-                        value={newHabitTimeOfDay || ''}
-                        onChange={e => setNewHabitTimeOfDay(e.target.value || null)}
-                        className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
-                    >
-                        <option value="">Any Time</option>
-                        <option value="morning">Morning</option>
-                        <option value="afternoon">Afternoon</option>
-                        <option value="evening">Evening</option>
-                    </select>
-                    <button
-                        onClick={onAdd}
-                        className="rounded-md bg-amber-400 px-3 py-1 text-xs font-semibold text-black hover:bg-amber-300"
-                    >
-                        Add
-                    </button>
+                <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 items-stretch sm:items-center">
+                    <div className="flex gap-2 min-w-0 flex-1">
+                        <input
+                            type="text"
+                            placeholder="Icon (emoji)"
+                            value={newHabitIcon}
+                            onChange={e => setNewHabitIcon(e.target.value)}
+                            className="w-12 sm:w-16 shrink-0 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
+                            maxLength={2}
+                        />
+                        <input
+                            type="text"
+                            placeholder="Habit name..."
+                            value={newHabitName}
+                            onChange={e => setNewHabitName(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && onAdd()}
+                            className="flex-1 min-w-0 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
+                        />
+                    </div>
+                    <div className="flex flex-wrap gap-2 items-center">
+                        <select
+                            value={newHabitCategory}
+                            onChange={e => setNewHabitCategory(e.target.value as Category)}
+                            className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm shrink-0"
+                        >
+                            <option value="physical">Physical</option>
+                            <option value="mental">Mental</option>
+                            <option value="spiritual">Spiritual</option>
+                        </select>
+                        <select
+                            value={newHabitTimeOfDay || ''}
+                            onChange={e => setNewHabitTimeOfDay(e.target.value || null)}
+                            className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm shrink-0"
+                        >
+                            <option value="">Any Time</option>
+                            <option value="morning">Morning</option>
+                            <option value="afternoon">Afternoon</option>
+                            <option value="evening">Evening</option>
+                        </select>
+                        <button
+                            onClick={onAdd}
+                            className="rounded-md bg-amber-400 px-3 py-1 text-xs font-semibold text-black hover:bg-amber-300 shrink-0"
+                        >
+                            Add
+                        </button>
+                    </div>
                 </div>
             </div>
                 </div>
@@ -3339,7 +3343,7 @@ function PrioritiesSection({
     };
     
     return (
-        <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
+        <div className="rounded-lg border border-slate-800 bg-slate-950 p-4 min-w-0 overflow-hidden">
             <details open={!isCollapsed} className="group">
                 <summary 
                     className="flex items-center justify-between mb-3 cursor-pointer list-none"
@@ -3365,10 +3369,10 @@ function PrioritiesSection({
                     const isEditing = editingId === priority.id;
                     
                     return (
-                    <div key={priority.id} className="flex items-center gap-2 group">
+                    <div key={priority.id} className="flex items-center gap-2 group min-w-0">
                         <button
                             onClick={() => onToggle(priority.id, priority.completed)}
-                            className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 ${
+                            className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 shrink-0 ${
                                 priority.completed
                                     ? 'bg-amber-400 border-amber-400'
                                     : 'border-slate-600'
@@ -3436,7 +3440,7 @@ function PrioritiesSection({
                             </div>
                         ) : (
                             <>
-                                <span className={`flex-1 text-sm ${priority.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                                <span className={`flex-1 min-w-0 text-sm break-words ${priority.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
                                     {priority.text}
                                     {linkedGoal && (
                                         <span className="ml-2 text-xs text-slate-400">→ {linkedGoal.name}</span>
@@ -3485,7 +3489,7 @@ function PrioritiesSection({
                     </div>
                     <div className="mt-4">
                         <h4 className="text-sm font-medium text-purple-300 mb-2">Add Priority</h4>
-                        <div className="flex gap-2 items-center">
+                        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 items-stretch sm:items-center">
                 <input
                     type="text"
                     placeholder="Add priority..."
@@ -3493,17 +3497,18 @@ function PrioritiesSection({
                     onChange={e => setNewPriority(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && !isLimitReached && onAdd()}
                         disabled={isLimitReached}
-                        className={`flex-1 rounded border border-slate-700 px-2 py-1 text-sm ${
+                        className={`flex-1 min-w-0 rounded border border-slate-700 px-2 py-1 text-sm ${
                             isLimitReached 
                                 ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
                                 : 'bg-slate-900'
                         }`}
                 />
+                <div className="flex flex-wrap gap-2 items-center">
                 <select
                     value={newPriorityCategory || ''}
                     onChange={e => setNewPriorityCategory(e.target.value || null)}
                         disabled={isLimitReached}
-                        className={`rounded border border-slate-700 px-2 py-1 text-sm ${
+                        className={`rounded border border-slate-700 px-2 py-1 text-sm shrink-0 ${
                             isLimitReached 
                                 ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
                                 : 'bg-slate-900'
@@ -3518,7 +3523,7 @@ function PrioritiesSection({
                     value={newPriorityTimeOfDay || ''}
                     onChange={e => setNewPriorityTimeOfDay(e.target.value || null)}
                         disabled={isLimitReached}
-                        className={`rounded border border-slate-700 px-2 py-1 text-sm ${
+                        className={`rounded border border-slate-700 px-2 py-1 text-sm shrink-0 ${
                             isLimitReached 
                                 ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
                                 : 'bg-slate-900'
@@ -3533,7 +3538,7 @@ function PrioritiesSection({
                         value={newPriorityGoalId || ''}
                         onChange={e => setNewPriorityGoalId(e.target.value || null)}
                         disabled={isLimitReached}
-                        className={`rounded border border-slate-700 px-2 py-1 text-sm ${
+                        className={`rounded border border-slate-700 px-2 py-1 text-sm shrink-0 ${
                             isLimitReached 
                                 ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
                                 : 'bg-slate-900'
@@ -3548,7 +3553,7 @@ function PrioritiesSection({
                 <button
                     onClick={onAdd}
                         disabled={isLimitReached}
-                        className={`rounded-md px-3 py-1 text-xs font-semibold ${
+                        className={`rounded-md px-3 py-1 text-xs font-semibold shrink-0 ${
                             isLimitReached
                                 ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
                                 : 'bg-amber-400 text-black hover:bg-amber-300'
@@ -3556,6 +3561,7 @@ function PrioritiesSection({
                 >
                     Add
                 </button>
+                </div>
                         </div>
                         {isLimitReached && (
                             <p className="text-xs text-slate-400 mt-2">Maximum of 5 priorities per day allowed</p>
@@ -3615,7 +3621,7 @@ function TodosSection({
     };
     
     return (
-        <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
+        <div className="rounded-lg border border-slate-800 bg-slate-950 p-4 min-w-0 overflow-hidden">
             <details open={!isCollapsed} className="group">
                 <summary 
                     className="flex items-center justify-between mb-3 cursor-pointer list-none"
@@ -3641,10 +3647,10 @@ function TodosSection({
                     const isEditing = editingId === todo.id;
                     
                     return (
-                    <div key={todo.id} className="flex items-center gap-2 group">
+                    <div key={todo.id} className="flex items-center gap-2 group min-w-0">
                         <button
                             onClick={() => onToggle(todo.id, todo.is_done)}
-                            className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 ${
+                            className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 shrink-0 ${
                                 todo.is_done ? 'bg-amber-400 border-amber-400' : 'border-slate-600'
                             }`}
                         >
@@ -3710,7 +3716,7 @@ function TodosSection({
                             </div>
                         ) : (
                             <>
-                                <span className={`flex-1 text-sm ${todo.is_done ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                                <span className={`flex-1 min-w-0 text-sm break-words ${todo.is_done ? 'line-through text-slate-500' : 'text-slate-200'}`}>
                                     {todo.title}
                                     {linkedGoal && (
                                         <span className="ml-2 text-xs text-slate-400">→ {linkedGoal.name}</span>
@@ -3759,19 +3765,20 @@ function TodosSection({
                     </div>
                     <div className="mt-4">
                         <h4 className="text-sm font-medium text-green-300 mb-2">Add Todo</h4>
-                        <div className="flex gap-2 items-center">
+                        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 items-stretch sm:items-center">
                 <input
                     type="text"
                     placeholder="Add task..."
                     value={newTodo}
                     onChange={e => setNewTodo(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && onAdd()}
-                    className="flex-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
+                    className="flex-1 min-w-0 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
                 />
+                <div className="flex flex-wrap gap-2 items-center">
                 <select
                     value={newTodoCategory || ''}
                     onChange={e => setNewTodoCategory(e.target.value || null)}
-                    className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
+                    className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm shrink-0"
                 >
                     <option value="">No Category</option>
                     <option value="physical">Physical</option>
@@ -3781,7 +3788,7 @@ function TodosSection({
                 <select
                     value={newTodoTimeOfDay || ''}
                     onChange={e => setNewTodoTimeOfDay(e.target.value || null)}
-                    className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
+                    className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm shrink-0"
                 >
                     <option value="">Any Time</option>
                     <option value="morning">Morning</option>
@@ -3791,7 +3798,7 @@ function TodosSection({
                 <select
                     value={newTodoGoalId || ''}
                     onChange={e => setNewTodoGoalId(e.target.value || null)}
-                    className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
+                    className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm shrink-0"
                     title="Link to goal"
                 >
                     <option value="">No Goal</option>
@@ -3801,10 +3808,11 @@ function TodosSection({
                 </select>
                 <button
                     onClick={onAdd}
-                    className="rounded-md bg-amber-400 px-3 py-1 text-xs font-semibold text-black hover:bg-amber-300"
+                    className="rounded-md bg-amber-400 px-3 py-1 text-xs font-semibold text-black hover:bg-amber-300 shrink-0"
                 >
                     Add
                 </button>
+                </div>
                         </div>
                     </div>
                 </div>
