@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { Suspense, useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useSearchParams } from 'next/navigation';
@@ -127,7 +127,7 @@ type CalendarDay = {
     habitsCount?: number;
 };
 
-export default function HabitPage() {
+function HabitPageClient() {
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const preview = usePreview();
@@ -728,6 +728,20 @@ export default function HabitPage() {
                 )}
             </div>
         </main>
+    );
+}
+
+export default function HabitPage() {
+    return (
+        <Suspense
+            fallback={
+                <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
+                    <div className="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                </main>
+            }
+        >
+            <HabitPageClient />
+        </Suspense>
     );
 }
 
