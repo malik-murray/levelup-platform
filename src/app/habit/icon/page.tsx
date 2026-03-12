@@ -1,7 +1,16 @@
-'use client';
-
-import { IconPickerScreen } from '../components/grit/IconPickerScreen';
+import { Suspense } from 'react';
+import HabitIconClient from './HabitIconClient';
 
 export default function HabitIconPage() {
-  return <IconPickerScreen />;
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[var(--lu-bg)] flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-[var(--lu-accent)] border-t-transparent rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <HabitIconClient />
+    </Suspense>
+  );
 }

@@ -1,7 +1,16 @@
-'use client';
-
-import { TypeSelectorScreen } from '../components/grit/TypeSelectorScreen';
+import { Suspense } from 'react';
+import HabitTypeClient from './HabitTypeClient';
 
 export default function HabitTypePage() {
-  return <TypeSelectorScreen />;
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[var(--lu-bg)] flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-[var(--lu-accent)] border-t-transparent rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <HabitTypeClient />
+    </Suspense>
+  );
 }

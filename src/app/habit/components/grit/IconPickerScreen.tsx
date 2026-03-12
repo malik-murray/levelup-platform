@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { getStoredDraft, setStoredDraft } from '../../lib/habitFormStore';
 
 type Tab = 'icons' | 'emojis' | 'text' | 'image';
@@ -18,11 +18,8 @@ const ICON_LABELS = [
   'Chart', 'Clean', 'Growth', 'Calendar', 'Save', 'No smoke', 'No junk', 'No scroll',
 ];
 
-export function IconPickerScreen() {
+export function IconPickerScreen({ returnTo }: { returnTo: string }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const returnTo = searchParams.get('return') || '/habit/new';
-
   const [draft, setDraft] = useState<import('../../lib/gritTypes').GritHabitFormDraft | null>(null);
   const [tab, setTab] = useState<Tab>('emojis');
   const [search, setSearch] = useState('');

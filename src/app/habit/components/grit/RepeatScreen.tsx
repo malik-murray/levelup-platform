@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { getStoredDraft, setStoredDraft } from '../../lib/habitFormStore';
 import type { TimeOfDay } from '../../lib/gritTypes';
 
@@ -12,11 +12,8 @@ const OPTIONS: { value: TimeOfDay | null; label: string }[] = [
   { value: 'evening', label: 'Evening' },
 ];
 
-export function RepeatScreen() {
+export function RepeatScreen({ returnTo }: { returnTo: string }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const returnTo = searchParams.get('return') || '/habit/new';
-
   const [draft, setDraft] = useState<import('../../lib/gritTypes').GritHabitFormDraft | null>(null);
 
   useEffect(() => {

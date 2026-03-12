@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { getStoredDraft, setStoredDraft } from '../../lib/habitFormStore';
 import type { GritHabitType } from '../../lib/gritTypes';
 
@@ -12,11 +12,8 @@ const TYPES: { value: GritHabitType; label: string; description: string }[] = [
   { value: 'todo', label: 'To-Do', description: 'A one-off or recurring task for the day.' },
 ];
 
-export function TypeSelectorScreen() {
+export function TypeSelectorScreen({ returnTo }: { returnTo: string }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const returnTo = searchParams.get('return') || '/habit/new';
-
   const [draft, setDraft] = useState<import('../../lib/gritTypes').GritHabitFormDraft | null>(null);
 
   useEffect(() => {
