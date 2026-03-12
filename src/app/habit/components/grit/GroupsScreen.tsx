@@ -1,11 +1,9 @@
 'use client';
 
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 
-export function GroupsScreen() {
+export function GroupsScreen({ returnTo }: { returnTo: string }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const returnTo = searchParams.get('return') || '/habit/new';
 
   return (
     <div className="min-h-screen bg-[var(--lu-bg)] text-[var(--lu-text)] flex flex-col">
