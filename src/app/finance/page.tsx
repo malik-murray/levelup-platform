@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState, FormEvent } from 'react';
+import { usePathname } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
+import { usePreview } from '@/lib/previewStore';
 
 console.log('FINANCE PAGE LOADED, URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
 
@@ -63,6 +65,10 @@ type TxRow = {
 };
 
 export default function FinancePage() {
+    const pathname = usePathname();
+    const preview = usePreview();
+    const isPreview = preview.isPreview || pathname?.startsWith('/preview') === true;
+
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [categories, setCategories] = useState<Category[]>([]);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -277,7 +283,28 @@ export default function FinancePage() {
     useEffect(() => {
         const load = async () => {
             setLoading(true);
-            console.log('RUNNING SUPABASE QUERIES...');
+
+            if (isPreview) {
+                const f = preview.finance;
+                setAccounts(f.accounts);
+                setCategories(f.categories);
+                setBudgets(f.budgets.filter(b => b.month === monthStr));
+                const monthTx = f.transactions.filter(tx => tx.date.startsWith(monthStr));
+                const txWithNames: Transaction[] = monthTx.map(tx => ({
+                    id: tx.id,
+                    date: tx.date,
+                    amount: tx.amount,
+                    person: tx.person,
+                    note: tx.note,
+                    account: f.accounts.find(a => a.id === tx.account_id)?.name ?? null,
+                    category: f.categories.find(c => c.id === tx.category_id)?.name ?? null,
+                    accountId: tx.account_id,
+                    categoryId: tx.category_id,
+                }));
+                setTransactions(txWithNames);
+                setLoading(false);
+                return;
+            }
 
             // Get authenticated user
             const { data: { user } } = await supabase.auth.getUser();
@@ -346,7 +373,7 @@ export default function FinancePage() {
             console.error('LOAD() FAILED:', err);
             setLoading(false);
         });
-    }, [monthDate, monthStr]);
+    }, [monthDate, monthStr, isPreview, isPreview ? preview.finance : null]);
 
     const thisMonthTx = useMemo(
         () => transactions.filter(tx => tx.date.startsWith(monthStr)),
@@ -535,13 +562,6 @@ export default function FinancePage() {
     const handleAddOrUpdateTransaction = async (e: FormEvent, addAnother: boolean = false) => {
         e.preventDefault();
 
-        // Get authenticated user
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-            setNotification('You must be logged in to save transactions.');
-            return;
-        }
-
         const numAmount = Number(amount);
         if (!numAmount || !accountId) {
             setNotification('Please fill in all required fields.');
@@ -575,6 +595,42 @@ export default function FinancePage() {
         }
 
         setNotification(null);
+
+        if (isPreview) {
+            let resolvedCategoryId = finalCategoryId;
+            if (categoryName && !resolvedCategoryId) {
+                const existing = preview.finance.categories.find(c => c.name.toLowerCase() === categoryName.trim().toLowerCase() && c.type === transactionType);
+                if (existing) resolvedCategoryId = existing.id;
+                else {
+                    const newId = preview.generateId();
+                    preview.setFinance(f => ({ ...f, categories: [...f.categories, { id: newId, name: categoryName.trim(), kind: 'category' as const, parent_id: null, type: transactionType }] }));
+                    resolvedCategoryId = newId;
+                }
+            }
+            const f = preview.finance;
+            if (editingId) {
+                preview.setFinance(prev => ({
+                    ...prev,
+                    transactions: prev.transactions.map(t => t.id === editingId ? { ...t, date, account_id: accountId, category_id: resolvedCategoryId, amount: finalAmount, person, note: note || null } : t),
+                }));
+            } else {
+                preview.setFinance(prev => ({
+                    ...prev,
+                    transactions: [...prev.transactions, { id: preview.generateId(), date, account_id: accountId, category_id: resolvedCategoryId, amount: finalAmount, person, note: note || null }],
+                }));
+            }
+            setEditingId(null);
+            if (!addAnother) setShowAddTransaction(false);
+            setNotification(`Transaction ${editingId ? 'updated' : 'saved'} (preview).`);
+            return;
+        }
+
+        // Get authenticated user
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            setNotification('You must be logged in to save transactions.');
+            return;
+        }
 
         if (editingId) {
             // UPDATE existing transaction

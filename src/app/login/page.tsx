@@ -1,9 +1,13 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
 
 export default function LoginPage() {
+    const searchParams = useSearchParams();
+    const redirectTo = searchParams.get('redirect') || '/dashboard';
+
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [mode, setMode] = useState<'login' | 'signup'>('login');
@@ -20,7 +24,7 @@ export default function LoginPage() {
         } else {
             const { error } = await supabase.auth.signInWithPassword({ email, password });
             if (error) setMessage(error.message);
-            else window.location.href = '/dashboard';
+            else window.location.href = redirectTo;
         }
     };
 
@@ -75,6 +79,10 @@ export default function LoginPage() {
                         ? "Don't have an account? Sign up"
                         : 'Already have an account? Log in'}
                 </button>
+
+                <p className="mt-6 text-center text-sm text-slate-400">
+                    <a href="/preview" className="underline hover:text-amber-400">Try the app</a> without an account
+                </p>
             </div>
         </main>
     );

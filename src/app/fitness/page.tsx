@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
+import { usePreview } from '@/lib/previewStore';
 
 type Workout = {
     id: string;
@@ -43,6 +45,10 @@ type Goal = {
 };
 
 export default function FitnessPage() {
+    const pathname = usePathname();
+    const preview = usePreview();
+    const isPreview = preview.isPreview || pathname?.startsWith('/preview') === true;
+
     const [workouts, setWorkouts] = useState<Workout[]>([]);
     const [meals, setMeals] = useState<Meal[]>([]);
     const [metrics, setMetrics] = useState<Metric | null>(null);
@@ -69,6 +75,17 @@ export default function FitnessPage() {
         setNotification(null);
 
         try {
+            if (isPreview) {
+                const f = preview.fitness;
+                const today = new Date().toISOString().split('T')[0];
+                setWorkouts((f.workouts || []).filter(w => w.date === today));
+                setMeals((f.meals || []).filter(m => m.date === today));
+                setMetrics(f.metrics?.[today] ?? null);
+                setGoals(f.goals);
+                setLoading(false);
+                return;
+            }
+
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
                 window.location.href = '/login';

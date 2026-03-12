@@ -1,22 +1,24 @@
 'use client';
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { supabase } from "@auth/supabaseClient";
 import logo from "../logo.png";
-import { ThemeToggle } from "@/components/ThemeToggle";
-import { formatDate, isSameDay } from "@/lib/habitHelpers";
+import { formatDate } from "@/lib/habitHelpers";
 import HabitDailyEntrySection from "./components/HabitDailyEntrySection";
 import NewsfeedSection from "./components/NewsfeedSection";
 import FitnessWidget from "./components/FitnessWidget";
 import MarketsWidget from "./components/MarketsWidget";
 import FinanceWidget from "./components/FinanceWidget";
 import AppSidebar from "./components/AppSidebar";
+import DashboardScoreBars, { type DashboardScores } from "./components/DashboardScoreBars";
+import DashboardCalendarOverview from "./components/DashboardCalendarOverview";
 
 type Timeframe = 'daily' | 'weekly' | 'custom';
 
 export default function DashboardPage() {
+    const router = useRouter();
     const [email, setEmail] = useState<string | null>(null);
     const [userId, setUserId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
@@ -25,6 +27,8 @@ export default function DashboardPage() {
     const [customStartDate, setCustomStartDate] = useState<Date | null>(null);
     const [customEndDate, setCustomEndDate] = useState<Date | null>(null);
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [headerScores, setHeaderScores] = useState<DashboardScores | null>(null);
+    const [showCalendarOverview, setShowCalendarOverview] = useState(false);
 
     useEffect(() => {
         const checkAuth = async () => {
@@ -59,10 +63,9 @@ export default function DashboardPage() {
         checkAuth();
     }, []);
 
-    const handleToday = () => {
-        setSelectedDate(new Date());
-        setTimeframe('daily');
-    };
+    useEffect(() => {
+        setHeaderScores(null);
+    }, [selectedDate, timeframe]);
 
     const handleYesterday = () => {
         const yesterday = new Date();
@@ -71,23 +74,20 @@ export default function DashboardPage() {
         setTimeframe('daily');
     };
 
-    const formatDisplayDate = (date: Date) => {
-        const today = new Date();
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-
-        if (isSameDay(date, today)) {
-            return 'Today';
-        } else if (isSameDay(date, yesterday)) {
-            return 'Yesterday';
-        } else {
-            return date.toLocaleDateString('en-US', { 
-                month: 'short', 
-                day: 'numeric',
-                year: date.getFullYear() !== today.getFullYear() ? 'numeric' : undefined 
-            });
-        }
+    const handleTomorrow = () => {
+        const tomorrow = new Date(selectedDate);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        setSelectedDate(tomorrow);
+        setTimeframe('daily');
     };
+
+    const handleSetupNextDay = () => {
+        const nextDay = new Date(selectedDate);
+        nextDay.setDate(nextDay.getDate() + 1);
+        const nextDayStr = formatDate(nextDay);
+        router.push(`/habit?tab=daily&date=${nextDayStr}`);
+    };
+
 
     if (loading) {
         return (
@@ -101,7 +101,7 @@ export default function DashboardPage() {
     }
 
     return (
-        <div className="min-h-screen bg-black text-white flex">
+        <div className="min-h-screen min-w-0 bg-black text-white flex overflow-x-hidden">
             {/* Sidebar */}
             <AppSidebar 
                 isOpen={sidebarOpen} 
@@ -109,12 +109,12 @@ export default function DashboardPage() {
             />
 
             {/* Main Content */}
-            <div className="flex-1 flex flex-col">
+            <div className="flex-1 flex flex-col min-w-0 overflow-x-hidden">
                 {/* Header */}
-                <header className="border-b border-slate-800 bg-slate-950">
-                    <div className="px-4 sm:px-6 lg:px-8 py-4">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-4">
+                <header className="relative border-b border-slate-800 bg-slate-950 min-w-0">
+                    <div className="px-4 sm:px-6 lg:px-8 py-4 min-w-0">
+                        <div className="flex items-center justify-between gap-2 sm:gap-4 flex-wrap">
+                            <div className="flex items-center gap-4 shrink-0">
                                 <button
                                     onClick={() => setSidebarOpen(!sidebarOpen)}
                                     className="lg:hidden p-2 rounded-md border border-slate-700 hover:bg-slate-800"
@@ -133,11 +133,11 @@ export default function DashboardPage() {
                                             priority
                                         />
                                     </div>
-                                    <h1 className="text-xl sm:text-2xl font-bold">Daily Entry</h1>
+                                    <h1 className="text-xl sm:text-2xl font-bold">Dashboard</h1>
                                 </div>
                             </div>
 
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-3 shrink-0">
                                 {email && (
                                     <div className="hidden sm:flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/50 px-3 py-1.5">
                                         <span className="text-xs text-slate-400">Logged in as</span>
@@ -146,7 +146,6 @@ export default function DashboardPage() {
                                         </span>
                                     </div>
                                 )}
-                                <ThemeToggle />
                                 <button
                                     onClick={async () => {
                                         await supabase.auth.signOut();
@@ -159,118 +158,62 @@ export default function DashboardPage() {
                             </div>
                         </div>
 
-                        {/* Date Controls */}
-                        <div className="mt-4 flex flex-wrap items-center gap-3">
-                            <div className="flex items-center gap-2">
-                                <input
-                                    type="date"
-                                    value={formatDate(selectedDate)}
-                                    onChange={(e) => {
-                                        if (e.target.value) {
-                                            setSelectedDate(new Date(e.target.value));
-                                            setTimeframe('daily');
-                                        }
-                                    }}
-                                    className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-                                />
-                                <button
-                                    onClick={handleToday}
-                                    className="rounded-md border border-amber-500/30 bg-amber-950/20 px-3 py-2 text-sm font-medium text-amber-400 hover:bg-amber-950/30 transition-colors"
-                                >
-                                    Today
-                                </button>
-                                <button
-                                    onClick={handleYesterday}
-                                    className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors"
-                                >
-                                    Yesterday
-                                </button>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={() => setTimeframe('daily')}
-                                    className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                                        timeframe === 'daily'
-                                            ? 'bg-amber-500 text-black'
-                                            : 'border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800'
-                                    }`}
-                                >
-                                    Daily
-                                </button>
-                                <button
-                                    onClick={() => setTimeframe('weekly')}
-                                    className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                                        timeframe === 'weekly'
-                                            ? 'bg-amber-500 text-black'
-                                            : 'border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800'
-                                    }`}
-                                >
-                                    Weekly
-                                </button>
-                                <button
-                                    onClick={() => setTimeframe('custom')}
-                                    className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                                        timeframe === 'custom'
-                                            ? 'bg-amber-500 text-black'
-                                            : 'border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800'
-                                    }`}
-                                >
-                                    Custom
-                                </button>
-                            </div>
-
-                            {timeframe === 'custom' && (
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        type="date"
-                                        value={customStartDate ? formatDate(customStartDate) : ''}
-                                        onChange={(e) => {
-                                            if (e.target.value) {
-                                                setCustomStartDate(new Date(e.target.value));
-                                            }
-                                        }}
-                                        className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-                                        placeholder="Start date"
-                                    />
-                                    <span className="text-slate-400">to</span>
-                                    <input
-                                        type="date"
-                                        value={customEndDate ? formatDate(customEndDate) : ''}
-                                        onChange={(e) => {
-                                            if (e.target.value) {
-                                                setCustomEndDate(new Date(e.target.value));
-                                            }
-                                        }}
-                                        className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-                                        placeholder="End date"
-                                    />
-                                </div>
-                            )}
-
-                            <div className="text-sm text-slate-400">
-                                {timeframe === 'daily' && formatDisplayDate(selectedDate)}
-                                {timeframe === 'weekly' && `Week of ${formatDisplayDate(selectedDate)}`}
-                                {timeframe === 'custom' && customStartDate && customEndDate && 
-                                    `${formatDisplayDate(customStartDate)} - ${formatDisplayDate(customEndDate)}`
-                                }
-                            </div>
+                        {/* Date Controls - Yesterday left, Overview center, Tomorrow right */}
+                        <div className="mt-4 flex justify-between items-center gap-2">
+                            <button
+                                onClick={handleYesterday}
+                                className="rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors whitespace-nowrap"
+                            >
+                                Yesterday
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setShowCalendarOverview(true)}
+                                className="rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors whitespace-nowrap"
+                            >
+                                Overview
+                            </button>
+                            <button
+                                onClick={handleTomorrow}
+                                className="rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors whitespace-nowrap"
+                            >
+                                Tomorrow
+                            </button>
                         </div>
+
+                        {/* Score bars - full width, daily only */}
+                        {timeframe === 'daily' && (
+                            <DashboardScoreBars scores={headerScores} />
+                        )}
                     </div>
                 </header>
 
+                {/* Calendar overview overlay */}
+                {showCalendarOverview && (
+                    <DashboardCalendarOverview
+                        userId={userId}
+                        selectedDate={selectedDate}
+                        onSelectDate={(date) => {
+                            setSelectedDate(date);
+                            setTimeframe('daily');
+                        }}
+                        onClose={() => setShowCalendarOverview(false)}
+                    />
+                )}
+
                 {/* Main Content Area */}
-                <main className="flex-1 overflow-auto">
-                    <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+                <main className="flex-1 overflow-auto min-w-0">
+                    <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full min-w-0">
                         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                             {/* Main Section - Habit Tracker (Center, Largest) */}
-                            <div className="lg:col-span-7 xl:col-span-8">
+                            <div className="lg:col-span-7 xl:col-span-8 min-w-0">
                                 <HabitDailyEntrySection 
                                     selectedDate={selectedDate}
                                     timeframe={timeframe}
                                     customStartDate={customStartDate}
                                     customEndDate={customEndDate}
                                     userId={userId}
+                                    onScoresChange={setHeaderScores}
                                 />
                             </div>
 
@@ -297,6 +240,16 @@ export default function DashboardPage() {
                                 selectedDate={selectedDate}
                                 userId={userId}
                             />
+                        </div>
+
+                        {/* Set up next day - bottom of page */}
+                        <div className="mt-8 flex justify-center pb-6">
+                            <button
+                                onClick={handleSetupNextDay}
+                                className="rounded-md border border-amber-500/30 bg-amber-950/20 px-4 py-2 text-sm font-medium text-amber-400 hover:bg-amber-950/30 transition-colors whitespace-nowrap"
+                            >
+                                Set up next day
+                            </button>
                         </div>
                     </div>
                 </main>

@@ -22,6 +22,7 @@ body {
     background-color: var(--lu-bg);
     color: var(--lu-text);
     transition: background-color 0.2s ease, color 0.2s ease;
+    overflow-x: hidden;
 }
 
 /* Optional: reusable gold button */
@@ -65,10 +66,11 @@ body {
     }
 }
 
-/* Smooth scrolling for mobile */
+/* Smooth scrolling for mobile; prevent horizontal scroll site-wide */
 html {
     -webkit-overflow-scrolling: touch;
     scroll-behavior: smooth;
+    overflow-x: hidden;
 }
 
 /* Prevent text size adjustment on orientation change */
@@ -85,4 +87,16 @@ body {
 
 .scrollbar-hide::-webkit-scrollbar {
     display: none;  /* Chrome, Safari and Opera */
+}
+
+/* Dashboard score bar finish line (race finish stripe) */
+.finish-line {
+    background: repeating-linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.12) 0px,
+        rgba(255, 255, 255, 0.12) 2px,
+        rgba(0, 0, 0, 0.25) 2px,
+        rgba(0, 0, 0, 0.25) 4px
+    );
+    border-left: 1px solid rgba(255, 255, 255, 0.2);
 }

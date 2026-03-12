@@ -26,5 +26,6 @@ export default async function Home() {
         redirect("/dashboard");
     }
 
-    redirect("/login");
+    // Public landing for guests (no login required)
+    redirect("/landing");
 }

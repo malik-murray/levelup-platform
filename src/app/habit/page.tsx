@@ -3,9 +3,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { usePathname, useSearchParams } from 'next/navigation';
 import logo from '../logo.png';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { supabase } from '@auth/supabaseClient';
+import { usePreview } from '@/lib/previewStore';
 import {
     formatDate,
     getDatesInMonth,
@@ -126,6 +128,11 @@ type CalendarDay = {
 };
 
 export default function HabitPage() {
+    const pathname = usePathname();
+    const searchParams = useSearchParams();
+    const preview = usePreview();
+    const isPreview = preview.isPreview || pathname?.startsWith('/preview') === true;
+
     // Use constant default to ensure server/client match on first render
     const [activeTab, setActiveTab] = useState<Tab>('home');
     const [mounted, setMounted] = useState(false);
@@ -134,17 +141,32 @@ export default function HabitPage() {
     const [loading, setLoading] = useState(true);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     
-    // Restore activeTab from localStorage after mount to preserve state across refreshes
-    // This runs only on client after hydration, preventing mismatch
+    // Restore activeTab from URL or localStorage after mount to preserve state across refreshes
+    // Read from both useSearchParams and window.location so tab=calendar works when navigating from dashboard
     useEffect(() => {
         setMounted(true);
-        if (typeof window !== 'undefined') {
+        if (typeof window === 'undefined') return;
+
+        const tabFromUrl = searchParams?.get('tab') ?? new URLSearchParams(window.location.search).get('tab');
+        const dateParam = searchParams?.get('date') ?? new URLSearchParams(window.location.search).get('date');
+
+        if (tabFromUrl && ['home', 'calendar', 'daily', 'weekly-plan', 'statistics', 'goals', 'habits'].includes(tabFromUrl)) {
+            setActiveTab(tabFromUrl as Tab);
+        } else {
             const saved = localStorage.getItem('habitActiveTab');
             if (saved && ['home', 'calendar', 'daily', 'weekly-plan', 'statistics', 'goals', 'habits'].includes(saved)) {
                 setActiveTab(saved as Tab);
             }
         }
-    }, []);
+
+        if (dateParam) {
+            const parsed = new Date(dateParam);
+            if (!Number.isNaN(parsed.getTime())) {
+                setSelectedDate(parsed);
+                setCurrentMonth(parsed);
+            }
+        }
+    }, [searchParams]);
     
     // Save activeTab to localStorage whenever it changes
     useEffect(() => {
@@ -191,6 +213,28 @@ export default function HabitPage() {
     const loadData = async () => {
         setLoading(true);
         try {
+            if (isPreview) {
+                const dateStr = formatDate(selectedDate);
+                const { start, end } = getMonthRange(currentMonth);
+                const monthStartStr = formatDate(start);
+                const monthEndStr = formatDate(end);
+                const h = preview.habit;
+                setHabitTemplates(h.habitTemplates.filter((t) => t.is_active));
+                setHabitEntries(h.habitEntries.filter((e) => e.date >= monthStartStr && e.date <= monthEndStr));
+                setPriorities((h.priorities || []).filter((p) => (p as { date?: string }).date === dateStr));
+                setTodos((h.todos || []).filter((t) => (t as { date?: string }).date === dateStr));
+                setDailyContent(h.dailyContent?.[dateStr] ?? null);
+                const scoresMap = new Map<string, DailyScore>();
+                if (h.dailyScores) Object.entries(h.dailyScores).forEach(([d, s]) => scoresMap.set(d, s as DailyScore));
+                setDailyScores(scoresMap);
+                setGoals(h.goals || []);
+                setScoringSettings(h.scoringSettings);
+                setMonthPriorities(h.monthPriorities || []);
+                setMonthTodos(h.monthTodos || []);
+                setLoading(false);
+                return;
+            }
+
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
                 // Save current tab before redirecting to login
@@ -491,7 +535,7 @@ export default function HabitPage() {
             {/* Header */}
             <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-black transition-colors">
                 <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-                    <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+                    <Link href={isPreview ? '/preview/dashboard' : '/dashboard'} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
                         <div className="relative h-8 w-8">
                             <Image src={logo} alt="LevelUpSolutions logo" className="h-full w-full object-contain" fill />
                         </div>
@@ -503,7 +547,7 @@ export default function HabitPage() {
                     <div className="flex items-center gap-2">
                         <ThemeToggle />
                         <Link
-                            href="/dashboard"
+                            href={isPreview ? '/preview/dashboard' : '/dashboard'}
                             className="rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 hover:text-amber-300 transition-colors"
                         >
                             ← Dashboard
@@ -819,6 +863,11 @@ function DailyView({
     onScoringSettingsChange: () => void;
     onDateChange: (date: Date) => void;
 }) {
+    const pathname = usePathname();
+    const previewCtx = usePreview();
+    const isPreview = previewCtx.isPreview || pathname?.startsWith('/preview') === true;
+    const preview = previewCtx;
+
     const [newHabitName, setNewHabitName] = useState('');
     const [newHabitIcon, setNewHabitIcon] = useState('📝');
     const [newHabitCategory, setNewHabitCategory] = useState<Category>('mental');
@@ -1014,6 +1063,23 @@ function DailyView({
             ));
         }
             
+        if (isPreview) {
+            const id = existingEntry?.id ?? preview.generateId();
+            if (existingEntry) {
+                preview.setHabit(h => ({
+                    ...h,
+                    habitEntries: h.habitEntries.map(e => e.id === existingEntry.id ? { ...e, status: nextStatus, checked_at: checkedAt } : e),
+                }));
+            } else {
+                preview.setHabit(h => ({
+                    ...h,
+                    habitEntries: [...h.habitEntries, { id, habit_template_id: templateId, date: dateStr, status: nextStatus, checked_at: checkedAt }],
+                }));
+            }
+            if (!existingEntry) setLocalHabitEntries(prev => [...prev, { id, habit_template_id: templateId, date: dateStr, status: nextStatus, checked_at: checkedAt } as HabitEntry]);
+            return;
+        }
+
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
@@ -1128,6 +1194,23 @@ function DailyView({
         setNewHabitIcon('📝');
         setNewHabitCategory('mental');
         setNewHabitTimeOfDay(null);
+        
+        if (isPreview) {
+            const newHabit: HabitTemplate = {
+                id: preview.generateId(),
+                name: habitName,
+                icon: habitIcon,
+                category: habitCategory,
+                time_of_day: habitTimeOfDay,
+                goal_id: null,
+                is_bad_habit: false,
+                is_active: true,
+                sort_order: null,
+            };
+            setLocalHabitTemplates(prev => [...prev, newHabit]);
+            preview.setHabit(h => ({ ...h, habitTemplates: [...h.habitTemplates, newHabit] }));
+            return;
+        }
         
         try {
             const { data: { user } } = await supabase.auth.getUser();
@@ -1278,6 +1361,24 @@ function DailyView({
         setNewPriorityTimeOfDay(null);
         setNewPriorityGoalId(null);
         
+        if (isPreview) {
+            const newPriorityData: Priority = {
+                id: preview.generateId(),
+                text: priorityText,
+                category: priorityCategory,
+                time_of_day: priorityTimeOfDay,
+                completed: false,
+                goal_id: priorityGoalId,
+                completed_at: null,
+            };
+            setLocalPriorities(prev => [...prev, newPriorityData]);
+            preview.setHabit(h => ({
+                ...h,
+                priorities: [...(h.priorities || []), { ...newPriorityData, date: dateStr } as Priority & { date: string }],
+            }));
+            return;
+        }
+        
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
@@ -1331,6 +1432,14 @@ function DailyView({
         setLocalPriorities(prev => prev.map(p => 
             p.id === id ? { ...p, completed: newCompleted, completed_at: completedAt } : p
         ));
+        
+        if (isPreview) {
+            preview.setHabit(h => ({
+                ...h,
+                priorities: (h.priorities || []).map(p => p.id === id ? { ...p, completed: newCompleted, completed_at: completedAt } : p),
+            }));
+            return;
+        }
         
         try {
             const { data: { user } } = await supabase.auth.getUser();
@@ -1484,6 +1593,24 @@ function DailyView({
         setNewTodoTimeOfDay(null);
         setNewTodoGoalId(null);
         
+        if (isPreview) {
+            const newTodoData: Todo = {
+                id: preview.generateId(),
+                title: todoTitle,
+                category: todoCategory,
+                time_of_day: todoTimeOfDay,
+                is_done: false,
+                goal_id: todoGoalId,
+                completed_at: null,
+            };
+            setLocalTodos(prev => [...prev, newTodoData]);
+            preview.setHabit(h => ({
+                ...h,
+                todos: [...(h.todos || []), { ...newTodoData, date: dateStr } as Todo & { date: string }],
+            }));
+            return;
+        }
+        
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
@@ -1535,6 +1662,14 @@ function DailyView({
         setLocalTodos(prev => prev.map(t => 
             t.id === id ? { ...t, is_done: newIsDone, completed_at: completedAt } : t
         ));
+        
+        if (isPreview) {
+            preview.setHabit(h => ({
+                ...h,
+                todos: (h.todos || []).map(t => t.id === id ? { ...t, is_done: newIsDone, completed_at: completedAt } : t),
+            }));
+            return;
+        }
         
         try {
             const { data: { user } } = await supabase.auth.getUser();
@@ -2639,7 +2774,10 @@ function DoNextSection({
             }
         }
         
-        return ordered;
+        // When checked off, move completed items to the bottom (preserve relative order within each group)
+        const incomplete = ordered.filter(item => !item.completed);
+        const completed = ordered.filter(item => item.completed);
+        return [...incomplete, ...completed];
     }, [defaultItems, customOrder]);
     
     // Save custom order to database

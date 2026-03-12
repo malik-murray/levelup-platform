@@ -11,7 +11,8 @@ type App = {
 
 const apps: App[] = [
     { name: 'Dashboard (Daily Entry)', href: '/dashboard', icon: '📊' },
-    { name: 'Habit Tracker', href: '/habit', icon: '📈' },
+    { name: 'Habits (Today)', href: '/habit/today', icon: '📈' },
+    { name: 'Habit Tracker', href: '/habit', icon: '📋' },
     { name: 'Finance Tracker', href: '/finance', icon: '💰' },
     { name: 'Newsfeed', href: '/newsfeed', icon: '📰' },
     { name: 'Fitness Tracker', href: '/fitness', icon: '💪' },
