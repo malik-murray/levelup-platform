@@ -1,7 +1,5 @@
-'use client';
-
-import { ColorPickerScreen } from '../components/grit/ColorPickerScreen';
+import ColorPageClient from './ColorPageClient';
 
 export default function HabitColorPage() {
-  return <ColorPickerScreen />;
+  return <ColorPageClient />;
 }

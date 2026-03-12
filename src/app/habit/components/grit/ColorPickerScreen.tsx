@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { getStoredDraft, setStoredDraft } from '../../lib/habitFormStore';
 
 const PRESET_COLORS = [
@@ -9,10 +9,8 @@ const PRESET_COLORS = [
   '#ec4899', '#ef4444', '#f59e0b', '#84cc16', '#06b6d4', '#6366f1', '#a855f7', '#64748b',
 ];
 
-export function ColorPickerScreen() {
+export function ColorPickerScreen({ returnTo }: { returnTo: string }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const returnTo = searchParams.get('return') || '/habit/new';
 
   const [draft, setDraft] = useState<import('../../lib/gritTypes').GritHabitFormDraft | null>(null);
   const [customColor, setCustomColor] = useState('#f4b73f');
