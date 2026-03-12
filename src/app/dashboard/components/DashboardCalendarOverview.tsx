@@ -31,20 +31,25 @@ export default function DashboardCalendarOverview({
         const startStr = formatDate(start);
         const endStr = formatDate(end);
         setLoading(true);
-        supabase
-            .from('habit_daily_scores')
-            .select('date, grade, score_overall')
-            .eq('user_id', userId)
-            .gte('date', startStr)
-            .lte('date', endStr)
-            .then(({ data }) => {
+
+        (async () => {
+            try {
+                const { data } = await supabase
+                    .from('habit_daily_scores')
+                    .select('date, grade, score_overall')
+                    .eq('user_id', userId)
+                    .gte('date', startStr)
+                    .lte('date', endStr);
+
                 const map = new Map<string, DayScore>();
                 data?.forEach((row: { date: string; grade: string; score_overall: number }) => {
                     map.set(row.date, { date: row.date, grade: row.grade, score_overall: row.score_overall });
                 });
                 setScoresByDate(map);
-            })
-            .finally(() => setLoading(false));
+            } finally {
+                setLoading(false);
+            }
+        })();
     }, [userId, currentMonth]);
 
     const calendarDays = getDatesInMonth(currentMonth).map((date) => ({
