@@ -5,6 +5,7 @@ export type DashboardScores = {
     score_habits: number;
     score_priorities: number;
     score_todos: number;
+    grade?: string;
 };
 
 const BAR_CONFIG = [

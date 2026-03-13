@@ -29,6 +29,7 @@ export default function DashboardPage() {
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [headerScores, setHeaderScores] = useState<DashboardScores | null>(null);
     const [showCalendarOverview, setShowCalendarOverview] = useState(false);
+    const [dailyScoreOpen, setDailyScoreOpen] = useState(true);
 
     useEffect(() => {
         const checkAuth = async () => {
@@ -67,17 +68,22 @@ export default function DashboardPage() {
         setHeaderScores(null);
     }, [selectedDate, timeframe]);
 
-    const handleYesterday = () => {
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        setSelectedDate(yesterday);
+    const handlePrevDay = () => {
+        const prev = new Date(selectedDate);
+        prev.setDate(prev.getDate() - 1);
+        setSelectedDate(prev);
         setTimeframe('daily');
     };
 
-    const handleTomorrow = () => {
-        const tomorrow = new Date(selectedDate);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        setSelectedDate(tomorrow);
+    const handleToday = () => {
+        setSelectedDate(new Date());
+        setTimeframe('daily');
+    };
+
+    const handleNextDay = () => {
+        const next = new Date(selectedDate);
+        next.setDate(next.getDate() + 1);
+        setSelectedDate(next);
         setTimeframe('daily');
     };
 
@@ -113,8 +119,8 @@ export default function DashboardPage() {
                 {/* Header */}
                 <header className="relative border-b border-slate-800 bg-slate-950 min-w-0">
                     <div className="px-4 sm:px-6 lg:px-8 py-4 min-w-0">
-                        <div className="flex items-center justify-between gap-2 sm:gap-4 flex-wrap">
-                            <div className="flex items-center gap-4 shrink-0">
+                        <div className="flex items-center justify-between gap-2 sm:gap-4 flex-nowrap min-w-0">
+                            <div className="flex items-center gap-4 min-w-0 overflow-hidden">
                                 <button
                                     onClick={() => setSidebarOpen(!sidebarOpen)}
                                     className="lg:hidden p-2 rounded-md border border-slate-700 hover:bg-slate-800"
@@ -133,7 +139,17 @@ export default function DashboardPage() {
                                             priority
                                         />
                                     </div>
-                                    <h1 className="text-xl sm:text-2xl font-bold">Dashboard</h1>
+                                    <div className="flex flex-col min-w-0">
+                                        <h1 className="text-xl sm:text-2xl font-bold truncate">Dashboard</h1>
+                                        <span className="text-sm text-slate-400 truncate" title={selectedDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}>
+                                            {selectedDate.toLocaleDateString('en-US', {
+                                                weekday: 'long',
+                                                year: 'numeric',
+                                                month: 'long',
+                                                day: 'numeric',
+                                            })}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
 
@@ -158,32 +174,61 @@ export default function DashboardPage() {
                             </div>
                         </div>
 
-                        {/* Date Controls - Yesterday left, Overview center, Tomorrow right */}
+                        {/* Date Controls - prev day, Today, Overview, next day */}
                         <div className="mt-4 flex justify-between items-center gap-2">
                             <button
-                                onClick={handleYesterday}
+                                onClick={handlePrevDay}
+                                className="rounded-md border border-slate-700 bg-slate-900 p-2 text-slate-300 hover:bg-slate-800 transition-colors shrink-0"
+                                aria-label="Previous day"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                </svg>
+                            </button>
+                            <button
+                                onClick={handleToday}
                                 className="rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors whitespace-nowrap"
                             >
-                                Yesterday
+                                Today
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setShowCalendarOverview(true)}
                                 className="rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors whitespace-nowrap"
                             >
-                                Overview
+                                Calendar overview
                             </button>
                             <button
-                                onClick={handleTomorrow}
-                                className="rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors whitespace-nowrap"
+                                onClick={handleNextDay}
+                                className="rounded-md border border-slate-700 bg-slate-900 p-2 text-slate-300 hover:bg-slate-800 transition-colors shrink-0"
+                                aria-label="Next day"
                             >
-                                Tomorrow
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                </svg>
                             </button>
                         </div>
 
-                        {/* Score bars - full width, daily only */}
+                        {/* Daily Score - collapsible, full width, daily only */}
                         {timeframe === 'daily' && (
-                            <DashboardScoreBars scores={headerScores} />
+                            <div className="mt-4 rounded-lg border border-slate-700 bg-slate-900 min-w-0 overflow-hidden">
+                                <button
+                                    type="button"
+                                    onClick={() => setDailyScoreOpen((o) => !o)}
+                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 text-center hover:bg-slate-800/50 transition-colors"
+                                >
+                                    <h2 className="text-2xl font-bold text-white">Daily Score</h2>
+                                    {headerScores?.grade && (
+                                        <span className="text-lg font-semibold text-amber-400">({headerScores.grade})</span>
+                                    )}
+                                    <svg className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${dailyScoreOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                </button>
+                                {dailyScoreOpen && (
+                                    <DashboardScoreBars scores={headerScores} />
+                                )}
+                            </div>
                         )}
                     </div>
                 </header>

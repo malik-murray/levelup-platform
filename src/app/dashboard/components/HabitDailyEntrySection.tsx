@@ -56,6 +56,7 @@ export type DailyScoresForHeader = {
     score_habits: number;
     score_priorities: number;
     score_todos: number;
+    grade: string;
 };
 
 export default function HabitDailyEntrySection({
@@ -81,6 +82,11 @@ export default function HabitDailyEntrySection({
     const [dailyScore, setDailyScore] = useState<DailyScore | null>(null);
     const [draftPriorities, setDraftPriorities] = useState<string[]>([]);
     const [draftTodos, setDraftTodos] = useState<string[]>(['', '', '']);
+    const [dailyPlanOpen, setDailyPlanOpen] = useState(true);
+    const [scoresOpen, setScoresOpen] = useState(true);
+    const [prioritiesOpen, setPrioritiesOpen] = useState(true);
+    const [todosOpen, setTodosOpen] = useState(true);
+    const [habitsOpen, setHabitsOpen] = useState(true);
 
     useEffect(() => {
         if (userId) {
@@ -496,13 +502,30 @@ export default function HabitDailyEntrySection({
             Math.max(1, todos.length)
         );
         const score_overall = calculateDailyScore(habitsScore, prioritiesScore, todosScore);
+        const grade = getGrade(score_overall);
         onScoresChange({
             score_overall,
             score_habits: habitsScore,
             score_priorities: prioritiesScore,
             score_todos: todosScore,
+            grade,
         });
-    }, [timeframe, onScoresChange, habitTemplates, habitEntries, priorities, todos]);
+        if (userId && timeframe === 'daily') {
+            const dateStr = formatDate(selectedDate);
+            supabase
+                .from('habit_daily_scores')
+                .upsert({
+                    user_id: userId,
+                    date: dateStr,
+                    score_overall,
+                    grade,
+                    score_habits: habitsScore,
+                    score_priorities: prioritiesScore,
+                    score_todos: todosScore,
+                }, { onConflict: 'user_id,date' })
+                .then(() => {});
+        }
+    }, [timeframe, onScoresChange, habitTemplates, habitEntries, priorities, todos, userId, selectedDate]);
 
     const categoryColors = {
         physical: 'bg-blue-500/30 text-blue-300 border-blue-500/50',
@@ -529,41 +552,78 @@ export default function HabitDailyEntrySection({
     }
 
     return (
-        <div className="space-y-6 min-w-0 overflow-hidden">
-            {/* Header */}
-            <div className="relative flex items-center justify-center">
-                <Link href="/habit" className="hover:underline">
-                    <h2 className="text-2xl font-bold text-center">Daily Plan</h2>
-                </Link>
+        <div className="rounded-lg border border-slate-700 bg-slate-900 min-w-0 overflow-hidden">
+            {/* Daily Plan - collapsible header */}
+            <div className="flex items-center justify-between gap-2 px-4 py-3 min-w-0">
+                <button
+                    type="button"
+                    onClick={() => setDailyPlanOpen((o) => !o)}
+                    className="flex-1 flex items-center justify-center gap-2 text-left hover:bg-slate-800/50 -mx-2 -my-1 px-2 py-1 rounded transition-colors min-w-0"
+                >
+                    <h2 className="text-2xl font-bold text-white">Daily Plan</h2>
+                    <svg className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${dailyPlanOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                </button>
                 {dailyScore && (
-                    <div className="absolute right-0 text-right">
-                        <div className="text-3xl font-bold text-amber-400">{dailyScore.score_overall}%</div>
-                        <div className="text-lg font-semibold text-amber-300">Grade: {dailyScore.grade}</div>
+                    <div className="text-right shrink-0">
+                        <div className="text-2xl font-bold text-amber-400">{dailyScore.score_overall}%</div>
+                        <div className="text-sm font-semibold text-amber-300">Grade: {dailyScore.grade}</div>
                     </div>
                 )}
             </div>
-
-            {/* Score Breakdown */}
+            {dailyPlanOpen && (
+            <div className="px-4 pb-4 space-y-6 min-w-0 overflow-hidden">
+            {/* Daily Score - collapsible */}
             {dailyScore && (
-                <div className="grid grid-cols-3 gap-4 rounded-lg border border-slate-700 bg-slate-900 p-4 min-w-0">
-                    <div className="text-center">
-                        <div className="text-xs text-slate-400 mb-1">Habits</div>
-                        <div className="text-xl font-bold text-blue-400">{dailyScore.score_habits}%</div>
-                    </div>
-                    <div className="text-center">
-                        <div className="text-xs text-slate-400 mb-1">Priorities</div>
-                        <div className="text-xl font-bold text-purple-400">{dailyScore.score_priorities}%</div>
-                    </div>
-                    <div className="text-center">
-                        <div className="text-xs text-slate-400 mb-1">Todos</div>
-                        <div className="text-xl font-bold text-green-400">{dailyScore.score_todos}%</div>
-                    </div>
+                <div className="rounded-lg border border-slate-700 bg-slate-900 min-w-0 overflow-hidden">
+                    <button
+                        type="button"
+                        onClick={() => setScoresOpen((o) => !o)}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 text-center hover:bg-slate-800/50 transition-colors"
+                    >
+                        <h2 className="text-2xl font-bold text-white">Daily Score</h2>
+                        <svg className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${scoresOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </button>
+                    {scoresOpen && (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 pt-0 min-w-0">
+                            <div className="text-center">
+                                <div className="text-xs text-slate-400 mb-1">Overall</div>
+                                <div className="text-xl font-bold text-amber-400">{dailyScore.score_overall}%</div>
+                            </div>
+                            <div className="text-center">
+                                <div className="text-xs text-slate-400 mb-1">Habit</div>
+                                <div className="text-xl font-bold text-blue-400">{dailyScore.score_habits}%</div>
+                            </div>
+                            <div className="text-center">
+                                <div className="text-xs text-slate-400 mb-1">Priority</div>
+                                <div className="text-xl font-bold text-purple-400">{dailyScore.score_priorities}%</div>
+                            </div>
+                            <div className="text-center">
+                                <div className="text-xs text-slate-400 mb-1">To-Do List</div>
+                                <div className="text-xl font-bold text-green-400">{dailyScore.score_todos}%</div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
-            {/* Top Priorities - numbered list, add as many as you want */}
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-2 min-w-0 overflow-hidden">
-                <h3 className="text-lg font-semibold text-purple-400 mb-3">Top Priorities</h3>
+            {/* Top Priorities - collapsible */}
+            <div className="rounded-lg border border-slate-700 bg-slate-900 min-w-0 overflow-hidden">
+                <button
+                    type="button"
+                    onClick={() => setPrioritiesOpen((o) => !o)}
+                    className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left hover:bg-slate-800/50 transition-colors"
+                >
+                    <h3 className="text-lg font-semibold text-purple-400">Top Priorities</h3>
+                    <svg className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${prioritiesOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                </button>
+                {prioritiesOpen && (
+                <div className="p-4 pt-0 space-y-2 min-w-0 overflow-hidden">
                 <ol className="list-decimal list-inside space-y-2 min-w-0">
                     {Array.from({ length: sortedPrioritiesForSlots.length + 1 }, (_, slotIndex) => {
                         const priority = sortedPrioritiesForSlots[slotIndex];
@@ -599,11 +659,24 @@ export default function HabitDailyEntrySection({
                         );
                     })}
                 </ol>
+                </div>
+                )}
             </div>
 
-            {/* To-Do List - numbered list, add as many as you want */}
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-2 min-w-0 overflow-hidden">
-                <h3 className="text-lg font-semibold text-green-400 mb-3">To-Do List</h3>
+            {/* To-Do List - collapsible */}
+            <div className="rounded-lg border border-slate-700 bg-slate-900 min-w-0 overflow-hidden">
+                <button
+                    type="button"
+                    onClick={() => setTodosOpen((o) => !o)}
+                    className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left hover:bg-slate-800/50 transition-colors"
+                >
+                    <h3 className="text-lg font-semibold text-green-400">To-Do List</h3>
+                    <svg className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${todosOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                </button>
+                {todosOpen && (
+                <div className="p-4 pt-0 space-y-2 min-w-0 overflow-hidden">
                 <ol className="list-decimal list-inside space-y-2 min-w-0">
                     {Array.from({ length: todos.length + 1 }, (_, slotIndex) => {
                         const todo = todos[slotIndex];
@@ -639,33 +712,49 @@ export default function HabitDailyEntrySection({
                         );
                     })}
                 </ol>
+                </div>
+                )}
             </div>
 
-            {/* Habits Checklist */}
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-3 min-w-0 overflow-hidden">
-                <div className="flex items-center justify-between gap-2 mb-3 min-w-0">
+            {/* Habits Checklist - collapsible (Morning, Afternoon, Evening, Bad Habits) */}
+            <div className="rounded-lg border border-slate-700 bg-slate-900 min-w-0 overflow-hidden">
+                <div className="flex items-center justify-between gap-2 px-4 py-3 min-w-0">
                     <h3 className="text-lg font-semibold text-blue-400 min-w-0">Habits Checklist</h3>
+                    <button
+                        type="button"
+                        onClick={() => setHabitsOpen((o) => !o)}
+                        className="rounded p-1.5 text-slate-400 hover:bg-slate-800 transition-colors shrink-0"
+                        aria-label={habitsOpen ? 'Collapse' : 'Expand'}
+                    >
+                        <svg className={`w-5 h-5 transition-transform ${habitsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </button>
+                </div>
+                {habitsOpen && (
+                <div className="px-4 pb-4 space-y-3 min-w-0 overflow-hidden">
+                {/* Category key + Edit habits on same line */}
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-3 min-w-0">
+                    <div className="flex flex-wrap gap-3 text-xs">
+                        <span className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-blue-500/80 shrink-0" aria-hidden />
+                            <span className="text-slate-400">Physical</span>
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-purple-500/80 shrink-0" aria-hidden />
+                            <span className="text-slate-400">Mental</span>
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80 shrink-0" aria-hidden />
+                            <span className="text-slate-400">Spiritual</span>
+                        </span>
+                    </div>
                     <Link
                         href="/habit?tab=habits"
                         className="shrink-0 rounded-md border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm font-medium text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
                     >
                         Edit habits
                     </Link>
-                </div>
-                {/* Category key */}
-                <div className="flex flex-wrap gap-3 mb-3 text-xs">
-                    <span className="flex items-center gap-1.5">
-                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500/80 shrink-0" aria-hidden />
-                        <span className="text-slate-400">Physical</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                        <span className="w-2.5 h-2.5 rounded-full bg-purple-500/80 shrink-0" aria-hidden />
-                        <span className="text-slate-400">Mental</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                        <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80 shrink-0" aria-hidden />
-                        <span className="text-slate-400">Spiritual</span>
-                    </span>
                 </div>
                 {timeOfDayOrder.map((time) => {
                     const timeHabits = habitsByTimeOfDay(time);
@@ -723,6 +812,8 @@ export default function HabitDailyEntrySection({
                 {habitsWithEntries.length === 0 && (
                     <p className="text-sm text-slate-400 text-center py-4">No habits for today</p>
                 )}
+                </div>
+                )}
             </div>
 
             {/* Link to full app */}
@@ -735,6 +826,8 @@ export default function HabitDailyEntrySection({
                     <span>→</span>
                 </Link>
             </div>
+            </div>
+            )}
         </div>
     );
 }
