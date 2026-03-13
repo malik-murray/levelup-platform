@@ -531,16 +531,16 @@ function HabitPageClient() {
     };
 
     return (
-        <main className="min-h-screen bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
+        <main className="min-h-screen bg-white text-slate-900 dark:bg-black dark:text-white transition-colors overflow-x-hidden">
             {/* Header */}
-            <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-black transition-colors">
-                <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-                    <Link href={isPreview ? '/preview/dashboard' : '/dashboard'} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-                        <div className="relative h-8 w-8">
+            <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-black transition-colors overflow-x-hidden">
+                <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 py-4 min-w-0">
+                    <Link href={isPreview ? '/preview/dashboard' : '/dashboard'} className="flex items-center gap-3 hover:opacity-80 transition-opacity min-w-0 shrink-0">
+                        <div className="relative h-8 w-8 shrink-0">
                             <Image src={logo} alt="LevelUpSolutions logo" className="h-full w-full object-contain" fill />
                         </div>
                         <div>
-                            <h1 className="text-xl font-semibold text-amber-400">Habit Tracker</h1>
+                            <h1 className="text-xl font-semibold text-amber-400">{activeTab === 'goals' ? 'Goals & Milestones' : 'Habit Tracker'}</h1>
                             <p className="text-xs text-slate-400 mt-0.5">LevelUp Player One</p>
                         </div>
                     </Link>
@@ -557,8 +557,8 @@ function HabitPageClient() {
             </header>
 
             {/* Tabs - Mobile: hamburger menu, Desktop: horizontal tabs */}
-            <div className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-black">
-                <div className="mx-auto max-w-7xl">
+            <div className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-black overflow-x-hidden">
+                <div className="mx-auto max-w-7xl min-w-0">
                     {/* Mobile: Hamburger button (visible only on mobile) */}
                     <div className="md:hidden flex items-center justify-between px-4 py-4">
                         <button
@@ -585,11 +585,21 @@ function HabitPageClient() {
                         <span className="text-sm font-medium text-slate-700 dark:text-slate-300 capitalize">
                             {activeTab === 'home' ? 'Home' : activeTab === 'calendar' ? 'Calendar' : activeTab === 'daily' ? 'Daily' : activeTab === 'weekly-plan' ? 'Weekly Plan' : activeTab === 'statistics' ? 'Statistics' : activeTab === 'goals' ? 'Goals' : 'Habits'}
                         </span>
-                        <div className="w-10" /> {/* Spacer for centering */}
+                        <div className="flex items-center gap-2 w-10 justify-end">
+                            {activeTab === 'habits' && (
+                                <button
+                                    onClick={() => setActiveTab('goals')}
+                                    className="rounded-md border border-slate-600 dark:border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                                >
+                                    Goals
+                                </button>
+                            )}
+                        </div>
                     </div>
                     
                     {/* Desktop: Horizontal tabs (visible only on desktop) */}
-                    <div className="hidden md:flex gap-1 px-4 sm:px-6">
+                    <div className="hidden md:flex gap-1 px-4 sm:px-6 items-center justify-between min-w-0">
+                        <div className="flex gap-1 overflow-x-auto min-w-0 flex-1">
                         {(['home', 'calendar', 'daily', 'weekly-plan', 'statistics', 'goals', 'habits'] as Tab[]).map(tab => (
                                 <button
                                 key={tab}
@@ -600,9 +610,18 @@ function HabitPageClient() {
                                         : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
                                 }`}
                             >
-                                {tab === 'home' ? 'Home' : tab === 'calendar' ? 'Calendar' : tab === 'daily' ? 'Daily' : tab === 'weekly-plan' ? 'Weekly Plan' : tab === 'statistics' ? 'Statistics/Streaks' : tab === 'goals' ? 'Goals & Milestones' : 'Habits/Bad Habits'}
+                                {tab === 'home' ? 'Home' : tab === 'calendar' ? 'Calendar' : tab === 'daily' ? 'Daily' : tab === 'weekly-plan' ? 'Weekly Plan' : tab === 'statistics' ? 'Statistics/Streaks' : tab === 'goals' ? 'Goals' : 'Habits/Bad Habits'}
                                 </button>
                         ))}
+                        </div>
+                        {activeTab === 'habits' && (
+                            <button
+                                onClick={() => setActiveTab('goals')}
+                                className="rounded-md border border-slate-600 dark:border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+                            >
+                                Goals
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
@@ -648,7 +667,7 @@ function HabitPageClient() {
                                         daily: 'Daily',
                                         'weekly-plan': 'Weekly Plan',
                                         statistics: 'Statistics/Streaks',
-                                        goals: 'Goals & Milestones',
+                                        goals: 'Goals',
                                         habits: 'Habits/Bad Habits',
                                     };
                                     
@@ -676,7 +695,7 @@ function HabitPageClient() {
             )}
 
             {/* Content - Mobile-first padding */}
-            <div className="mx-auto max-w-7xl px-4 sm:px-6 py-4 sm:py-6">
+            <div className="mx-auto max-w-7xl px-4 sm:px-6 py-4 sm:py-6 min-w-0 overflow-x-hidden">
                 {loading ? (
                     <div className="text-center py-12 text-slate-400">Loading...</div>
                 ) : activeTab === 'home' ? (
@@ -3220,7 +3239,7 @@ function HabitsSection({
                         )}
                     </div>
             
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4 min-w-0">
                 {(['physical', 'mental', 'spiritual'] as Category[]).map(category => (
                     <div key={category} className={`rounded-lg border ${categoryColors[category]} p-4`}>
                         <h4 className="text-xs font-semibold mb-2 capitalize">{category} Habits</h4>
@@ -3322,7 +3341,7 @@ function HabitsSection({
             {(badHabitsByCategory.physical.length > 0 || badHabitsByCategory.mental.length > 0 || badHabitsByCategory.spiritual.length > 0) && (
                 <div className="mb-4">
                     <h3 className="text-xs font-semibold mb-2 text-red-400">Bad Habits (Avoid These)</h3>
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 min-w-0">
                         {(['physical', 'mental', 'spiritual'] as Category[]).map(category => {
                             if (badHabitsByCategory[category].length === 0) return null;
                             return (
@@ -4913,10 +4932,9 @@ function GoalsView() {
     }
 
     return (
-        <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold">Goals & Milestones</h2>
-                <div className="flex gap-2 items-center">
+        <div className="space-y-6 min-w-0 overflow-x-hidden">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+                <div className="flex flex-wrap gap-2 items-center min-w-0">
                     {selectedGoals.size > 0 && (
                         <>
                             <span className="text-sm text-slate-400">{selectedGoals.size} selected</span>
@@ -5351,9 +5369,9 @@ function GoalsView() {
                                             const progress = goal.target_value ? (goal.current_value / goal.target_value) * 100 : 0;
 
                                             return (
-                                                <div key={goal.id} className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-                                                    <div className="flex items-start justify-between mb-2">
-                                                        <div className="flex items-center gap-2 flex-1">
+                                                <div key={goal.id} className="rounded-lg border border-slate-800 bg-slate-950 p-4 min-w-0">
+                                                    <div className="flex items-start justify-between gap-2 mb-2">
+                                                        <div className="flex items-center gap-2 flex-1 min-w-0">
                                                             <input
                                                                 type="checkbox"
                                                                 checked={selectedGoals.has(goal.id)}
@@ -5361,9 +5379,9 @@ function GoalsView() {
                                                                 onClick={(e) => e.stopPropagation()}
                                                                 className="rounded border-slate-600"
                                                             />
-                                                        <div className="flex-1">
-                                                            <div className="flex items-center gap-2">
-                                                                <h3 className="text-lg font-semibold">{goal.name}</h3>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <h3 className="text-lg font-semibold break-words">{goal.name}</h3>
                                                                     {(() => {
                                                                         const priority = goal.priority_score || 0;
                                                                         const getPriorityBadgeColor = (priority: number) => {
@@ -5390,7 +5408,7 @@ function GoalsView() {
                                                                 )}
                                                             </div>
                                                             {goal.description && (
-                                                                <p className="text-sm text-slate-400 mt-1">{goal.description}</p>
+                                                                <p className="text-sm text-slate-400 mt-1 break-words">{goal.description}</p>
                                                             )}
                                                             </div>
                                                         </div>
@@ -6165,19 +6183,6 @@ function HabitsManagementView({
         }
     };
 
-    const handleToggleActive = async (habit: HabitTemplate) => {
-        try {
-            await supabase
-                .from('habit_templates')
-                .update({ is_active: !habit.is_active })
-                .eq('id', habit.id);
-            
-            onDataChange();
-        } catch (error) {
-            console.error('Error toggling habit:', error);
-        }
-    };
-
     const handleSubmit = async () => {
         if (!formData.name.trim()) return;
 
@@ -6240,10 +6245,19 @@ function HabitsManagementView({
         setSelectedHabits(new Set());
     }, [filter, categoryFilter]);
 
+    const goodHabits = filteredHabits.filter(h => !h.is_bad_habit);
+    const badHabits = filteredHabits.filter(h => h.is_bad_habit);
+
     const habitsByCategory = {
-        physical: filteredHabits.filter(h => h.category === 'physical'),
-        mental: filteredHabits.filter(h => h.category === 'mental'),
-        spiritual: filteredHabits.filter(h => h.category === 'spiritual'),
+        physical: goodHabits.filter(h => h.category === 'physical'),
+        mental: goodHabits.filter(h => h.category === 'mental'),
+        spiritual: goodHabits.filter(h => h.category === 'spiritual'),
+    };
+
+    const badHabitsByCategory = {
+        physical: badHabits.filter(h => h.category === 'physical'),
+        mental: badHabits.filter(h => h.category === 'mental'),
+        spiritual: badHabits.filter(h => h.category === 'spiritual'),
     };
 
     const categoryColors = {
@@ -6253,31 +6267,50 @@ function HabitsManagementView({
     };
 
     return (
-        <div className="space-y-6">
-            <div className="flex items-center justify-between">
+        <div className="space-y-6 min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-2xl font-bold">Habits & Bad Habits</h2>
-                <button
-                    onClick={() => {
-                        setEditingHabit(null);
-                        setFormData({
-                            name: '',
-                            icon: '📝',
-                            category: 'mental',
-                            time_of_day: null,
-                            is_bad_habit: false,
-                            goal_id: null,
-                        });
-                        setShowForm(!showForm);
-                    }}
-                    className="rounded-md bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300"
-                >
-                    {showForm ? 'Cancel' : '+ Add Habit'}
-                </button>
+                <div className="flex gap-2 flex-shrink-0">
+                    <button
+                        onClick={() => {
+                            setEditingHabit(null);
+                            setFormData({
+                                name: '',
+                                icon: '📝',
+                                category: 'mental',
+                                time_of_day: null,
+                                is_bad_habit: false,
+                                goal_id: null,
+                            });
+                            setShowForm(!showForm);
+                        }}
+                        className="rounded-md bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300"
+                    >
+                        {showForm ? 'Cancel' : '+ Add Habit'}
+                    </button>
+                    <button
+                        onClick={() => {
+                            setEditingHabit(null);
+                            setFormData({
+                                name: '',
+                                icon: '📝',
+                                category: 'mental',
+                                time_of_day: null,
+                                is_bad_habit: true,
+                                goal_id: null,
+                            });
+                            setShowForm(true);
+                        }}
+                        className="rounded-md bg-red-500/80 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500"
+                    >
+                        + Add Bad Habit
+                    </button>
+                </div>
             </div>
 
             {/* Filters and Bulk Actions */}
-            <div className="flex gap-2 items-center justify-between">
-            <div className="flex gap-2 items-center">
+            <div className="flex flex-wrap gap-2 items-center justify-between">
+            <div className="flex flex-wrap gap-2 items-center min-w-0">
                 <div className="flex gap-1 rounded-md border border-slate-700 bg-slate-900 p-1">
                     <button
                         onClick={() => setFilter('all')}
@@ -6316,7 +6349,7 @@ function HabitsManagementView({
                 </select>
                 </div>
                 {selectedHabits.size > 0 && (
-                    <div className="flex gap-2 items-center">
+                    <div className="flex flex-wrap gap-2 items-center shrink-0">
                         <span className="text-sm text-slate-400">{selectedHabits.size} selected</span>
                         <button
                             onClick={() => {
@@ -6345,7 +6378,7 @@ function HabitsManagementView({
             {/* Add/Edit Form */}
             {showForm && (
                 <div className="rounded-lg border border-slate-800 bg-slate-950 p-4 space-y-3">
-                    <h3 className="text-sm font-semibold">{editingHabit ? 'Edit Habit' : 'New Habit'}</h3>
+                    <h3 className="text-sm font-semibold">{editingHabit ? 'Edit Habit' : formData.is_bad_habit ? 'New Bad Habit' : 'New Habit'}</h3>
                     <div className="flex gap-2">
                         <input
                             type="text"
@@ -6383,18 +6416,6 @@ function HabitsManagementView({
                             <option value="afternoon">Afternoon</option>
                             <option value="evening">Evening</option>
                         </select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <input
-                            type="checkbox"
-                            id="is_bad_habit"
-                            checked={formData.is_bad_habit}
-                            onChange={e => setFormData({ ...formData, is_bad_habit: e.target.checked })}
-                            className="rounded border-slate-700"
-                        />
-                        <label htmlFor="is_bad_habit" className="text-sm text-slate-300">
-                            This is a bad habit (to avoid)
-                        </label>
                     </div>
                     <div className="flex flex-col gap-1">
                         <label className="text-xs text-slate-400">Link to goal (optional)</label>
@@ -6440,7 +6461,7 @@ function HabitsManagementView({
                     const someCategorySelected = categorySelectedCount > 0 && categorySelectedCount < categoryHabits.length;
 
                     return (
-                        <div key={category} className={`rounded-lg border ${categoryColors[category]} p-4`}>
+                        <div key={category} className={`rounded-lg border ${categoryColors[category]} p-4 min-w-0`}>
                             <div className="flex items-center justify-between mb-3">
                                 <h3 className="text-sm font-semibold capitalize">{category} Habits</h3>
                                 <div className="flex items-center gap-2">
@@ -6473,9 +6494,9 @@ function HabitsManagementView({
                                 {categoryHabits.map(habit => (
                                     <div
                                         key={habit.id}
-                                        className="flex items-center justify-between p-2 rounded bg-slate-900/50 hover:bg-slate-900 transition-colors"
+                                        className="flex items-center justify-between gap-2 p-2 rounded bg-slate-900/50 hover:bg-slate-900 transition-colors min-w-0"
                                     >
-                                        <div className="flex items-center gap-2 flex-1">
+                                        <div className="flex items-center gap-2 flex-1 min-w-0">
                                             <input
                                                 type="checkbox"
                                                 checked={selectedHabits.has(habit.id)}
@@ -6483,17 +6504,12 @@ function HabitsManagementView({
                                                 onClick={(e) => e.stopPropagation()}
                                                 className="rounded border-slate-600"
                                             />
-                                            <span className="text-lg">{habit.icon}</span>
-                                            <div className="flex-1">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-sm text-slate-200">{habit.name}</span>
-                                                    {habit.is_bad_habit && (
-                                                        <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded">
-                                                            Bad Habit
-                                                        </span>
-                                                    )}
+                                            <span className="text-lg shrink-0">{habit.icon}</span>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <span className="text-sm text-slate-200 truncate">{habit.name}</span>
                                                     {!habit.is_active && (
-                                                        <span className="text-xs bg-slate-700 text-slate-400 px-2 py-0.5 rounded">
+                                                        <span className="text-xs bg-slate-700 text-slate-400 px-2 py-0.5 rounded shrink-0">
                                                             Inactive
                                                         </span>
                                                     )}
@@ -6504,25 +6520,10 @@ function HabitsManagementView({
                                                             {habit.time_of_day}
                                                         </span>
                                                     )}
-                                                    {habit.goal_id && (
-                                                        <span className="text-xs text-amber-400">
-                                                            Goal: {goals.find(g => g.id === habit.goal_id)?.name || 'Unknown'}
-                                                        </span>
-                                                    )}
                                                 </div>
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                onClick={() => handleToggleActive(habit)}
-                                                className={`text-xs px-2 py-1 rounded ${
-                                                    habit.is_active
-                                                        ? 'bg-green-500/20 text-green-400'
-                                                        : 'bg-slate-700 text-slate-400'
-                                                }`}
-                                            >
-                                                {habit.is_active ? 'Active' : 'Inactive'}
-                                            </button>
+                                        <div className="flex items-center gap-2 shrink-0">
                                             <button
                                                 onClick={() => handleEdit(habit)}
                                                 className="text-xs px-2 py-1 rounded bg-blue-500/20 text-blue-400 hover:bg-blue-500/30"
@@ -6542,6 +6543,104 @@ function HabitsManagementView({
                         </div>
                     );
                 })}
+
+                {/* Bad Habits Section */}
+                {(badHabitsByCategory.physical.length > 0 || badHabitsByCategory.mental.length > 0 || badHabitsByCategory.spiritual.length > 0) && (
+                    <div className="rounded-lg border border-red-500/30 bg-red-950/30 p-4">
+                        <h3 className="text-sm font-semibold mb-3 text-red-400">Bad Habits (Avoid These)</h3>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 min-w-0">
+                            {(['physical', 'mental', 'spiritual'] as Category[]).map(category => {
+                                const categoryBadHabits = badHabitsByCategory[category];
+                                if (categoryBadHabits.length === 0) return null;
+
+                                const categorySelectedCount = categoryBadHabits.filter(h => selectedHabits.has(h.id)).length;
+                                const allCategorySelected = categoryBadHabits.length > 0 && categorySelectedCount === categoryBadHabits.length;
+                                const someCategorySelected = categorySelectedCount > 0 && categorySelectedCount < categoryBadHabits.length;
+
+                                return (
+                                    <div key={`bad-${category}`} className="rounded-lg border border-red-500/20 bg-red-950/20 p-4 min-w-0">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <h4 className="text-xs font-semibold capitalize text-red-300">{category} Bad Habits</h4>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={allCategorySelected}
+                                                    onChange={(e) => {
+                                                        e.target.indeterminate = false;
+                                                        if (allCategorySelected) {
+                                                            const newSelected = new Set(selectedHabits);
+                                                            categoryBadHabits.forEach(h => newSelected.delete(h.id));
+                                                            setSelectedHabits(newSelected);
+                                                        } else {
+                                                            const newSelected = new Set(selectedHabits);
+                                                            categoryBadHabits.forEach(h => newSelected.add(h.id));
+                                                            setSelectedHabits(newSelected);
+                                                        }
+                                                    }}
+                                                    ref={(input) => {
+                                                        if (input) input.indeterminate = someCategorySelected;
+                                                    }}
+                                                    className="rounded border-slate-600"
+                                                />
+                                                <span className="text-xs text-slate-400">Select All</span>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            {categoryBadHabits.map(habit => (
+                                                <div
+                                                    key={habit.id}
+                                                    className="flex items-center justify-between gap-2 p-2 rounded bg-slate-900/50 hover:bg-slate-900 transition-colors min-w-0"
+                                                >
+                                                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={selectedHabits.has(habit.id)}
+                                                            onChange={() => handleToggleSelect(habit.id)}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            className="rounded border-slate-600"
+                                                        />
+                                                        <span className="text-lg shrink-0">{habit.icon}</span>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center gap-2 min-w-0">
+                                                                <span className="text-sm text-slate-200 truncate">{habit.name}</span>
+                                                                {!habit.is_active && (
+                                                                    <span className="text-xs bg-slate-700 text-slate-400 px-2 py-0.5 rounded shrink-0">
+                                                                        Inactive
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex items-center gap-2 mt-1">
+                                                                {habit.time_of_day && (
+                                                                    <span className="text-xs text-slate-400 capitalize">
+                                                                        {habit.time_of_day}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 shrink-0">
+                                                        <button
+                                                            onClick={() => handleEdit(habit)}
+                                                            className="text-xs px-2 py-1 rounded bg-blue-500/20 text-blue-400 hover:bg-blue-500/30"
+                                                        >
+                                                            Edit
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDelete(habit.id)}
+                                                            className="text-xs px-2 py-1 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30"
+                                                        >
+                                                            Delete
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
 
                 {filteredHabits.length === 0 && (
                     <div className="text-center py-12 text-slate-400">

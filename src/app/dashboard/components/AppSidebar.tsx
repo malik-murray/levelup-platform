@@ -14,6 +14,7 @@ const apps: App[] = [
     { name: 'Score Analysis', href: '/score-analysis', icon: '📈' },
     { name: 'Habits (Today)', href: '/habit/today', icon: '📈' },
     { name: 'Habit Tracker', href: '/habit', icon: '📋' },
+    { name: 'Goals & Milestones', href: '/habit?tab=goals', icon: '🎯' },
     { name: 'Finance Tracker', href: '/finance', icon: '💰' },
     { name: 'Newsfeed', href: '/newsfeed', icon: '📰' },
     { name: 'Fitness Tracker', href: '/fitness', icon: '💪' },
