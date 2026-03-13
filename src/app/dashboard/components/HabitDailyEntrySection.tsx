@@ -83,7 +83,6 @@ export default function HabitDailyEntrySection({
     const [draftPriorities, setDraftPriorities] = useState<string[]>([]);
     const [draftTodos, setDraftTodos] = useState<string[]>(['', '', '']);
     const [dailyPlanOpen, setDailyPlanOpen] = useState(true);
-    const [scoresOpen, setScoresOpen] = useState(true);
     const [prioritiesOpen, setPrioritiesOpen] = useState(true);
     const [todosOpen, setTodosOpen] = useState(true);
     const [habitsOpen, setHabitsOpen] = useState(true);
@@ -565,51 +564,9 @@ export default function HabitDailyEntrySection({
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                 </button>
-                {dailyScore && (
-                    <div className="text-right shrink-0">
-                        <div className="text-2xl font-bold text-amber-400">{dailyScore.score_overall}%</div>
-                        <div className="text-sm font-semibold text-amber-300">Grade: {dailyScore.grade}</div>
-                    </div>
-                )}
             </div>
             {dailyPlanOpen && (
             <div className="px-4 pb-4 space-y-6 min-w-0 overflow-hidden">
-            {/* Daily Score - collapsible */}
-            {dailyScore && (
-                <div className="rounded-lg border border-slate-700 bg-slate-900 min-w-0 overflow-hidden">
-                    <button
-                        type="button"
-                        onClick={() => setScoresOpen((o) => !o)}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-3 text-center hover:bg-slate-800/50 transition-colors"
-                    >
-                        <h2 className="text-2xl font-bold text-white">Daily Score</h2>
-                        <svg className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${scoresOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                        </svg>
-                    </button>
-                    {scoresOpen && (
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 pt-0 min-w-0">
-                            <div className="text-center">
-                                <div className="text-xs text-slate-400 mb-1">Overall</div>
-                                <div className="text-xl font-bold text-amber-400">{dailyScore.score_overall}%</div>
-                            </div>
-                            <div className="text-center">
-                                <div className="text-xs text-slate-400 mb-1">Habit</div>
-                                <div className="text-xl font-bold text-blue-400">{dailyScore.score_habits}%</div>
-                            </div>
-                            <div className="text-center">
-                                <div className="text-xs text-slate-400 mb-1">Priority</div>
-                                <div className="text-xl font-bold text-purple-400">{dailyScore.score_priorities}%</div>
-                            </div>
-                            <div className="text-center">
-                                <div className="text-xs text-slate-400 mb-1">To-Do List</div>
-                                <div className="text-xl font-bold text-green-400">{dailyScore.score_todos}%</div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )}
-
             {/* Top Priorities - collapsible */}
             <div className="rounded-lg border border-slate-700 bg-slate-900 min-w-0 overflow-hidden">
                 <button
