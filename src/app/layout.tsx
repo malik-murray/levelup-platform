@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { AuthHashErrorHandler } from "@/components/AuthHashErrorHandler";
 
 export const metadata: Metadata = {
     title: "LevelUpSolutions",
@@ -23,6 +24,7 @@ export default function RootLayout({
         <html lang="en" suppressHydrationWarning>
         <body className="antialiased bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
         <ThemeProvider>
+            <AuthHashErrorHandler />
             {children}
         </ThemeProvider>
         </body>
