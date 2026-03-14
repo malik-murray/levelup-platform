@@ -245,7 +245,7 @@ export default function DashboardPage() {
                     <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full min-w-0">
                         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                             {/* Main Section - Habit Tracker (Center, Largest) */}
-                            <div className="lg:col-span-7 xl:col-span-8 min-w-0">
+                            <div className="lg:col-span-7 xl:col-span-8 min-w-0 space-y-6">
                                 <HabitDailyEntrySection 
                                     selectedDate={selectedDate}
                                     timeframe={timeframe}

@@ -41,6 +41,8 @@ type Todo = {
     is_done: boolean;
     date: string;
     completed_at: string | null;
+    weekly_item_day_id?: string | null;
+    weekly_event_id?: string | null;
 };
 
 type DailyScore = {
@@ -138,10 +140,10 @@ export default function HabitDailyEntrySection({
                 .eq('date', dateStr)
                 .order('sort_order');
 
-            // Load todos
+            // Load todos (including weekly links for two-way sync)
             const { data: todosData } = await supabase
                 .from('habit_daily_todos')
-                .select('*')
+                .select('id, title, category, is_done, date, completed_at, weekly_item_day_id, weekly_event_id')
                 .eq('user_id', userId)
                 .eq('date', dateStr)
                 .order('created_at');
@@ -433,13 +435,24 @@ export default function HabitDailyEntrySection({
 
         const dateStr = formatDate(selectedDate);
         const completedAt = !isDone ? new Date().toISOString() : null;
-        const todoTitle = todos.find((t) => t.id === id)?.title ?? '';
+        const newIsDone = !isDone;
+        const todo = todos.find((t) => t.id === id);
+        const todoTitle = todo?.title ?? '';
 
         try {
             await supabase
                 .from('habit_daily_todos')
-                .update({ is_done: !isDone, completed_at: completedAt })
+                .update({ is_done: newIsDone, completed_at: completedAt })
                 .eq('id', id);
+
+            // Two-way sync: update habit_weekly_item_days when todo is linked
+            if (todo?.weekly_item_day_id) {
+                await supabase
+                    .from('habit_weekly_item_days')
+                    .update({ completed: newIsDone, completed_at: completedAt })
+                    .eq('id', todo.weekly_item_day_id);
+            }
+
             if (isDone && todoTitle) {
                 const templateWithName = habitTemplates.find((t) => t.name === todoTitle);
                 if (templateWithName) {

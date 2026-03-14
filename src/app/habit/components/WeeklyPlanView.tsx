@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate, isSameDay } from '@/lib/habitHelpers';
+import WeeklyScoreBars, { type WeeklyScores } from './WeeklyScoreBars';
 
 type WeeklyPlan = {
     id: string;
@@ -20,6 +21,7 @@ type WeeklyItem = {
     priority: 'low' | 'med' | 'high';
     status: 'not_started' | 'in_progress' | 'done';
     sort_order: number;
+    item_type?: 'goal' | 'todo';
 };
 
 type WeeklyItemDay = {
@@ -28,6 +30,18 @@ type WeeklyItemDay = {
     date: string;
     completed: boolean;
     completed_at: string | null;
+    todo_id?: string | null;
+};
+
+type WeeklyEvent = {
+    id: string;
+    title: string;
+    date: string;
+    start_time: string | null;
+    end_time: string | null;
+    sms_notify: boolean;
+    todo_id?: string | null;
+    is_done?: boolean;
 };
 
 type Goal = {
@@ -40,6 +54,8 @@ export default function WeeklyPlanView() {
     const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan | null>(null);
     const [weeklyItems, setWeeklyItems] = useState<WeeklyItem[]>([]);
     const [itemDays, setItemDays] = useState<WeeklyItemDay[]>([]);
+    const [events, setEvents] = useState<WeeklyEvent[]>([]);
+    const [weeklyScores, setWeeklyScores] = useState<WeeklyScores | null>(null);
     const [goals, setGoals] = useState<Goal[]>([]);
     
     // Form states
@@ -49,6 +65,7 @@ export default function WeeklyPlanView() {
     const [newItemGoalId, setNewItemGoalId] = useState<string | null>(null);
     const [newItemCategory, setNewItemCategory] = useState<string | null>(null);
     const [newItemPriority, setNewItemPriority] = useState<'low' | 'med' | 'high'>('med');
+    const [newItemType, setNewItemType] = useState<'goal' | 'todo'>('goal');
     const [editingItemId, setEditingItemId] = useState<string | null>(null);
     const [editingItem, setEditingItem] = useState<Partial<WeeklyItem>>({});
     
@@ -58,10 +75,16 @@ export default function WeeklyPlanView() {
     const [showNewCategoryInput, setShowNewCategoryInput] = useState(false);
     const [newCategoryName, setNewCategoryName] = useState('');
     
+    // Events form
+    const [newEventTitle, setNewEventTitle] = useState('');
+    const [newEventDate, setNewEventDate] = useState('');
+    const [newEventStartTime, setNewEventStartTime] = useState('');
+    const [newEventEndTime, setNewEventEndTime] = useState('');
+    
     // Custom categories (stored in state, could be persisted later)
     const [customCategories, setCustomCategories] = useState<string[]>([]);
 
-    // Get current week start (Sunday)
+    // Selected week (Sunday)
     const getWeekStart = (date: Date): Date => {
         const d = new Date(date);
         d.setHours(0, 0, 0, 0);
@@ -69,9 +92,23 @@ export default function WeeklyPlanView() {
         const diff = d.getDate() - day;
         return new Date(d.setDate(diff));
     };
-
-    const currentWeekStart = getWeekStart(new Date());
+    const [selectedWeekStart, setSelectedWeekStart] = useState(() => getWeekStart(new Date()));
+    const currentWeekStart = selectedWeekStart;
     const weekStartStr = formatDate(currentWeekStart);
+
+    const handlePrevWeek = () => {
+        const prev = new Date(selectedWeekStart);
+        prev.setDate(prev.getDate() - 7);
+        setSelectedWeekStart(prev);
+    };
+    const handleNextWeek = () => {
+        const next = new Date(selectedWeekStart);
+        next.setDate(next.getDate() + 7);
+        setSelectedWeekStart(next);
+    };
+    const handleThisWeek = () => {
+        setSelectedWeekStart(getWeekStart(new Date()));
+    };
 
     // Get the 7 days of the week
     const getWeekDays = (): Date[] => {
@@ -89,6 +126,10 @@ export default function WeeklyPlanView() {
 
     useEffect(() => {
         loadData();
+    }, [weekStartStr]);
+
+    useEffect(() => {
+        setNewEventDate(weekStartStr);
     }, [weekStartStr]);
 
     const loadData = async () => {
@@ -156,57 +197,137 @@ export default function WeeklyPlanView() {
 
                 setWeeklyItems(itemsData || []);
 
+                let daysData: WeeklyItemDay[] | null = null;
                 // Load item days
                 if (itemsData && itemsData.length > 0) {
                     const itemIds = itemsData.map(item => item.id);
-                    const { data: daysData } = await supabase
+                    const { data: daysResult } = await supabase
                         .from('habit_weekly_item_days')
                         .select('*')
                         .in('weekly_item_id', itemIds);
+                    daysData = daysResult || [];
 
-                    setItemDays(daysData || []);
+                    setItemDays(daysData);
 
-                    // Sync todos: ensure todos exist for all assigned items
-                    if (daysData && daysData.length > 0) {
+                    // Sync todos: ensure todos exist for all assigned items (two-way linking)
+                    const mapCategory = (c: string | null): 'physical' | 'mental' | 'spiritual' | null => {
+                        if (!c) return null;
+                        const m: Record<string, 'physical' | 'mental' | 'spiritual' | null> = {
+                            health: 'physical', family: 'mental', relationships: 'mental', work: 'mental',
+                            business: 'mental', education: 'mental', finance: 'mental', personal: 'mental', other: null,
+                        };
+                        return m[c.toLowerCase()] || null;
+                    };
+                    if (daysData.length > 0) {
                         for (const itemDay of daysData) {
                             const item = itemsData.find(i => i.id === itemDay.weekly_item_id);
-                            if (item) {
-                                // Check if todo exists
-                                const { data: existingTodo } = await supabase
-                                    .from('habit_daily_todos')
-                                    .select('id')
-                                    .eq('user_id', user.id)
-                                    .eq('date', itemDay.date)
-                                    .eq('title', item.title)
-                                    .maybeSingle();
+                            if (!item) continue;
+                            const { data: existingTodo } = await supabase
+                                .from('habit_daily_todos')
+                                .select('id')
+                                .eq('user_id', user.id)
+                                .eq('date', itemDay.date)
+                                .eq('title', item.title)
+                                .maybeSingle();
 
-                                // Create todo if it doesn't exist
-                                if (!existingTodo) {
+                            if (!existingTodo) {
+                                const { data: newTodo } = await supabase
+                                    .from('habit_daily_todos')
+                                    .insert({
+                                        user_id: user.id,
+                                        date: itemDay.date,
+                                        title: item.title,
+                                        category: mapCategory(item.category),
+                                        time_of_day: null,
+                                        is_done: itemDay.completed,
+                                        completed_at: itemDay.completed_at,
+                                        goal_id: item.goal_id,
+                                        weekly_item_day_id: itemDay.id,
+                                    })
+                                    .select('id')
+                                    .single();
+                                if (newTodo) {
                                     await supabase
-                                        .from('habit_daily_todos')
-                                        .insert({
-                                            user_id: user.id,
-                                            date: itemDay.date,
-                                            title: item.title,
-                                            category: item.category,
-                                            time_of_day: null,
-                                            is_done: itemDay.completed,
-                                            completed_at: itemDay.completed_at,
-                                            goal_id: item.goal_id,
-                                        });
-                                } else if (existingTodo && itemDay.completed !== undefined) {
-                                    // Sync completion status if todo exists
+                                        .from('habit_weekly_item_days')
+                                        .update({ todo_id: newTodo.id })
+                                        .eq('id', itemDay.id);
+                                }
+                            } else {
+                                await supabase
+                                    .from('habit_daily_todos')
+                                    .update({
+                                        is_done: itemDay.completed,
+                                        completed_at: itemDay.completed_at,
+                                        weekly_item_day_id: itemDay.id,
+                                    })
+                                    .eq('id', existingTodo.id);
+                                const wid = (itemDay as { todo_id?: string }).todo_id;
+                                if (!wid) {
                                     await supabase
-                                        .from('habit_daily_todos')
-                                        .update({
-                                            is_done: itemDay.completed,
-                                            completed_at: itemDay.completed_at,
-                                        })
-                                        .eq('id', existingTodo.id);
+                                        .from('habit_weekly_item_days')
+                                        .update({ todo_id: existingTodo.id })
+                                        .eq('id', itemDay.id);
                                 }
                             }
                         }
                     }
+                }
+
+                // Load weekly events by date range (not weekly_plan_id) so events persist across refresh
+                // even if plan lookup varies due to timing/timezone
+                const weekEndForEvents = new Date(currentWeekStart);
+                weekEndForEvents.setDate(weekEndForEvents.getDate() + 6);
+                const weekEndStrForEvents = formatDate(weekEndForEvents);
+                const { data: eventsRaw } = await supabase
+                    .from('habit_weekly_events')
+                    .select('id, title, date, start_time, end_time, sms_notify, todo_id, habit_daily_todos(is_done)')
+                    .eq('user_id', user.id)
+                    .gte('date', weekStartStr)
+                    .lte('date', weekEndStrForEvents)
+                    .order('date')
+                    .order('start_time');
+                const eventsData: WeeklyEvent[] = (eventsRaw || []).map((e: Record<string, unknown>) => {
+                    const todo = e.habit_daily_todos as { is_done?: boolean } | { is_done?: boolean }[] | null | undefined;
+                    const isDone = Array.isArray(todo) ? todo[0]?.is_done : todo?.is_done;
+                    const { habit_daily_todos: _, ...rest } = e;
+                    return { ...rest, is_done: !!isDone } as WeeklyEvent;
+                });
+                setEvents(eventsData);
+
+                // Compute weekly scores from habit_daily_scores
+                const weekEnd = new Date(currentWeekStart);
+                weekEnd.setDate(weekEnd.getDate() + 6);
+                const weekEndStr = formatDate(weekEnd);
+                const { data: dailyScores } = await supabase
+                    .from('habit_daily_scores')
+                    .select('score_overall, score_priorities, score_todos')
+                    .eq('user_id', user.id)
+                    .gte('date', weekStartStr)
+                    .lte('date', weekEndStr);
+                if (dailyScores && dailyScores.length > 0) {
+                    const avgOverall = Math.round(dailyScores.reduce((s, d) => s + (d.score_overall || 0), 0) / dailyScores.length);
+                    const avgPriorities = Math.round(dailyScores.reduce((s, d) => s + (d.score_priorities || 0), 0) / dailyScores.length);
+                    const avgTodos = Math.round(dailyScores.reduce((s, d) => s + (d.score_todos || 0), 0) / dailyScores.length);
+                    const goalItems = (itemsData || []).filter((i: { item_type?: string }) => (i.item_type || 'goal') === 'goal');
+                    const todoItems = (itemsData || []).filter((i: { item_type?: string }) => i.item_type === 'todo');
+                    const dData = daysData || [];
+                    const goalDayIds = dData.filter((d: WeeklyItemDay) => goalItems.some((g: { id: string }) => g.id === d.weekly_item_id)).map((d: WeeklyItemDay) => d.id);
+                    const todoDayIds = dData.filter((d: WeeklyItemDay) => todoItems.some((t: { id: string }) => t.id === d.weekly_item_id)).map((d: WeeklyItemDay) => d.id);
+                    const goalCompleted = dData.filter((d: WeeklyItemDay) => goalDayIds.includes(d.id) && d.completed).length;
+                    const todoCompleted = dData.filter((d: WeeklyItemDay) => todoDayIds.includes(d.id) && d.completed).length;
+                    const goalsScore = goalDayIds.length > 0 ? Math.round((goalCompleted / goalDayIds.length) * 100) : 0;
+                    const todosScore = todoDayIds.length > 0 ? Math.round((todoCompleted / todoDayIds.length) * 100) : 0;
+                    const eventsCompleted = eventsData.filter((e: WeeklyEvent) => e.is_done).length;
+                    const eventsScore = eventsData.length > 0 ? Math.round((eventsCompleted / eventsData.length) * 100) : 0;
+                    setWeeklyScores({
+                        avg_daily_score: avgOverall,
+                        weekly_goals_score: goalsScore,
+                        weekly_todos_score: todosScore,
+                        weekly_events_score: eventsScore,
+                        score_overall: Math.round((avgOverall * 0.35 + goalsScore * 0.25 + todosScore * 0.25 + eventsScore * 0.15)),
+                    });
+                } else {
+                    setWeeklyScores(null);
                 }
             }
         } catch (error) {
@@ -307,6 +428,7 @@ export default function WeeklyPlanView() {
                     priority: newItemPriority,
                     status: 'not_started',
                     sort_order: weeklyItems.length,
+                    item_type: newItemType,
                 })
                 .select()
                 .single();
@@ -318,11 +440,12 @@ export default function WeeklyPlanView() {
             }
 
             if (newItem) {
-                setWeeklyItems([...weeklyItems, newItem]);
+                setWeeklyItems([...weeklyItems, { ...newItem, item_type: newItemType }]);
                 setNewItemTitle('');
                 setNewItemGoalId(null);
                 setNewItemCategory(null);
                 setNewItemPriority('med');
+                setNewItemType('goal');
                 setShowNewGoalInput(false);
                 setShowNewCategoryInput(false);
             }
@@ -351,16 +474,21 @@ export default function WeeklyPlanView() {
         if (!confirm('Delete this item?')) return;
 
         try {
-            await supabase
-                .from('habit_weekly_items')
-                .delete()
-                .eq('id', itemId);
-
-            // Also delete associated item days
+            const daysToRemove = itemDays.filter(d => d.weekly_item_id === itemId);
+            for (const d of daysToRemove) {
+                const todoId = (d as WeeklyItemDay).todo_id;
+                if (todoId) {
+                    await supabase.from('habit_daily_todos').delete().eq('id', todoId);
+                }
+            }
             await supabase
                 .from('habit_weekly_item_days')
                 .delete()
                 .eq('weekly_item_id', itemId);
+            await supabase
+                .from('habit_weekly_items')
+                .delete()
+                .eq('id', itemId);
 
             setWeeklyItems(prev => prev.filter(item => item.id !== itemId));
             setItemDays(prev => prev.filter(day => day.weekly_item_id !== itemId));
@@ -384,21 +512,24 @@ export default function WeeklyPlanView() {
             if (!user) return;
 
             if (existingDay) {
-                // Remove assignment
+                // Remove assignment - delete linked todo first (by todo_id or title+date)
+                const todoId = (existingDay as WeeklyItemDay).todo_id;
+                if (todoId) {
+                    await supabase.from('habit_daily_todos').delete().eq('id', todoId);
+                } else {
+                    await supabase
+                        .from('habit_daily_todos')
+                        .delete()
+                        .eq('user_id', user.id)
+                        .eq('date', dateStr)
+                        .eq('title', item.title);
+                }
                 await supabase
                     .from('habit_weekly_item_days')
                     .delete()
                     .eq('id', existingDay.id);
 
                 setItemDays(prev => prev.filter(d => d.id !== existingDay.id));
-
-                // Delete the corresponding todo if it exists
-                await supabase
-                    .from('habit_daily_todos')
-                    .delete()
-                    .eq('user_id', user.id)
-                    .eq('date', dateStr)
-                    .eq('title', item.title);
             } else {
                 // Before adding assignment, remove any existing assignments for this item to other days
                 const otherDayAssignments = itemDays.filter(d => d.weekly_item_id === itemId && d.date !== dateStr);
@@ -406,18 +537,21 @@ export default function WeeklyPlanView() {
                 if (otherDayAssignments.length > 0) {
                     // Delete all other assignments
                     for (const otherDay of otherDayAssignments) {
+                        const oTodoId = (otherDay as WeeklyItemDay).todo_id;
+                        if (oTodoId) {
+                            await supabase.from('habit_daily_todos').delete().eq('id', oTodoId);
+                        } else {
+                            await supabase
+                                .from('habit_daily_todos')
+                                .delete()
+                                .eq('user_id', user.id)
+                                .eq('date', otherDay.date)
+                                .eq('title', item.title);
+                        }
                         await supabase
                             .from('habit_weekly_item_days')
                             .delete()
                             .eq('id', otherDay.id);
-
-                        // Delete corresponding todos from other days
-                        await supabase
-                            .from('habit_daily_todos')
-                            .delete()
-                            .eq('user_id', user.id)
-                            .eq('date', otherDay.date)
-                            .eq('title', item.title);
                     }
 
                     // Update local state to remove other assignments
@@ -497,6 +631,7 @@ export default function WeeklyPlanView() {
                             time_of_day: null,
                             is_done: false,
                             goal_id: item.goal_id || null,
+                            weekly_item_day_id: newDay.id,
                         };
 
                         const { data: newTodo, error: todoError } = await supabase
@@ -505,14 +640,13 @@ export default function WeeklyPlanView() {
                             .select()
                             .single();
 
-                        if (todoError) {
-                            console.error('Error creating todo:', JSON.stringify(todoError, null, 2));
-                            console.error('Todo data attempted:', JSON.stringify(todoData, null, 2));
-                            console.error('Item data:', JSON.stringify(item, null, 2));
-                            console.error('User ID:', user.id);
-                            console.error('Date string:', dateStr);
-                        } else if (newTodo) {
-                            console.log('Successfully created todo:', newTodo);
+                        if (!todoError && newTodo) {
+                            await supabase
+                                .from('habit_weekly_item_days')
+                                .update({ todo_id: newTodo.id })
+                                .eq('id', newDay.id);
+                        } else if (todoError) {
+                            console.error('Error creating todo:', todoError);
                         }
                     } else {
                         console.log('Todo already exists for this item and date');
@@ -543,43 +677,58 @@ export default function WeeklyPlanView() {
                 day.id === itemDayId ? { ...day, completed, completed_at: completedAt } : day
             ));
 
-            // Update corresponding todo in daily plan
+            // Update corresponding todo in daily plan (two-way sync)
             const itemDay = itemDays.find(d => d.id === itemDayId);
             if (itemDay) {
                 const item = weeklyItems.find(i => i.id === itemDay.weekly_item_id);
                 if (item) {
-                    // Update or create the todo
-                    const { data: existingTodo } = await supabase
-                        .from('habit_daily_todos')
-                        .select('id')
-                        .eq('user_id', user.id)
-                        .eq('date', itemDay.date)
-                        .eq('title', item.title)
-                        .maybeSingle();
-
-                    if (existingTodo) {
-                        // Update existing todo
+                    const todoId = (itemDay as WeeklyItemDay).todo_id;
+                    if (todoId) {
                         await supabase
                             .from('habit_daily_todos')
-                            .update({
-                                is_done: completed,
-                                completed_at: completedAt,
-                            })
-                            .eq('id', existingTodo.id);
+                            .update({ is_done: completed, completed_at: completedAt })
+                            .eq('id', todoId);
                     } else {
-                        // Create todo if it doesn't exist (shouldn't happen, but just in case)
-                        await supabase
+                        const { data: existingTodo } = await supabase
                             .from('habit_daily_todos')
-                            .insert({
-                                user_id: user.id,
-                                date: itemDay.date,
-                                title: item.title,
-                                category: item.category,
-                                time_of_day: null,
-                                is_done: completed,
-                                completed_at: completedAt,
-                                goal_id: item.goal_id,
-                            });
+                            .select('id')
+                            .eq('user_id', user.id)
+                            .eq('date', itemDay.date)
+                            .eq('title', item.title)
+                            .maybeSingle();
+
+                        if (existingTodo) {
+                            await supabase
+                                .from('habit_daily_todos')
+                                .update({ is_done: completed, completed_at: completedAt })
+                                .eq('id', existingTodo.id);
+                            await supabase
+                                .from('habit_weekly_item_days')
+                                .update({ todo_id: existingTodo.id })
+                                .eq('id', itemDayId);
+                        } else {
+                            const mapCat = (c: string | null): 'physical' | 'mental' | 'spiritual' | null => {
+                                if (!c) return null;
+                                const m: Record<string, 'physical' | 'mental' | 'spiritual' | null> = {
+                                    health: 'physical', family: 'mental', relationships: 'mental', work: 'mental',
+                                    business: 'mental', education: 'mental', finance: 'mental', personal: 'mental', other: null,
+                                };
+                                return m[c.toLowerCase()] || null;
+                            };
+                            await supabase
+                                .from('habit_daily_todos')
+                                .insert({
+                                    user_id: user.id,
+                                    date: itemDay.date,
+                                    title: item.title,
+                                    category: mapCat(item.category),
+                                    time_of_day: null,
+                                    is_done: completed,
+                                    completed_at: completedAt,
+                                    goal_id: item.goal_id,
+                                    weekly_item_day_id: itemDayId,
+                                });
+                        }
                     }
 
                     // Update item status based on day completions
@@ -612,18 +761,120 @@ export default function WeeklyPlanView() {
         }
     };
 
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'done':
-                return 'bg-green-500/20 text-green-400';
-            case 'in_progress':
-                return 'bg-blue-500/20 text-blue-400';
-            case 'not_started':
-                return 'bg-slate-500/20 text-slate-400';
-            default:
-                return 'bg-slate-500/20 text-slate-400';
+    const handleAddEvent = async () => {
+        if (!newEventTitle.trim() || !weeklyPlan) return;
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+            const eventDate = newEventDate || weekStartStr;
+            const { data: newEvent, error } = await supabase
+                .from('habit_weekly_events')
+                .insert({
+                    user_id: user.id,
+                    weekly_plan_id: weeklyPlan.id,
+                    title: newEventTitle.trim(),
+                    date: eventDate,
+                    start_time: newEventStartTime || null,
+                    end_time: newEventEndTime || null,
+                    sms_notify: false,
+                })
+                .select()
+                .single();
+            if (!error && newEvent) {
+                setNewEventTitle('');
+                setNewEventStartTime('');
+                setNewEventEndTime('');
+                // Create todo on that day for two-way sync
+                const { data: newTodo } = await supabase
+                    .from('habit_daily_todos')
+                    .insert({
+                        user_id: user.id,
+                        date: eventDate,
+                        title: newEvent.title,
+                        is_done: false,
+                        weekly_event_id: newEvent.id,
+                    })
+                    .select('id')
+                    .single();
+                if (newTodo) {
+                    await supabase
+                        .from('habit_weekly_events')
+                        .update({ todo_id: newTodo.id })
+                        .eq('id', newEvent.id);
+                }
+                const addedEvent = { ...newEvent, todo_id: newTodo?.id ?? null, is_done: false };
+                setEvents(prev => {
+                    const next = [...prev, addedEvent];
+                    setWeeklyScores(s => {
+                        if (!s) return s;
+                        const eventsScore = next.length > 0 ? Math.round((next.filter(e => e.is_done).length / next.length) * 100) : 0;
+                        return {
+                            ...s,
+                            weekly_events_score: eventsScore,
+                            score_overall: Math.round(s.avg_daily_score * 0.35 + s.weekly_goals_score * 0.25 + s.weekly_todos_score * 0.25 + eventsScore * 0.15),
+                        };
+                    });
+                    return next;
+                });
+            }
+        } catch (error) {
+            console.error('Error adding event:', error);
         }
     };
+
+    const handleToggleEventCompletion = async (ev: WeeklyEvent, completed: boolean) => {
+        if (!ev.todo_id) return;
+        try {
+            await supabase
+                .from('habit_daily_todos')
+                .update({ is_done: completed, completed_at: completed ? new Date().toISOString() : null })
+                .eq('id', ev.todo_id);
+            const nextEvents = events.map(e => e.id === ev.id ? { ...e, is_done: completed } : e);
+            setEvents(nextEvents);
+            setWeeklyScores(prev => {
+                if (!prev) return prev;
+                const completedCount = nextEvents.filter(e => e.is_done).length;
+                const eventsScore = nextEvents.length > 0 ? Math.round((completedCount / nextEvents.length) * 100) : 0;
+                return {
+                    ...prev,
+                    weekly_events_score: eventsScore,
+                    score_overall: Math.round(prev.avg_daily_score * 0.35 + prev.weekly_goals_score * 0.25 + prev.weekly_todos_score * 0.25 + eventsScore * 0.15),
+                };
+            });
+        } catch (err) {
+            console.error('Error toggling event completion:', err);
+        }
+    };
+
+    const handleDeleteEvent = async (eventId: string) => {
+        if (!confirm('Delete this event?')) return;
+        try {
+            const ev = events.find(e => e.id === eventId);
+            const { data } = await supabase.from('habit_weekly_events').select('todo_id').eq('id', eventId).single();
+            if (data?.todo_id) {
+                await supabase.from('habit_daily_todos').delete().eq('id', data.todo_id);
+            }
+            await supabase.from('habit_weekly_events').delete().eq('id', eventId);
+            setEvents(prev => {
+                const next = prev.filter(e => e.id !== eventId);
+                setWeeklyScores(s => {
+                    if (!s) return s;
+                    const eventsScore = next.length > 0 ? Math.round((next.filter(e => e.is_done).length / next.length) * 100) : 0;
+                    return {
+                        ...s,
+                        weekly_events_score: eventsScore,
+                        score_overall: Math.round(s.avg_daily_score * 0.35 + s.weekly_goals_score * 0.25 + s.weekly_todos_score * 0.25 + eventsScore * 0.15),
+                    };
+                });
+                return next;
+            });
+        } catch (error) {
+            console.error('Error deleting event:', error);
+        }
+    };
+
+    // Calendar sync placeholder - would need Google Calendar API etc.
+    // TODO: Add calendar integration when API is available
 
     if (loading) {
         return <div className="text-center py-12 text-slate-400">Loading...</div>;
@@ -631,14 +882,59 @@ export default function WeeklyPlanView() {
 
     const weekRange = `${weekDays[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekDays[6].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
 
+    const goalsItems = weeklyItems.filter(i => (i.item_type || 'goal') === 'goal');
+    const todosItems = weeklyItems.filter(i => i.item_type === 'todo');
+
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold">Weekly Plan</h1>
-                    <p className="text-sm text-slate-400 mt-1">{weekRange}</p>
+            <div className="space-y-4">
+                <div className="grid grid-cols-[auto_1fr_auto] items-center gap-4 w-full">
+                    <button
+                        onClick={handlePrevWeek}
+                        className="rounded-md border border-slate-700 bg-slate-900 p-2 text-slate-300 hover:bg-slate-800 transition-colors shrink-0 justify-self-start"
+                        aria-label="Previous week"
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                        </svg>
+                    </button>
+                    <div className="flex flex-col items-center justify-center min-w-0">
+                        <span className="text-sm font-medium text-slate-300">
+                            {weekRange}
+                        </span>
+                        <button
+                            onClick={handleThisWeek}
+                            className="mt-1 rounded-md border border-slate-700 bg-slate-900 px-3 py-1 text-xs font-medium text-slate-300 hover:bg-slate-800 transition-colors whitespace-nowrap"
+                        >
+                            This Week
+                        </button>
+                    </div>
+                    <button
+                        onClick={handleNextWeek}
+                        className="rounded-md border border-slate-700 bg-slate-900 p-2 text-slate-300 hover:bg-slate-800 transition-colors shrink-0 justify-self-end"
+                        aria-label="Next week"
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                    </button>
                 </div>
             </div>
+
+            {/* Weekly Score */}
+            <section className="rounded-lg border border-slate-800 bg-slate-950 p-4">
+                <details open className="group">
+                    <summary className="text-lg font-semibold mb-3 cursor-pointer list-none flex items-center justify-between">
+                        <span>Weekly Score</span>
+                        <svg className="w-5 h-5 text-slate-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </summary>
+                    <div className="mt-3">
+                        <WeeklyScoreBars scores={weeklyScores} />
+                    </div>
+                </details>
+            </section>
 
             {/* This Week's Focus */}
             <section className="rounded-lg border border-slate-800 bg-slate-950 p-4">
@@ -676,11 +972,11 @@ export default function WeeklyPlanView() {
                 </details>
             </section>
 
-            {/* What I want to accomplish this week */}
+            {/* Weekly Goals & To-Do */}
             <section className="rounded-lg border border-slate-800 bg-slate-950 p-4">
                 <details open className="group">
                     <summary className="text-lg font-semibold mb-3 cursor-pointer list-none flex items-center justify-between">
-                        <span>What I want to accomplish this week</span>
+                        <span>Weekly Goals & To-Do</span>
                         <svg className="w-5 h-5 text-slate-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                         </svg>
@@ -688,14 +984,24 @@ export default function WeeklyPlanView() {
                     <div className="mt-3">
                         {/* Add new item */}
                         <div className="mb-4 p-3 rounded border border-slate-700 bg-slate-900/50 space-y-2">
-                            <input
-                                type="text"
-                                value={newItemTitle}
-                                onChange={(e) => setNewItemTitle(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleAddItem()}
-                                placeholder="Add a weekly goal/task..."
-                                className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-                            />
+                            <div className="flex gap-2">
+                                <select
+                                    value={newItemType}
+                                    onChange={(e) => setNewItemType(e.target.value as 'goal' | 'todo')}
+                                    className="rounded border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs shrink-0"
+                                >
+                                    <option value="goal">Goal / Priority</option>
+                                    <option value="todo">To-Do</option>
+                                </select>
+                                <input
+                                    type="text"
+                                    value={newItemTitle}
+                                    onChange={(e) => setNewItemTitle(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleAddItem()}
+                                    placeholder={newItemType === 'goal' ? 'Add a weekly goal...' : 'Add a weekly to-do...'}
+                                    className="flex-1 rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+                                />
+                            </div>
                             <div className="flex gap-2 flex-wrap">
                         <div className="flex-1 min-w-[120px] relative">
                             <select
@@ -1019,9 +1325,17 @@ export default function WeeklyPlanView() {
                                     </div>
                                 ) : (
                                     <div className="flex items-start gap-3">
-                                        <div className="flex-1">
+                                        <label className="flex items-center cursor-pointer shrink-0 pt-0.5">
+                                            <input
+                                                type="checkbox"
+                                                checked={item.status === 'done'}
+                                                onChange={(e) => handleUpdateItem(item.id, { status: e.target.checked ? 'done' : 'not_started' })}
+                                                className="h-5 w-5 rounded border-slate-600 text-amber-500 focus:ring-amber-500 cursor-pointer"
+                                            />
+                                        </label>
+                                        <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2 flex-wrap">
-                                                <span className="font-medium text-slate-200">{item.title}</span>
+                                                <span className={`font-medium ${item.status === 'done' ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{item.title}</span>
                                                 {linkedGoal && (
                                                     <span className="text-xs text-slate-400">→ {linkedGoal.name}</span>
                                                 )}
@@ -1032,9 +1346,6 @@ export default function WeeklyPlanView() {
                                                 )}
                                                 <span className={`px-2 py-0.5 rounded text-xs border ${getPriorityColor(item.priority)}`}>
                                                     {item.priority}
-                                                </span>
-                                                <span className={`px-2 py-0.5 rounded text-xs ${getStatusColor(item.status)}`}>
-                                                    {item.status.replace('_', ' ')}
                                                 </span>
                                             </div>
                                         </div>
@@ -1060,12 +1371,100 @@ export default function WeeklyPlanView() {
                             </div>
                         );
                     })}
-                        {weeklyItems.length === 0 && (
+                        {(goalsItems.length === 0 && todosItems.length === 0) && (
                             <div className="text-center py-8 text-slate-500 text-sm">
-                                No items yet. Add one above to get started.
+                                No items yet. Add a goal or to-do above to get started.
                             </div>
                         )}
                         </div>
+                    </div>
+                </details>
+            </section>
+
+            {/* Weekly Events */}
+            <section className="rounded-lg border border-slate-800 bg-slate-950 p-4">
+                <details open className="group">
+                    <summary className="text-lg font-semibold mb-3 cursor-pointer list-none flex items-center justify-between">
+                        <span>Weekly Events / Meetings / Appointments</span>
+                        <svg className="w-5 h-5 text-slate-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </summary>
+                    <div className="mt-3 space-y-3">
+                        <div className="flex flex-wrap gap-2 items-end p-3 rounded border border-slate-700 bg-slate-900/50">
+                            <input
+                                type="text"
+                                value={newEventTitle}
+                                onChange={(e) => setNewEventTitle(e.target.value)}
+                                placeholder="Event title..."
+                                className="rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm flex-1 min-w-[140px]"
+                            />
+                            <select
+                                value={newEventDate}
+                                onChange={(e) => setNewEventDate(e.target.value)}
+                                className="rounded border border-slate-700 bg-slate-800 px-2 py-2 text-sm"
+                            >
+                                {weekDays.map(d => (
+                                    <option key={formatDate(d)} value={formatDate(d)}>
+                                        {d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                                    </option>
+                                ))}
+                            </select>
+                            <input
+                                type="time"
+                                value={newEventStartTime}
+                                onChange={(e) => setNewEventStartTime(e.target.value)}
+                                className="rounded border border-slate-700 bg-slate-800 px-2 py-2 text-sm"
+                            />
+                            <input
+                                type="time"
+                                value={newEventEndTime}
+                                onChange={(e) => setNewEventEndTime(e.target.value)}
+                                className="rounded border border-slate-700 bg-slate-800 px-2 py-2 text-sm"
+                            />
+                            <button
+                                onClick={handleAddEvent}
+                                className="px-4 py-2 rounded bg-amber-500 text-black text-sm font-semibold hover:bg-amber-400"
+                            >
+                                Add Event
+                            </button>
+                        </div>
+                        <ul className="space-y-2">
+                            {events.map(ev => (
+                                <li key={ev.id} className="flex items-center gap-3 p-3 rounded border border-slate-700 bg-slate-900/50 min-h-[44px]">
+                                    <label className="flex items-center gap-3 flex-1 cursor-pointer min-w-0">
+                                        <input
+                                            type="checkbox"
+                                            checked={!!ev.is_done}
+                                            onChange={(e) => handleToggleEventCompletion(ev, e.target.checked)}
+                                            disabled={!ev.todo_id}
+                                            className="h-5 w-5 shrink-0 rounded border-slate-600 text-amber-500 focus:ring-amber-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                            <span className={`font-medium block ${ev.is_done ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                                                {ev.title}
+                                            </span>
+                                            <span className="text-xs text-slate-400">
+                                                {new Date(ev.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                                                {ev.start_time && ` • ${ev.start_time.slice(0, 5)}`}
+                                            </span>
+                                        </div>
+                                    </label>
+                                    <button
+                                        onClick={() => handleDeleteEvent(ev.id)}
+                                        className="text-red-400 hover:text-red-300 text-sm shrink-0"
+                                    >
+                                        Delete
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                        {events.length === 0 && (
+                            <p className="text-sm text-slate-500 text-center py-2">No events scheduled.</p>
+                        )}
+                        <p className="text-xs text-slate-500">
+                            Calendar sync: placeholder for future Google Calendar integration.
+                        </p>
                     </div>
                 </details>
             </section>

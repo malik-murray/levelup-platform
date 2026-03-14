@@ -8,6 +8,7 @@ type DailyNotesContent = {
     notes: string | null;
     lessons: string | null;
     feelings: string | null;
+    ideas: string | null;
     reflection: string | null;
 };
 
@@ -15,6 +16,7 @@ const SECTIONS = [
     { key: 'notes' as const, title: 'Notes', placeholder: 'General notes...' },
     { key: 'lessons' as const, title: 'Lessons', placeholder: 'What did you learn today?' },
     { key: 'feelings' as const, title: 'Feelings', placeholder: 'How are you feeling?' },
+    { key: 'ideas' as const, title: 'Ideas', placeholder: 'Any ideas or insights?' },
     { key: 'reflection' as const, title: 'Reflection', placeholder: 'End of day reflection...' },
 ];
 
@@ -26,11 +28,12 @@ export default function DashboardNotesSection({
     userId: string | null;
 }) {
     const [notesOpen, setNotesOpen] = useState(true);
-    const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['notes', 'lessons', 'feelings', 'reflection']));
+    const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['notes', 'lessons', 'feelings', 'ideas', 'reflection']));
     const [content, setContent] = useState<DailyNotesContent>({
         notes: null,
         lessons: null,
         feelings: null,
+        ideas: null,
         reflection: null,
     });
     const [loading, setLoading] = useState(true);
@@ -48,7 +51,7 @@ export default function DashboardNotesSection({
             const dateStr = formatDate(selectedDate);
             const { data } = await supabase
                 .from('habit_daily_content')
-                .select('notes, lessons, feelings, reflection')
+                .select('notes, lessons, feelings, ideas, reflection')
                 .eq('user_id', userId)
                 .eq('date', dateStr)
                 .single();
@@ -57,6 +60,7 @@ export default function DashboardNotesSection({
                 notes: data?.notes ?? null,
                 lessons: data?.lessons ?? null,
                 feelings: (data as { feelings?: string } | null)?.feelings ?? null,
+                ideas: data?.ideas ?? null,
                 reflection: data?.reflection ?? null,
             });
         } catch (error) {
@@ -73,7 +77,7 @@ export default function DashboardNotesSection({
         try {
             const { data: existing } = await supabase
                 .from('habit_daily_content')
-                .select('ideas, distractions')
+                .select('distractions')
                 .eq('user_id', userId)
                 .eq('date', dateStr)
                 .single();
@@ -87,8 +91,8 @@ export default function DashboardNotesSection({
                         notes: updated.notes || null,
                         lessons: updated.lessons || null,
                         feelings: updated.feelings ?? null,
+                        ideas: updated.ideas ?? null,
                         reflection: updated.reflection || null,
-                        ideas: existing?.ideas ?? null,
                         distractions: existing?.distractions ?? null,
                     },
                     { onConflict: 'user_id,date' }
