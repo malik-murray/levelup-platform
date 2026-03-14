@@ -109,9 +109,9 @@ export default function HabitDailyEntrySection({
         setDraftTodos([...todos.map((t) => t.title), '']);
     }, [todos]);
 
-    const loadData = async () => {
+    const loadData = async (silent = false) => {
         if (!userId) return;
-        setLoading(true);
+        if (!silent) setLoading(true);
         try {
             const dateStr = formatDate(selectedDate);
 
@@ -193,7 +193,7 @@ export default function HabitDailyEntrySection({
                     filter: `user_id=eq.${userId} AND date=eq.${dateStr}`,
                 },
                 () => {
-                    loadData();
+                    loadData(true);
                 }
             )
             .subscribe();
@@ -210,7 +210,7 @@ export default function HabitDailyEntrySection({
                     filter: `user_id=eq.${userId} AND date=eq.${dateStr}`,
                 },
                 () => {
-                    loadData();
+                    loadData(true);
                 }
             )
             .subscribe();
@@ -227,7 +227,7 @@ export default function HabitDailyEntrySection({
                     filter: `user_id=eq.${userId} AND date=eq.${dateStr}`,
                 },
                 () => {
-                    loadData();
+                    loadData(true);
                 }
             )
             .subscribe();
@@ -244,7 +244,7 @@ export default function HabitDailyEntrySection({
                     filter: `user_id=eq.${userId} AND date=eq.${dateStr}`,
                 },
                 () => {
-                    loadData();
+                    loadData(true);
                 }
             )
             .subscribe();
@@ -317,7 +317,7 @@ export default function HabitDailyEntrySection({
                         .eq('title', habitName);
                 }
             }
-            loadData();
+            loadData(true);
         } catch (error) {
             console.error('Error updating habit:', error);
         }
@@ -346,7 +346,7 @@ export default function HabitDailyEntrySection({
             } else if (priority) {
                 await supabase.from('habit_daily_priorities').delete().eq('id', priority.id);
             }
-            loadData();
+            loadData(true);
         } catch (error) {
             console.error('Error saving priority:', error);
         }
@@ -374,7 +374,7 @@ export default function HabitDailyEntrySection({
             } else if (todo) {
                 await supabase.from('habit_daily_todos').delete().eq('id', todo.id);
             }
-            loadData();
+            loadData(true);
         } catch (error) {
             console.error('Error saving todo:', error);
         }
@@ -422,7 +422,7 @@ export default function HabitDailyEntrySection({
                     .eq('date', dateStr)
                     .eq('title', priorityText);
             }
-            loadData();
+            loadData(true);
         } catch (error) {
             console.error('Error updating priority:', error);
         }
@@ -459,7 +459,7 @@ export default function HabitDailyEntrySection({
                         .eq('id', priorityWithText.id);
                 }
             }
-            loadData();
+            loadData(true);
         } catch (error) {
             console.error('Error updating todo:', error);
         }
@@ -553,18 +553,16 @@ export default function HabitDailyEntrySection({
     return (
         <div className="rounded-lg border border-slate-700 bg-slate-900 min-w-0 overflow-hidden">
             {/* Daily Plan - collapsible header */}
-            <div className="flex items-center justify-between gap-2 px-4 py-3 min-w-0">
-                <button
-                    type="button"
-                    onClick={() => setDailyPlanOpen((o) => !o)}
-                    className="flex-1 flex items-center justify-center gap-2 text-left hover:bg-slate-800/50 -mx-2 -my-1 px-2 py-1 rounded transition-colors min-w-0"
-                >
-                    <h2 className="text-2xl font-bold text-white">Daily Plan</h2>
-                    <svg className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${dailyPlanOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                </button>
-            </div>
+            <button
+                type="button"
+                onClick={() => setDailyPlanOpen((o) => !o)}
+                className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left hover:bg-slate-800/50 transition-colors min-w-0"
+            >
+                <h2 className="text-2xl font-bold text-white">Daily Plan</h2>
+                <svg className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${dailyPlanOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
             {dailyPlanOpen && (
             <div className="px-4 pb-4 space-y-6 min-w-0 overflow-hidden">
             {/* Top Priorities - collapsible */}

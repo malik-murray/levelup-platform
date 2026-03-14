@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { supabase } from '@auth/supabaseClient';
 
 type App = {
     name: string;
@@ -85,6 +86,21 @@ export default function AppSidebar({ isOpen, onClose }: { isOpen: boolean; onClo
                             })}
                         </ul>
                     </nav>
+
+                    {/* Log out - bottom of menu */}
+                    <div className="p-4 border-t border-slate-800">
+                        <button
+                            onClick={async () => {
+                                onClose();
+                                await supabase.auth.signOut();
+                                window.location.href = '/login';
+                            }}
+                            className="flex items-center gap-3 w-full px-4 py-3 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+                        >
+                            <span className="text-xl">🚪</span>
+                            <span className="font-medium">Log out</span>
+                        </button>
+                    </div>
                 </div>
             </aside>
         </>

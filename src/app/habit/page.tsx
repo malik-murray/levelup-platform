@@ -210,8 +210,8 @@ function HabitPageClient() {
         loadData();
     }, [selectedDate, currentMonth]);
 
-    const loadData = async () => {
-        setLoading(true);
+    const loadData = async (silent = false) => {
+        if (!silent) setLoading(true);
         try {
             if (isPreview) {
                 const dateStr = formatDate(selectedDate);
@@ -729,8 +729,8 @@ function HabitPageClient() {
                         dailyContent={dailyContent}
                         goals={goals}
                         scoringSettings={scoringSettings}
-                        onDataChange={loadData}
-                        onScoringSettingsChange={loadData}
+                        onDataChange={() => loadData(true)}
+                        onScoringSettingsChange={() => loadData(true)}
                         onDateChange={setSelectedDate}
                     />
                 ) : activeTab === 'weekly-plan' ? (
@@ -742,7 +742,7 @@ function HabitPageClient() {
                 ) : (
                     <HabitsManagementView
                         habitTemplates={habitTemplates}
-                        onDataChange={loadData}
+                        onDataChange={() => loadData(true)}
                     />
                 )}
             </div>

@@ -25,8 +25,8 @@ export default function HabitTodayPage() {
   const [habits, setHabits] = useState<HabitWithStatus[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     const dateStr = formatDate(selectedDate);
     try {
       if (isPreview) {
@@ -119,7 +119,7 @@ export default function HabitTodayPage() {
           }
           return { ...prev, habitEntries: rest };
         });
-        loadData();
+        loadData(true);
         return;
       }
 
@@ -146,7 +146,7 @@ export default function HabitTodayPage() {
           checked_at: new Date().toISOString(),
         });
       }
-      loadData();
+      loadData(true);
     },
     [habits, isPreview, preview, loadData]
   );

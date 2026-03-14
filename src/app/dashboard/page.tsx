@@ -8,6 +8,7 @@ import logo from "../logo.png";
 import { formatDate } from "@/lib/habitHelpers";
 import HabitDailyEntrySection from "./components/HabitDailyEntrySection";
 import NewsfeedSection from "./components/NewsfeedSection";
+import DashboardNotesSection from "./components/DashboardNotesSection";
 import FitnessWidget from "./components/FitnessWidget";
 import MarketsWidget from "./components/MarketsWidget";
 import FinanceWidget from "./components/FinanceWidget";
@@ -162,15 +163,6 @@ export default function DashboardPage() {
                                         </span>
                                     </div>
                                 )}
-                                <button
-                                    onClick={async () => {
-                                        await supabase.auth.signOut();
-                                        window.location.href = "/login";
-                                    }}
-                                    className="rounded-full border border-slate-700 bg-slate-900/50 px-4 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 transition-colors"
-                                >
-                                    Log out
-                                </button>
                             </div>
                         </div>
 
@@ -215,12 +207,14 @@ export default function DashboardPage() {
                                 <button
                                     type="button"
                                     onClick={() => setDailyScoreOpen((o) => !o)}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 text-center hover:bg-slate-800/50 transition-colors"
+                                    className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-800/50 transition-colors"
                                 >
-                                    <h2 className="text-2xl font-bold text-white">Daily Score</h2>
-                                    {headerScores?.grade && (
-                                        <span className="text-lg font-semibold text-amber-400">({headerScores.grade})</span>
-                                    )}
+                                    <div className="flex items-center gap-2">
+                                        <h2 className="text-2xl font-bold text-white">Daily Score</h2>
+                                        {headerScores?.grade && (
+                                            <span className="text-lg font-semibold text-amber-400">({headerScores.grade})</span>
+                                        )}
+                                    </div>
                                     <svg className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${dailyScoreOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                     </svg>
@@ -262,9 +256,15 @@ export default function DashboardPage() {
                                 />
                             </div>
 
-                            {/* Secondary Section - Newsfeed */}
+                            {/* Secondary Section - Notes & Newsfeed */}
                             <div className="lg:col-span-5 xl:col-span-4">
                                 <div className="space-y-6">
+                                    {timeframe === 'daily' && (
+                                        <DashboardNotesSection 
+                                            selectedDate={selectedDate}
+                                            userId={userId}
+                                        />
+                                    )}
                                     <NewsfeedSection 
                                         selectedDate={selectedDate}
                                         timeframe={timeframe}
