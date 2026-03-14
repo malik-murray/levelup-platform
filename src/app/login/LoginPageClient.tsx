@@ -1,24 +1,35 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
 
 export default function LoginPageClient() {
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirect') || '/dashboard';
+  const errorParam = searchParams.get('error');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [message, setMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (errorParam) setMessage(errorParam.replace(/\+/g, ' '));
+  }, [errorParam]);
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setMessage(null);
 
     if (mode === 'signup') {
-      const { error } = await supabase.auth.signUp({ email, password });
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
       if (error) setMessage(error.message);
       else setMessage('Check your email to confirm your account.');
     } else {
