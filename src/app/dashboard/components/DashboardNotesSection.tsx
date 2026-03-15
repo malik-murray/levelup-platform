@@ -1,8 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate } from '@/lib/habitHelpers';
+
+function adjustTextareaHeight(el: HTMLTextAreaElement | null) {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.max(80, el.scrollHeight)}px`;
+}
 
 type DailyNotesContent = {
     notes: string | null;
@@ -37,12 +43,19 @@ export default function DashboardNotesSection({
         reflection: null,
     });
     const [loading, setLoading] = useState(true);
+    const textareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
 
     useEffect(() => {
         if (userId) {
             loadContent();
         }
     }, [selectedDate, userId]);
+
+    useEffect(() => {
+        SECTIONS.forEach(({ key }) => {
+            if (expandedSections.has(key)) adjustTextareaHeight(textareaRefs.current[key]);
+        });
+    }, [content, expandedSections]);
 
     const loadContent = async () => {
         if (!userId) return;
@@ -172,14 +185,19 @@ export default function DashboardNotesSection({
                                     {isExpanded && (
                                         <div className="px-4 pb-3 pt-1">
                                             <textarea
+                                                ref={(el) => {
+                                                    textareaRefs.current[section.key] = el;
+                                                    adjustTextareaHeight(el);
+                                                }}
                                                 value={value}
-                                                onChange={(e) =>
-                                                    setContent((prev) => ({ ...prev, [section.key]: e.target.value }))
-                                                }
+                                                onChange={(e) => {
+                                                    setContent((prev) => ({ ...prev, [section.key]: e.target.value }));
+                                                    adjustTextareaHeight(e.target);
+                                                }}
                                                 onBlur={(e) => saveField(section.key, e.target.value || null)}
                                                 placeholder={section.placeholder}
-                                                className="w-full rounded border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 resize-none min-h-[80px] focus:border-amber-500/50 focus:outline-none"
-                                                rows={3}
+                                                className="w-full rounded border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 resize-none min-h-[80px] focus:border-amber-500/50 focus:outline-none overflow-hidden"
+                                                rows={1}
                                             />
                                         </div>
                                     )}
