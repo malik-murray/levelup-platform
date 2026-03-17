@@ -2,7 +2,7 @@
 
 export type WeeklyScores = {
     avg_daily_score: number;
-    weekly_goals_score: number;
+    weekly_habits_score: number;
     weekly_todos_score: number;
     weekly_events_score: number;
     score_overall: number;
@@ -10,7 +10,7 @@ export type WeeklyScores = {
 
 const BAR_CONFIG = [
     { key: 'avg_daily_score' as const, label: 'Avg Daily Score', color: 'from-amber-500 to-amber-400', trackBg: 'bg-amber-950/40', textColor: 'text-amber-400' },
-    { key: 'weekly_goals_score' as const, label: 'Weekly Goals Score', color: 'from-purple-500 to-purple-400', trackBg: 'bg-purple-950/40', textColor: 'text-purple-400' },
+    { key: 'weekly_habits_score' as const, label: 'Weekly Habits Score', color: 'from-purple-500 to-purple-400', trackBg: 'bg-purple-950/40', textColor: 'text-purple-400' },
     { key: 'weekly_todos_score' as const, label: 'Weekly To-Do Score', color: 'from-emerald-500 to-emerald-400', trackBg: 'bg-emerald-950/40', textColor: 'text-emerald-400' },
     { key: 'weekly_events_score' as const, label: 'Weekly Events Score', color: 'from-blue-500 to-blue-400', trackBg: 'bg-blue-950/40', textColor: 'text-blue-400' },
 ] as const;

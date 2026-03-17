@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate, getGrade, calculateItemScore, calculateDailyScore, type Category, type TimeOfDay, type HabitStatus } from '@/lib/habitHelpers';
@@ -43,6 +43,9 @@ type Todo = {
     completed_at: string | null;
     weekly_item_day_id?: string | null;
     weekly_event_id?: string | null;
+    created_at?: string | null;
+    start_time?: string | null;
+    end_time?: string | null;
 };
 
 type DailyScore = {
@@ -59,6 +62,18 @@ export type DailyScoresForHeader = {
     score_priorities: number;
     score_todos: number;
     grade: string;
+};
+
+const formatCompletedTime = (ts: string | null): string | null => {
+    if (!ts) return null;
+    const d = new Date(ts);
+    const formatted = d.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+    });
+    // e.g. "8:30 PM" -> "8:30pm"
+    return formatted.toLowerCase().replace(' ', '');
 };
 
 export default function HabitDailyEntrySection({
@@ -88,6 +103,7 @@ export default function HabitDailyEntrySection({
     const [prioritiesOpen, setPrioritiesOpen] = useState(true);
     const [todosOpen, setTodosOpen] = useState(true);
     const [habitsOpen, setHabitsOpen] = useState(true);
+    const [eventDisplayMap, setEventDisplayMap] = useState<Record<string, { start_time: string | null; end_time: string | null; title: string }>>({});
 
     useEffect(() => {
         if (userId) {
@@ -99,17 +115,64 @@ export default function HabitDailyEntrySection({
         }
     }, [selectedDate, userId]);
 
-    const sortedPrioritiesForSlots = [...priorities].sort(
-        (a, b) => (a.sort_order ?? 999) - (b.sort_order ?? 999)
+    const sortedPrioritiesForSlots = useMemo(
+        () =>
+            [...priorities].sort(
+                (a, b) => (a.sort_order ?? 999) - (b.sort_order ?? 999)
+            ),
+        [priorities]
     );
 
     useEffect(() => {
-        setDraftPriorities([...sortedPrioritiesForSlots.map((p) => p.text), '']);
-    }, [priorities]);
+        const titles = sortedPrioritiesForSlots.map((p) => {
+            if (p.completed && p.completed_at) {
+                const timeStr = formatCompletedTime(p.completed_at);
+                if (timeStr) {
+                    return `(${timeStr}) ${p.text}`;
+                }
+            }
+            return p.text;
+        });
+        setDraftPriorities([...titles, '']);
+    }, [sortedPrioritiesForSlots]);
+
+    const formatEventTimeShort = (start: string | null, end: string | null): string => {
+        const fmt = (t: string) => {
+            if (!t || t.length < 4) return '';
+            const parts = t.slice(0, 5).split(':').map(Number);
+            const h = parts[0];
+            const m = parts[1];
+            if (Number.isNaN(h)) return '';
+            const hour = h % 12 || 12;
+            const ampm = h < 12 ? 'am' : 'pm';
+            return m ? `${hour}:${String(m).padStart(2, '0')}${ampm}` : `${hour}${ampm}`;
+        };
+        if (start && end) return `${fmt(start)}-${fmt(end)}`;
+        if (start) return fmt(start);
+        return '';
+    };
 
     useEffect(() => {
-        setDraftTodos([...todos.map((t) => t.title), '']);
-    }, [todos]);
+        const titles = todos.map((t) => {
+            // 1) Prefer actual completion time when item is done
+            if (t.is_done && t.completed_at) {
+                const timeStr = formatCompletedTime(t.completed_at);
+                if (timeStr) return `(${timeStr}) ${t.title}`;
+            }
+            // 2) Otherwise fall back to scheduled/event time if available
+            if (t.weekly_event_id && eventDisplayMap[t.weekly_event_id]) {
+                const e = eventDisplayMap[t.weekly_event_id];
+                const timeStr = formatEventTimeShort(e.start_time, e.end_time);
+                if (timeStr) return `(${timeStr}) ${e.title}`;
+            }
+            if (t.start_time || t.end_time) {
+                const timeStr = formatEventTimeShort(t.start_time ?? null, t.end_time ?? null);
+                if (timeStr) return `(${timeStr}) ${t.title}`;
+            }
+            return t.title;
+        });
+        setDraftTodos([...titles, '']);
+    }, [todos, eventDisplayMap]);
 
     const loadData = async (silent = false) => {
         if (!userId) return;
@@ -140,13 +203,50 @@ export default function HabitDailyEntrySection({
                 .eq('date', dateStr)
                 .order('sort_order');
 
-            // Load todos (including weekly links for two-way sync)
+            // Load todos (including weekly links and optional time)
             const { data: todosData } = await supabase
                 .from('habit_daily_todos')
-                .select('id, title, category, is_done, date, completed_at, weekly_item_day_id, weekly_event_id')
+                .select('id, title, category, is_done, date, completed_at, weekly_item_day_id, weekly_event_id, created_at, start_time, end_time')
                 .eq('user_id', userId)
                 .eq('date', dateStr)
                 .order('created_at');
+
+            // Load event data for todos linked to weekly events (for sort-by-time and display title with time)
+            let eventStartTimes: Record<string, string> = {};
+            const eventDisplayMapNew: Record<string, { start_time: string | null; end_time: string | null; title: string }> = {};
+            const eventIds = (todosData || []).map((t) => t.weekly_event_id).filter(Boolean) as string[];
+            if (eventIds.length > 0) {
+                const { data: eventsData } = await supabase
+                    .from('habit_weekly_events')
+                    .select('id, start_time, end_time, title')
+                    .in('id', eventIds);
+                if (eventsData) {
+                    eventStartTimes = Object.fromEntries(
+                        eventsData.map((e) => [e.id, e.start_time ?? ''])
+                    );
+                    eventsData.forEach((e) => {
+                        eventDisplayMapNew[e.id] = {
+                            start_time: e.start_time ?? null,
+                            end_time: e.end_time ?? null,
+                            title: e.title ?? '',
+                        };
+                    });
+                }
+            }
+            setEventDisplayMap(eventDisplayMapNew);
+
+            const getTodoSortTime = (t: (typeof todosData)[0]) => {
+                if (t.weekly_event_id) return eventStartTimes[t.weekly_event_id] ?? '';
+                return (t as { start_time?: string }).start_time ?? '';
+            };
+            const sortedTodos = [...(todosData || [])].sort((a, b) => {
+                const aTime = getTodoSortTime(a);
+                const bTime = getTodoSortTime(b);
+                if (aTime && bTime) return aTime.localeCompare(bTime);
+                if (aTime) return -1;
+                if (bTime) return 1;
+                return (a.created_at ?? '').localeCompare(b.created_at ?? '');
+            });
 
             // Load daily score
             const { data: scoreData } = await supabase
@@ -159,7 +259,7 @@ export default function HabitDailyEntrySection({
             setHabitTemplates(templates || []);
             setHabitEntries(entries || []);
             setPriorities(prioritiesData || []);
-            setTodos(todosData || []);
+            setTodos(sortedTodos);
             if (scoreData) {
                 setDailyScore({
                     score_overall: scoreData.score_overall,
@@ -354,22 +454,43 @@ export default function HabitDailyEntrySection({
         }
     };
 
+    const parseTimeToDb = (s: string): string | null => {
+        const m = s.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*([ap]m)$/i);
+        if (!m) return null;
+        let h = parseInt(m[1], 10);
+        const min = m[2] ? parseInt(m[2], 10) : 0;
+        if (m[3].toLowerCase() === 'pm' && h !== 12) h += 12;
+        if (m[3].toLowerCase() === 'am' && h === 12) h = 0;
+        return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:00`;
+    };
+
     const handleTodoSlotBlur = async (slotIndex: number, value: string) => {
         if (!userId) return;
         const dateStr = formatDate(selectedDate);
         const todo = todos[slotIndex];
+        const match = value.trim().match(/^\((\d{1,2}(?::\d{2})?\s*[ap]m)(?:\s*-\s*(\d{1,2}(?::\d{2})?\s*[ap]m))?\)\s*(.*)$/i);
+        let title = value.trim();
+        let start_time: string | null = null;
+        let end_time: string | null = null;
+        if (match) {
+            start_time = parseTimeToDb(match[1]);
+            if (match[2]) end_time = parseTimeToDb(match[2]);
+            title = match[3].trim();
+        }
         try {
-            if (value.trim()) {
+            if (title) {
                 if (todo) {
                     await supabase
                         .from('habit_daily_todos')
-                        .update({ title: value.trim() })
+                        .update({ title, start_time, end_time })
                         .eq('id', todo.id);
                 } else {
                     await supabase.from('habit_daily_todos').insert({
                         user_id: userId,
                         date: dateStr,
-                        title: value.trim(),
+                        title,
+                        start_time,
+                        end_time,
                         is_done: false,
                     });
                 }
@@ -483,6 +604,7 @@ export default function HabitDailyEntrySection({
         return {
             ...template,
             status: (entry?.status || 'missed') as HabitStatus,
+            checked_at: entry?.checked_at ?? null,
         };
     });
 
@@ -597,19 +719,18 @@ export default function HabitDailyEntrySection({
                         const priority = sortedPrioritiesForSlots[slotIndex];
                         const isAddRow = slotIndex === sortedPrioritiesForSlots.length;
                         return (
-                            <li key={priority?.id ?? `priority-slot-${slotIndex}`} className="flex items-center gap-2 min-w-0">
+                            <li key={priority?.id ?? `priority-slot-${slotIndex}`} className="flex items-start gap-2 min-w-0">
                                 {priority ? (
                                     <input
                                         type="checkbox"
                                         checked={priority.completed}
                                         onChange={() => handleTogglePriority(priority.id, priority.completed)}
-                                        className="h-5 w-5 shrink-0 rounded border-slate-600 text-amber-500 focus:ring-amber-500"
+                                        className="h-5 w-5 shrink-0 rounded border-slate-600 text-amber-500 focus:ring-amber-500 mt-2.5"
                                     />
                                 ) : (
-                                    <span className="w-5 shrink-0" aria-hidden />
+                                    <span className="w-5 shrink-0 mt-2.5" aria-hidden />
                                 )}
-                                <input
-                                    type="text"
+                                <textarea
                                     value={draftPriorities[slotIndex] ?? ''}
                                     onChange={(e) =>
                                         setDraftPriorities((prev) => {
@@ -619,9 +740,10 @@ export default function HabitDailyEntrySection({
                                         })
                                     }
                                     onBlur={(e) => handlePrioritySlotBlur(slotIndex, e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+                                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
                                     placeholder={isAddRow ? 'Add priority' : `Priority ${slotIndex + 1}`}
-                                    className={`flex-1 min-w-0 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none ${priority?.completed ? 'line-through text-slate-500' : ''}`}
+                                    rows={2}
+                                    className={`flex-1 min-w-0 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none resize-none overflow-y-auto break-words min-h-[2.5rem] ${priority?.completed ? 'line-through text-slate-500' : ''}`}
                                 />
                             </li>
                         );
@@ -650,19 +772,18 @@ export default function HabitDailyEntrySection({
                         const todo = todos[slotIndex];
                         const isAddRow = slotIndex === todos.length;
                         return (
-                            <li key={todo?.id ?? `todo-slot-${slotIndex}`} className="flex items-center gap-2 min-w-0">
+                            <li key={todo?.id ?? `todo-slot-${slotIndex}`} className="flex items-start gap-2 min-w-0">
                                 {todo ? (
                                     <input
                                         type="checkbox"
                                         checked={todo.is_done}
                                         onChange={() => handleToggleTodo(todo.id, todo.is_done)}
-                                        className="h-5 w-5 shrink-0 rounded border-slate-600 text-amber-500 focus:ring-amber-500"
+                                        className="h-5 w-5 shrink-0 rounded border-slate-600 text-amber-500 focus:ring-amber-500 mt-2.5"
                                     />
                                 ) : (
-                                    <span className="w-5 shrink-0" aria-hidden />
+                                    <span className="w-5 shrink-0 mt-2.5" aria-hidden />
                                 )}
-                                <input
-                                    type="text"
+                                <textarea
                                     value={draftTodos[slotIndex] ?? ''}
                                     onChange={(e) =>
                                         setDraftTodos((prev) => {
@@ -672,9 +793,10 @@ export default function HabitDailyEntrySection({
                                         })
                                     }
                                     onBlur={(e) => handleTodoSlotBlur(slotIndex, e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+                                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
                                     placeholder={isAddRow ? 'Add to-do' : `To-do ${slotIndex + 1}`}
-                                    className={`flex-1 min-w-0 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none ${todo?.is_done ? 'line-through text-slate-500' : ''}`}
+                                    rows={2}
+                                    className={`flex-1 min-w-0 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none resize-none overflow-y-auto break-words min-h-[2.5rem] ${todo?.is_done ? 'line-through text-slate-500' : ''}`}
                                 />
                             </li>
                         );
@@ -742,7 +864,9 @@ export default function HabitDailyEntrySection({
                                         />
                                         <span className="text-lg shrink-0">{habit.icon}</span>
                                         <span className={`flex-1 min-w-0 break-words ${habit.status === 'checked' ? 'line-through text-slate-500' : 'text-white'}`}>
-                                            {habit.name}
+                                            {habit.status === 'checked' && habit.checked_at
+                                                ? `(${formatCompletedTime(habit.checked_at)}) ${habit.name}`
+                                                : habit.name}
                                         </span>
                                         <span
                                             className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium capitalize border ${categoryColors[habit.category]}`}

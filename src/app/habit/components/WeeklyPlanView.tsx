@@ -149,6 +149,42 @@ export default function WeeklyPlanView() {
 
             setGoals(goalsData || []);
 
+            // Load weekly events by date range first (independent of plan so they always persist)
+            const weekEndForEvents = new Date(selectedWeekStart);
+            weekEndForEvents.setDate(weekEndForEvents.getDate() + 6);
+            const weekEndStrForEvents = formatDate(weekEndForEvents);
+            const { data: eventsRaw } = await supabase
+                .from('habit_weekly_events')
+                .select('id, title, date, start_time, end_time, sms_notify, todo_id')
+                .eq('user_id', user.id)
+                .gte('date', weekStartStr)
+                .lte('date', weekEndStrForEvents)
+                .order('date')
+                .order('start_time');
+            const eventIdsWithTodo = (eventsRaw || []).map((e) => (e as { todo_id?: string }).todo_id).filter(Boolean) as string[];
+            let todoIsDoneMap: Record<string, boolean> = {};
+            if (eventIdsWithTodo.length > 0) {
+                const { data: todosData } = await supabase
+                    .from('habit_daily_todos')
+                    .select('id, is_done')
+                    .in('id', eventIdsWithTodo);
+                if (todosData) todoIsDoneMap = Object.fromEntries(todosData.map((t) => [t.id, !!t.is_done]));
+            }
+            const eventsData: WeeklyEvent[] = (eventsRaw || []).map((e: Record<string, unknown>) => {
+                const todoId = e.todo_id as string | undefined;
+                return {
+                    id: e.id,
+                    title: e.title,
+                    date: e.date,
+                    start_time: e.start_time,
+                    end_time: e.end_time,
+                    sms_notify: e.sms_notify,
+                    todo_id: todoId ?? null,
+                    is_done: todoId ? todoIsDoneMap[todoId] ?? false : false,
+                } as WeeklyEvent;
+            });
+            setEvents(eventsData);
+
             // Load or create weekly plan
             let { data: planData, error: planLoadError } = await supabase
                 .from('habit_weekly_plans')
@@ -273,58 +309,33 @@ export default function WeeklyPlanView() {
                     }
                 }
 
-                // Load weekly events by date range (not weekly_plan_id) so events persist across refresh
-                // even if plan lookup varies due to timing/timezone
-                const weekEndForEvents = new Date(currentWeekStart);
-                weekEndForEvents.setDate(weekEndForEvents.getDate() + 6);
-                const weekEndStrForEvents = formatDate(weekEndForEvents);
-                const { data: eventsRaw } = await supabase
-                    .from('habit_weekly_events')
-                    .select('id, title, date, start_time, end_time, sms_notify, todo_id, habit_daily_todos(is_done)')
-                    .eq('user_id', user.id)
-                    .gte('date', weekStartStr)
-                    .lte('date', weekEndStrForEvents)
-                    .order('date')
-                    .order('start_time');
-                const eventsData: WeeklyEvent[] = (eventsRaw || []).map((e: Record<string, unknown>) => {
-                    const todo = e.habit_daily_todos as { is_done?: boolean } | { is_done?: boolean }[] | null | undefined;
-                    const isDone = Array.isArray(todo) ? todo[0]?.is_done : todo?.is_done;
-                    const { habit_daily_todos: _, ...rest } = e;
-                    return { ...rest, is_done: !!isDone } as WeeklyEvent;
-                });
-                setEvents(eventsData);
-
-                // Compute weekly scores from habit_daily_scores
+                // Compute weekly scores from habit_daily_scores (events already loaded above)
                 const weekEnd = new Date(currentWeekStart);
                 weekEnd.setDate(weekEnd.getDate() + 6);
                 const weekEndStr = formatDate(weekEnd);
                 const { data: dailyScores } = await supabase
                     .from('habit_daily_scores')
-                    .select('score_overall, score_priorities, score_todos')
+                    .select('date, score_overall, score_habits, score_priorities, score_todos')
                     .eq('user_id', user.id)
                     .gte('date', weekStartStr)
                     .lte('date', weekEndStr);
-                if (dailyScores && dailyScores.length > 0) {
-                    const avgOverall = Math.round(dailyScores.reduce((s, d) => s + (d.score_overall || 0), 0) / dailyScores.length);
-                    const avgPriorities = Math.round(dailyScores.reduce((s, d) => s + (d.score_priorities || 0), 0) / dailyScores.length);
-                    const avgTodos = Math.round(dailyScores.reduce((s, d) => s + (d.score_todos || 0), 0) / dailyScores.length);
-                    const goalItems = (itemsData || []).filter((i: { item_type?: string }) => (i.item_type || 'goal') === 'goal');
-                    const todoItems = (itemsData || []).filter((i: { item_type?: string }) => i.item_type === 'todo');
-                    const dData = daysData || [];
-                    const goalDayIds = dData.filter((d: WeeklyItemDay) => goalItems.some((g: { id: string }) => g.id === d.weekly_item_id)).map((d: WeeklyItemDay) => d.id);
-                    const todoDayIds = dData.filter((d: WeeklyItemDay) => todoItems.some((t: { id: string }) => t.id === d.weekly_item_id)).map((d: WeeklyItemDay) => d.id);
-                    const goalCompleted = dData.filter((d: WeeklyItemDay) => goalDayIds.includes(d.id) && d.completed).length;
-                    const todoCompleted = dData.filter((d: WeeklyItemDay) => todoDayIds.includes(d.id) && d.completed).length;
-                    const goalsScore = goalDayIds.length > 0 ? Math.round((goalCompleted / goalDayIds.length) * 100) : 0;
-                    const todosScore = todoDayIds.length > 0 ? Math.round((todoCompleted / todoDayIds.length) * 100) : 0;
-                    const eventsCompleted = eventsData.filter((e: WeeklyEvent) => e.is_done).length;
-                    const eventsScore = eventsData.length > 0 ? Math.round((eventsCompleted / eventsData.length) * 100) : 0;
+                const todayStr = formatDate(new Date());
+                const scoresUpToToday = (dailyScores || []).filter((d: { date: string }) => d.date <= todayStr);
+                if (scoresUpToToday.length > 0) {
+                    const avgOverall = Math.round(scoresUpToToday.reduce((s: number, d: { score_overall?: number }) => s + (d.score_overall || 0), 0) / scoresUpToToday.length);
+                    const avgHabits = Math.round(scoresUpToToday.reduce((s: number, d: { score_habits?: number }) => s + (d.score_habits || 0), 0) / scoresUpToToday.length);
+                    const avgPriorities = Math.round(scoresUpToToday.reduce((s: number, d: { score_priorities?: number }) => s + (d.score_priorities || 0), 0) / scoresUpToToday.length);
+                    const avgTodos = Math.round(scoresUpToToday.reduce((s: number, d: { score_todos?: number }) => s + (d.score_todos || 0), 0) / scoresUpToToday.length);
+                    const eventsUpToToday = eventsData.filter((e: WeeklyEvent) => e.date <= todayStr);
+                    const eventsCompleted = eventsUpToToday.filter((e: WeeklyEvent) => e.is_done).length;
+                    const eventsScore = eventsUpToToday.length > 0 ? Math.round((eventsCompleted / eventsUpToToday.length) * 100) : 0;
                     setWeeklyScores({
                         avg_daily_score: avgOverall,
-                        weekly_goals_score: goalsScore,
-                        weekly_todos_score: todosScore,
+                        weekly_habits_score: avgHabits,
+                        weekly_todos_score: avgTodos,
                         weekly_events_score: eventsScore,
-                        score_overall: Math.round((avgOverall * 0.35 + goalsScore * 0.25 + todosScore * 0.25 + eventsScore * 0.15)),
+                        // Avg Daily is already a composite; keep weights simple and ensure non-future days only.
+                        score_overall: Math.round((avgOverall * 0.4 + avgHabits * 0.25 + avgTodos * 0.25 + eventsScore * 0.1)),
                     });
                 } else {
                     setWeeklyScores(null);
@@ -761,6 +772,18 @@ export default function WeeklyPlanView() {
         }
     };
 
+    const formatEventTimeShort = (start: string | null, end: string | null): string => {
+        const fmt = (t: string) => {
+            const [h, m] = t.slice(0, 5).split(':').map(Number);
+            const hour = h % 12 || 12;
+            const ampm = h < 12 ? 'am' : 'pm';
+            return m ? `${hour}:${String(m).padStart(2, '0')}${ampm}` : `${hour}${ampm}`;
+        };
+        if (start && end) return `${fmt(start)}-${fmt(end)}`;
+        if (start) return fmt(start);
+        return '';
+    };
+
     const handleAddEvent = async () => {
         if (!newEventTitle.trim() || !weeklyPlan) return;
         try {
@@ -784,13 +807,15 @@ export default function WeeklyPlanView() {
                 setNewEventTitle('');
                 setNewEventStartTime('');
                 setNewEventEndTime('');
-                // Create todo on that day for two-way sync
+                const timeLabel = formatEventTimeShort(newEvent.start_time, newEvent.end_time);
+                const todoTitle = timeLabel ? `(${timeLabel}) ${newEvent.title}` : newEvent.title;
+                // Create todo on that day for two-way sync (title includes time for daily list)
                 const { data: newTodo } = await supabase
                     .from('habit_daily_todos')
                     .insert({
                         user_id: user.id,
                         date: eventDate,
-                        title: newEvent.title,
+                        title: todoTitle,
                         is_done: false,
                         weekly_event_id: newEvent.id,
                     })
@@ -807,11 +832,13 @@ export default function WeeklyPlanView() {
                     const next = [...prev, addedEvent];
                     setWeeklyScores(s => {
                         if (!s) return s;
-                        const eventsScore = next.length > 0 ? Math.round((next.filter(e => e.is_done).length / next.length) * 100) : 0;
+                        const todayStr = formatDate(new Date());
+                        const eligible = next.filter(e => e.date <= todayStr);
+                        const eventsScore = eligible.length > 0 ? Math.round((eligible.filter(e => e.is_done).length / eligible.length) * 100) : 0;
                         return {
                             ...s,
                             weekly_events_score: eventsScore,
-                            score_overall: Math.round(s.avg_daily_score * 0.35 + s.weekly_goals_score * 0.25 + s.weekly_todos_score * 0.25 + eventsScore * 0.15),
+                            score_overall: Math.round(s.avg_daily_score * 0.4 + s.weekly_habits_score * 0.25 + s.weekly_todos_score * 0.25 + eventsScore * 0.1),
                         };
                     });
                     return next;
@@ -833,12 +860,14 @@ export default function WeeklyPlanView() {
             setEvents(nextEvents);
             setWeeklyScores(prev => {
                 if (!prev) return prev;
-                const completedCount = nextEvents.filter(e => e.is_done).length;
-                const eventsScore = nextEvents.length > 0 ? Math.round((completedCount / nextEvents.length) * 100) : 0;
+                const todayStr = formatDate(new Date());
+                const eligible = nextEvents.filter(e => e.date <= todayStr);
+                const completedCount = eligible.filter(e => e.is_done).length;
+                const eventsScore = eligible.length > 0 ? Math.round((completedCount / eligible.length) * 100) : 0;
                 return {
                     ...prev,
                     weekly_events_score: eventsScore,
-                    score_overall: Math.round(prev.avg_daily_score * 0.35 + prev.weekly_goals_score * 0.25 + prev.weekly_todos_score * 0.25 + eventsScore * 0.15),
+                    score_overall: Math.round(prev.avg_daily_score * 0.4 + prev.weekly_habits_score * 0.25 + prev.weekly_todos_score * 0.25 + eventsScore * 0.1),
                 };
             });
         } catch (err) {
@@ -859,11 +888,13 @@ export default function WeeklyPlanView() {
                 const next = prev.filter(e => e.id !== eventId);
                 setWeeklyScores(s => {
                     if (!s) return s;
-                    const eventsScore = next.length > 0 ? Math.round((next.filter(e => e.is_done).length / next.length) * 100) : 0;
+                    const todayStr = formatDate(new Date());
+                    const eligible = next.filter(e => e.date <= todayStr);
+                    const eventsScore = eligible.length > 0 ? Math.round((eligible.filter(e => e.is_done).length / eligible.length) * 100) : 0;
                     return {
                         ...s,
                         weekly_events_score: eventsScore,
-                        score_overall: Math.round(s.avg_daily_score * 0.35 + s.weekly_goals_score * 0.25 + s.weekly_todos_score * 0.25 + eventsScore * 0.15),
+                        score_overall: Math.round(s.avg_daily_score * 0.4 + s.weekly_habits_score * 0.25 + s.weekly_todos_score * 0.25 + eventsScore * 0.1),
                     };
                 });
                 return next;

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate, getMonthRange, getDatesInMonth, isSameDay } from '@/lib/habitHelpers';
 
@@ -93,7 +94,7 @@ export default function DashboardCalendarOverview({
                     </button>
                 </div>
                 <div className="p-4">
-                    <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center justify-between mb-2">
                         <button
                             onClick={handlePrevMonth}
                             className="rounded-md border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
@@ -107,6 +108,15 @@ export default function DashboardCalendarOverview({
                         >
                             Next →
                         </button>
+                    </div>
+                    <div className="mb-4 flex justify-center">
+                        <Link
+                            href="/habit?tab=weekly-plan"
+                            onClick={onClose}
+                            className="rounded-md border border-amber-500/50 bg-amber-500/10 px-4 py-2 text-sm font-medium text-amber-400 hover:bg-amber-500/20 transition-colors"
+                        >
+                            Weekly Plan
+                        </Link>
                     </div>
                     {loading ? (
                         <div className="py-12 text-center text-slate-400">Loading...</div>

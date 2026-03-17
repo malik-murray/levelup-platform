@@ -95,6 +95,8 @@ type Todo = {
     is_done: boolean;
     goal_id: string | null;
     completed_at: string | null;
+    start_time?: string | null;
+    end_time?: string | null;
 };
 
 type DailyContent = {
@@ -283,6 +285,16 @@ function HabitPageClient() {
                 .eq('date', dateStr)
                 .order('created_at');
 
+            const sortTodosByTime = (list: Todo[]) =>
+                [...list].sort((a, b) => {
+                    const aT = a.start_time ?? '';
+                    const bT = b.start_time ?? '';
+                    if (aT && bT) return aT.localeCompare(bT);
+                    if (aT) return -1;
+                    if (bT) return 1;
+                    return 0;
+                });
+
             // Sync weekly plan items: ensure todos exist for all weekly items assigned to this date
             // First, get all weekly item days for this date
             const { data: weeklyItemDaysData } = await supabase
@@ -368,18 +380,18 @@ function HabitPageClient() {
                             .order('created_at');
                         
                         if (updatedTodosData) {
-                            setTodos(updatedTodosData);
+                            setTodos(sortTodosByTime(updatedTodosData));
                         } else {
-                            setTodos(todosData || []);
+                            setTodos(sortTodosByTime(todosData || []));
                         }
                     } else {
-                        setTodos(todosData || []);
+                        setTodos(sortTodosByTime(todosData || []));
                     }
                 } else {
-                    setTodos(todosData || []);
+                    setTodos(sortTodosByTime(todosData || []));
                 }
             } else {
-                setTodos(todosData || []);
+                setTodos(sortTodosByTime(todosData || []));
             }
 
             // Load priorities for the entire month (for calendar)
@@ -1612,10 +1624,31 @@ function DailyView({
         }
     };
 
-    const handleAddTodo = async () => {
-        if (!newTodo.trim()) return;
+    const parseTodoTimePrefix = (value: string): { title: string; start_time: string | null; end_time: string | null } => {
+        const match = value.trim().match(/^\((\d{1,2}(?::\d{2})?\s*[ap]m)(?:\s*-\s*(\d{1,2}(?::\d{2})?\s*[ap]m))?\)\s*(.*)$/i);
+        if (!match) return { title: value.trim(), start_time: null, end_time: null };
+        const toDb = (s: string): string => {
+            const m = s.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*([ap]m)$/i);
+            if (!m) return '';
+            let h = parseInt(m[1], 10);
+            const min = m[2] ? parseInt(m[2], 10) : 0;
+            if (m[3].toLowerCase() === 'pm' && h !== 12) h += 12;
+            if (m[3].toLowerCase() === 'am' && h === 12) h = 0;
+            return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:00`;
+        };
+        return {
+            title: match[3].trim(),
+            start_time: toDb(match[1]) || null,
+            end_time: match[2] ? toDb(match[2]) : null,
+        };
+    };
 
-        const todoTitle = newTodo.trim();
+    const handleAddTodo = async () => {
+        const rawInput = newTodo.trim();
+        if (!rawInput) return;
+
+        const parsed = parseTodoTimePrefix(rawInput);
+        const todoTitle = parsed.title;
         const todoCategory = newTodoCategory;
         const todoTimeOfDay = newTodoTimeOfDay;
         const todoGoalId = newTodoGoalId;
@@ -1635,6 +1668,8 @@ function DailyView({
                 is_done: false,
                 goal_id: todoGoalId,
                 completed_at: null,
+                start_time: parsed.start_time,
+                end_time: parsed.end_time,
             };
             setLocalTodos(prev => [...prev, newTodoData]);
             preview.setHabit(h => ({
@@ -1648,7 +1683,7 @@ function DailyView({
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
                 // Revert input on error
-                setNewTodo(todoTitle);
+                setNewTodo(rawInput);
                 setNewTodoCategory(todoCategory);
                 setNewTodoTimeOfDay(todoTimeOfDay);
                 setNewTodoGoalId(todoGoalId);
@@ -1665,6 +1700,8 @@ function DailyView({
                     time_of_day: todoTimeOfDay,
                     goal_id: todoGoalId,
                     is_done: false,
+                    start_time: parsed.start_time,
+                    end_time: parsed.end_time,
                 })
                 .select()
                 .single();
@@ -1679,7 +1716,7 @@ function DailyView({
         } catch (error) {
             console.error('Error adding todo:', error);
             // Revert input on error
-            setNewTodo(todoTitle);
+            setNewTodo(rawInput);
             setNewTodoCategory(todoCategory);
             setNewTodoTimeOfDay(todoTimeOfDay);
             setNewTodoGoalId(todoGoalId);
@@ -1765,10 +1802,10 @@ function DailyView({
         }
     };
 
-    const handleEditTodo = async (id: string, title: string, category: Category | null, timeOfDay: TimeOfDay | null, goalId: string | null) => {
+    const handleEditTodo = async (id: string, title: string, category: Category | null, timeOfDay: TimeOfDay | null, goalId: string | null, startTime?: string | null, endTime?: string | null) => {
         // Optimistic update
         setLocalTodos(prev => prev.map(t => 
-            t.id === id ? { ...t, title, category, time_of_day: timeOfDay, goal_id: goalId } : t
+            t.id === id ? { ...t, title, category, time_of_day: timeOfDay, goal_id: goalId, start_time: startTime ?? t.start_time, end_time: endTime ?? t.end_time } : t
         ));
         
         try {
@@ -1780,7 +1817,7 @@ function DailyView({
             
             await supabase
                 .from('habit_daily_todos')
-                .update({ title, category, time_of_day: timeOfDay, goal_id: goalId })
+                .update({ title, category, time_of_day: timeOfDay, goal_id: goalId, start_time: startTime ?? null, end_time: endTime ?? null })
                 .eq('id', id)
                 .eq('user_id', user.id);
             
@@ -2608,7 +2645,7 @@ function DoNextSection({
         ...todos.map(t => ({
             type: 'todo' as const,
             id: t.id,
-            label: t.title,
+            label: getTodoDisplayTitle(t),
             completed: t.is_done,
             category: t.category || undefined,
         })),
@@ -3744,6 +3781,45 @@ function PrioritiesSection({
     );
 }
 
+function formatTodoTimeDisplay(start: string | null | undefined, end: string | null | undefined): string {
+    const fmt = (t: string) => {
+        const s = t.slice(0, 5);
+        const [h, m] = s.split(':').map(Number);
+        if (Number.isNaN(h)) return '';
+        const hour = h % 12 || 12;
+        const ampm = h < 12 ? 'am' : 'pm';
+        return m ? `${hour}:${String(m).padStart(2, '0')}${ampm}` : `${hour}${ampm}`;
+    };
+    if (start && end) return `${fmt(start)}-${fmt(end)}`;
+    if (start) return fmt(start);
+    return '';
+}
+
+function getTodoDisplayTitle(todo: Todo): string {
+    const timeStr = formatTodoTimeDisplay(todo.start_time, todo.end_time);
+    if (timeStr) return `(${timeStr}) ${todo.title}`;
+    return todo.title;
+}
+
+function parseTodoDisplayTitle(value: string): { title: string; start_time: string | null; end_time: string | null } {
+    const match = value.trim().match(/^\((\d{1,2}(?::\d{2})?\s*[ap]m)(?:\s*-\s*(\d{1,2}(?::\d{2})?\s*[ap]m))?\)\s*(.*)$/i);
+    if (!match) return { title: value.trim(), start_time: null, end_time: null };
+    const toDb = (s: string): string => {
+        const m = s.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*([ap]m)$/i);
+        if (!m) return '';
+        let h = parseInt(m[1], 10);
+        const min = m[2] ? parseInt(m[2], 10) : 0;
+        if (m[3].toLowerCase() === 'pm' && h !== 12) h += 12;
+        if (m[3].toLowerCase() === 'am' && h === 12) h = 0;
+        return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:00`;
+    };
+    return {
+        title: match[3].trim(),
+        start_time: toDb(match[1]) || null,
+        end_time: match[2] ? toDb(match[2]) : null,
+    };
+}
+
 function TodosSection({
     todos,
     goals,
@@ -3770,7 +3846,7 @@ function TodosSection({
     
     const startEdit = (todo: Todo) => {
         setEditingId(todo.id);
-        setEditTitle(todo.title);
+        setEditTitle(getTodoDisplayTitle(todo));
         setEditCategory(todo.category);
         setEditTimeOfDay(todo.time_of_day);
         setEditGoalId(todo.goal_id);
@@ -3786,7 +3862,8 @@ function TodosSection({
     
     const saveEdit = () => {
         if (editingId && editTitle.trim()) {
-            onEdit(editingId, editTitle.trim(), editCategory, editTimeOfDay, editGoalId);
+            const parsed = parseTodoDisplayTitle(editTitle);
+            onEdit(editingId, parsed.title, editCategory, editTimeOfDay, editGoalId, parsed.start_time, parsed.end_time);
             cancelEdit();
         }
     };
@@ -3888,7 +3965,7 @@ function TodosSection({
                         ) : (
                             <>
                                 <span className={`flex-1 min-w-0 text-sm break-words ${todo.is_done ? 'line-through text-slate-500' : 'text-slate-200'}`}>
-                                    {todo.title}
+                                    {getTodoDisplayTitle(todo)}
                                     {linkedGoal && (
                                         <span className="ml-2 text-xs text-slate-400">→ {linkedGoal.name}</span>
                                     )}
