@@ -235,7 +235,7 @@ export default function HabitDailyEntrySection({
             }
             setEventDisplayMap(eventDisplayMapNew);
 
-            const getTodoSortTime = (t: (typeof todosData)[0]) => {
+            const getTodoSortTime = (t: NonNullable<typeof todosData>[number]) => {
                 if (t.weekly_event_id) return eventStartTimes[t.weekly_event_id] ?? '';
                 return (t as { start_time?: string }).start_time ?? '';
             };
