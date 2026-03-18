@@ -55,6 +55,7 @@ export default function FitnessPage() {
     const [goals, setGoals] = useState<Goal | null>(null);
     const [loading, setLoading] = useState(true);
     const [notification, setNotification] = useState<string | null>(null);
+    const [schemaMissing, setSchemaMissing] = useState(false);
 
     const today = useMemo(() => {
         const date = new Date();
@@ -73,6 +74,7 @@ export default function FitnessPage() {
     const loadDashboardData = async () => {
         setLoading(true);
         setNotification(null);
+        setSchemaMissing(false);
 
         try {
             if (isPreview) {
@@ -174,8 +176,25 @@ export default function FitnessPage() {
                 // For now, just load it but don't display yet
             }
         } catch (error) {
-            console.error('Error loading dashboard data:', error);
-            setNotification(error instanceof Error ? error.message : 'Failed to load dashboard data');
+            const err = error as Record<string, unknown> | null;
+            const errMessage = (error instanceof Error && error.message) || (err && typeof err.message === 'string' ? err.message : null);
+            const errCode = err && typeof err.code === 'string' ? err.code : null;
+            const errDetails = err && typeof err.details === 'string' ? err.details : null;
+            // Table/schema not in PostgREST cache – migrations likely not run
+            if (errCode === 'PGRST205') {
+                setSchemaMissing(true);
+                setNotification('Fitness tables are not set up yet. Run database migrations (e.g. supabase db push) to enable this page.');
+            } else {
+                const message = errMessage ?? (errCode ? `Request failed (${errCode})` : null) ?? 'Failed to load dashboard data';
+                setNotification(message);
+                const payload: Record<string, unknown> = { message: errMessage, code: errCode, details: errDetails };
+                if (err && typeof err === 'object') {
+                    for (const key of Object.keys(err)) {
+                        if (!(key in payload)) payload[key] = err[key];
+                    }
+                }
+                console.error('Error loading dashboard data:', JSON.stringify(payload, null, 2));
+            }
         } finally {
             setLoading(false);
         }
@@ -197,9 +216,28 @@ export default function FitnessPage() {
     const steps = metrics?.steps || 0;
     const weight = metrics?.weight_kg || null;
 
+    if (!loading && schemaMissing) {
+        return (
+            <section className="px-6 py-4">
+                <div className="rounded-lg border border-amber-500/30 bg-amber-950/20 p-6 text-center">
+                    <p className="font-medium text-amber-200">Fitness data not set up</p>
+                    <p className="mt-2 text-sm text-slate-300">
+                        The fitness tables are missing from the database. Run migrations to create them.
+                    </p>
+                    <p className="mt-3 font-mono text-xs text-slate-400">
+                        supabase db push
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                        From your project root with Supabase CLI linked to this project.
+                    </p>
+                </div>
+            </section>
+        );
+    }
+
     return (
         <section className="space-y-6 px-6 py-4">
-            {notification && (
+            {notification && !schemaMissing && (
                 <div className={`rounded-lg border p-3 text-xs ${
                     notification.includes('Error') || notification.includes('Failed')
                         ? 'border-red-500/30 bg-red-950/20 text-red-400'

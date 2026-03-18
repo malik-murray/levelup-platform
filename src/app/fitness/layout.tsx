@@ -9,6 +9,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 
 const fitnessTabs = [
     { href: '/fitness', label: 'Dashboard' },
+    { href: '/fitness/exercises', label: 'Exercises' },
     { href: '/fitness/workouts', label: 'Workouts' },
     { href: '/fitness/meals', label: 'Meals' },
     { href: '/fitness/metrics', label: 'Metrics' },
