@@ -1,10 +1,11 @@
 import { Suspense } from 'react';
-import ExercisesClient from './ExercisesClient';
+import WorkoutGeneratorClient from './WorkoutGeneratorClient';
 
-export default function ExercisesPage() {
+export default function WorkoutGeneratorPage() {
     return (
         <Suspense fallback={<div className="p-6 text-slate-400">Loading…</div>}>
-            <ExercisesClient />
+            <WorkoutGeneratorClient />
         </Suspense>
     );
 }
+

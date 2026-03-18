@@ -63,6 +63,8 @@ export interface Exercise {
     common_mistakes: string[];
     media_url: string | null;
     thumbnail_url: string | null;
+    /** Free-form exercise tags (e.g. 'warmup', 'powerlifting', 'hypertrophy') */
+    tags: string[];
     is_published: boolean;
     created_at: string;
     updated_at: string;

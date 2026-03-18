@@ -1,10 +1,11 @@
 import { Suspense } from 'react';
-import ExercisesClient from './ExercisesClient';
+import PlansListClient from './PlansListClient';
 
-export default function ExercisesPage() {
+export default function PlansListPage() {
     return (
         <Suspense fallback={<div className="p-6 text-slate-400">Loading…</div>}>
-            <ExercisesClient />
+            <PlansListClient />
         </Suspense>
     );
 }
+

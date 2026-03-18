@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@auth/supabaseClient';
-import { getExerciseBySlug } from '@/lib/fitness/exercises';
-import type { ExerciseWithRelations } from '@/lib/fitness/types';
+import { getExerciseBySlug, isExerciseSaved, saveExercise, unsaveExercise } from '@/lib/fitness/exercises';
+import type { ExerciseWithRelations, MuscleGroup } from '@/lib/fitness/types';
 
 type ExerciseDetailClientProps = {
     slug: string;
@@ -18,21 +18,57 @@ function formatLabel(value: string | null | undefined): string {
 export default function ExerciseDetailClient({ slug }: ExerciseDetailClientProps) {
     const [exercise, setExercise] = useState<ExerciseWithRelations | null | undefined>(undefined);
     const [error, setError] = useState<string | null>(null);
+    const [secondaryMuscles, setSecondaryMuscles] = useState<MuscleGroup[]>([]);
+    const [isSaved, setIsSaved] = useState(false);
+    const [saving, setSaving] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
 
         async function load() {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
-                window.location.href = '/login';
-                return;
-            }
             try {
+                const {
+                    data: { user },
+                    error: authError,
+                } = await supabase.auth.getUser();
+                if (authError || !user) {
+                    window.location.href = '/login';
+                    return;
+                }
+
                 const data = await getExerciseBySlug(slug, supabase);
                 if (!cancelled) {
                     setExercise(data);
                     setError(null);
+                    setSecondaryMuscles([]);
+                    setIsSaved(false);
+
+                    if (data && data.secondary_muscle_group_ids?.length) {
+                        try {
+                            const { data: secs, error: secError } = await supabase
+                                .from('muscle_groups')
+                                .select('*')
+                                .in('id', data.secondary_muscle_group_ids);
+                            if (secError) {
+                                console.error('Load secondary muscles error:', secError);
+                            } else if (!cancelled && secs) {
+                                setSecondaryMuscles(secs as MuscleGroup[]);
+                            }
+                        } catch (secErr) {
+                            console.error('Load secondary muscles exception:', secErr);
+                        }
+                    }
+
+                    if (data) {
+                        try {
+                            const saved = await isExerciseSaved(data.id, supabase);
+                            if (!cancelled) {
+                                setIsSaved(saved);
+                            }
+                        } catch (secErr) {
+                            console.error('Check saved exercise error:', secErr);
+                        }
+                    }
                 }
             } catch (e) {
                 if (!cancelled) {
@@ -99,15 +135,53 @@ export default function ExerciseDetailClient({ slug }: ExerciseDetailClientProps
     const hasTips = exercise.tips?.length > 0;
     const hasMistakes = exercise.common_mistakes?.length > 0;
     const hasMedia = Boolean(exercise.media_url ?? exercise.thumbnail_url);
+    const hasTags = exercise.tags && exercise.tags.length > 0;
+    const hasSecondary = secondaryMuscles.length > 0;
 
     return (
         <div className="space-y-6">
-            <Link
-                href="/fitness/exercises"
-                className="inline-block text-sm text-amber-600 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-300"
-            >
-                ← Back to Exercises
-            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+                <Link
+                    href="/fitness/exercises"
+                    className="inline-block text-sm text-amber-600 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-300"
+                >
+                    ← Back to Exercises
+                </Link>
+                <Link
+                    href="/fitness/body-map"
+                    className="inline-block text-sm text-slate-500 hover:text-amber-600 dark:text-slate-400 dark:hover:text-amber-300"
+                >
+                    View on Body Map
+                </Link>
+                <button
+                    type="button"
+                    onClick={async () => {
+                        if (!exercise) return;
+                        setSaving(true);
+                        try {
+                            if (isSaved) {
+                                await unsaveExercise(exercise.id, supabase);
+                                setIsSaved(false);
+                            } else {
+                                await saveExercise(exercise.id, supabase);
+                                setIsSaved(true);
+                            }
+                        } catch (err) {
+                            console.error('Toggle save exercise (detail) error:', err);
+                        } finally {
+                            setSaving(false);
+                        }
+                    }}
+                    className={`ml-auto inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${
+                        isSaved
+                            ? 'border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-400 dark:bg-amber-900/40 dark:text-amber-200'
+                            : 'border-slate-300 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'
+                    }`}
+                    disabled={saving}
+                >
+                    {saving ? 'Saving…' : isSaved ? 'Saved' : 'Save exercise'}
+                </button>
+            </div>
 
             <header>
                 <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
@@ -116,6 +190,16 @@ export default function ExerciseDetailClient({ slug }: ExerciseDetailClientProps
                 <p className="mt-1 font-mono text-sm text-slate-500 dark:text-slate-400">
                     {exercise.slug}
                 </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                    {exercise.primary_muscle_group && (
+                        <Link
+                            href={`/fitness/muscles/${encodeURIComponent(exercise.primary_muscle_group.slug)}`}
+                            className="inline-flex items-center rounded-full bg-slate-200 px-2 py-1 font-medium text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
+                        >
+                            Primary muscle: {exercise.primary_muscle_group.name}
+                        </Link>
+                    )}
+                </div>
             </header>
 
             {/* Badges */}
@@ -123,6 +207,12 @@ export default function ExerciseDetailClient({ slug }: ExerciseDetailClientProps
                 <span className="rounded bg-slate-200 px-2 py-1 text-xs font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">
                     {exercise.primary_muscle_group?.name ?? 'Not available'}
                 </span>
+                {hasSecondary && (
+                    <span className="rounded bg-slate-200 px-2 py-1 text-xs font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                        Secondary:{' '}
+                        {secondaryMuscles.map((m) => m.name).join(', ')}
+                    </span>
+                )}
                 <span className="rounded bg-slate-200 px-2 py-1 text-xs font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">
                     {exercise.equipment?.name ?? 'Not available'}
                 </span>
@@ -144,6 +234,16 @@ export default function ExerciseDetailClient({ slug }: ExerciseDetailClientProps
                         {formatLabel(exercise.mechanic)}
                     </span>
                 )}
+                {hasTags &&
+                    exercise.tags.map((tag) => (
+                        <Link
+                            key={tag}
+                            href={`/fitness/exercises?tag=${encodeURIComponent(tag)}`}
+                            className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                        >
+                            #{tag}
+                        </Link>
+                    ))}
                 <span className={`rounded px-2 py-1 text-xs font-medium ${exercise.is_published ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>
                     {exercise.is_published ? 'Published' : 'Draft'}
                 </span>
@@ -196,6 +296,16 @@ export default function ExerciseDetailClient({ slug }: ExerciseDetailClientProps
                         <dt className="text-slate-500 dark:text-slate-400 w-32 shrink-0">Primary muscle</dt>
                         <dd className="text-slate-700 dark:text-slate-200">{exercise.primary_muscle_group?.name ?? 'Not available'}</dd>
                     </div>
+                    {hasSecondary && (
+                        <div className="flex gap-2">
+                            <dt className="text-slate-500 dark:text-slate-400 w-32 shrink-0">
+                                Secondary muscles
+                            </dt>
+                            <dd className="text-slate-700 dark:text-slate-200">
+                                {secondaryMuscles.map((m) => m.name).join(', ')}
+                            </dd>
+                        </div>
+                    )}
                     <div className="flex gap-2">
                         <dt className="text-slate-500 dark:text-slate-400 w-32 shrink-0">Equipment</dt>
                         <dd className="text-slate-700 dark:text-slate-200">{exercise.equipment?.name ?? 'Not available'}</dd>

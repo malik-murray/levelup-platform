@@ -26,6 +26,10 @@ export interface ExerciseQueryFilters {
     movementPattern?: ExerciseMovementPattern;
     forceType?: ExerciseForceType;
     mechanic?: ExerciseMechanic;
+    /** Filter by a single tag contained in exercise.tags */
+    tag?: string;
+    /** Optional future extension: filter by multiple tags (AND semantics) */
+    tags?: string[];
     search?: string;
     /** Default true: only return published exercises. */
     publishedOnly?: boolean;
@@ -49,6 +53,7 @@ interface ExerciseRow {
     common_mistakes: string[];
     media_url: string | null;
     thumbnail_url: string | null;
+    tags: string[];
     is_published: boolean;
     created_at: string;
     updated_at: string;
@@ -190,6 +195,28 @@ export async function getMuscleGroups(
 }
 
 /**
+ * Returns a single muscle group by slug, or null if not found.
+ */
+export async function getMuscleGroupBySlug(
+    slug: string,
+    supabase?: SupabaseClient
+): Promise<MuscleGroup | null> {
+    if (!slug?.trim()) return null;
+    const client = getClient(supabase);
+    const { data, error } = await client
+        .from('muscle_groups')
+        .select('*')
+        .eq('slug', slug.trim())
+        .maybeSingle();
+
+    if (error) {
+        console.error('getMuscleGroupBySlug:', error);
+        throw error;
+    }
+    return (data as MuscleGroup) ?? null;
+}
+
+/**
  * Returns all equipment ordered by name ascending.
  */
 export async function getEquipment(
@@ -267,6 +294,11 @@ export async function getExercisesByFilters(
     if (filters.mechanic != null) {
         query = query.eq('mechanic', filters.mechanic);
     }
+    if (filters.tag && filters.tag.trim()) {
+        query = query.contains('tags', [filters.tag.trim()]);
+    } else if (filters.tags && filters.tags.length > 0) {
+        query = query.contains('tags', filters.tags);
+    }
 
     const { data, error } = await query;
 
@@ -288,3 +320,124 @@ export async function getExercisesByFilters(
 
     return results;
 }
+
+// =============================================================================
+// Saved exercises (favorites)
+// =============================================================================
+
+export async function listSavedExercises(
+    supabase?: SupabaseClient
+): Promise<ExerciseWithRelations[]> {
+    const client = getClient(supabase);
+    const {
+        data: { user },
+        error: authError,
+    } = await client.auth.getUser();
+    if (authError || !user) {
+        throw new Error('Not authenticated');
+    }
+
+    const { data, error } = await client
+        .from('fitness_saved_exercises')
+        .select(
+            `
+            exercise:exercises (
+                ${EXERCISE_SELECT}
+            )
+        `
+        )
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        console.error('listSavedExercises:', error);
+        throw error;
+    }
+
+    const rows = (data ?? []) as { exercise: ExerciseRow | null }[];
+    return rows
+        .map((row) => (row.exercise ? mapRowToExerciseWithRelations(row.exercise) : null))
+        .filter((ex): ex is ExerciseWithRelations => ex !== null);
+}
+
+export async function isExerciseSaved(
+    exerciseId: string,
+    supabase?: SupabaseClient
+): Promise<boolean> {
+    const client = getClient(supabase);
+    const {
+        data: { user },
+        error: authError,
+    } = await client.auth.getUser();
+    if (authError || !user) {
+        return false;
+    }
+
+    const { data, error } = await client
+        .from('fitness_saved_exercises')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('exercise_id', exerciseId)
+        .maybeSingle();
+
+    if (error && error.code !== 'PGRST116') {
+        console.error('isExerciseSaved:', error);
+        throw error;
+    }
+
+    return !!data;
+}
+
+export async function saveExercise(
+    exerciseId: string,
+    supabase?: SupabaseClient
+): Promise<void> {
+    const client = getClient(supabase);
+    const {
+        data: { user },
+        error: authError,
+    } = await client.auth.getUser();
+    if (authError || !user) {
+        throw new Error('Not authenticated');
+    }
+
+    const { error } = await client.from('fitness_saved_exercises').insert({
+        user_id: user.id,
+        exercise_id: exerciseId,
+    });
+
+    if (error) {
+        // Ignore unique violation (already saved)
+        if ((error as any).code === '23505') {
+            return;
+        }
+        console.error('saveExercise:', error);
+        throw error;
+    }
+}
+
+export async function unsaveExercise(
+    exerciseId: string,
+    supabase?: SupabaseClient
+): Promise<void> {
+    const client = getClient(supabase);
+    const {
+        data: { user },
+        error: authError,
+    } = await client.auth.getUser();
+    if (authError || !user) {
+        throw new Error('Not authenticated');
+    }
+
+    const { error } = await client
+        .from('fitness_saved_exercises')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('exercise_id', exerciseId);
+
+    if (error) {
+        console.error('unsaveExercise:', error);
+        throw error;
+    }
+}
+
