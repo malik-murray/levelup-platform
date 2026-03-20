@@ -354,7 +354,7 @@ export async function listSavedExercises(
         throw error;
     }
 
-    const rows = (data ?? []) as { exercise: ExerciseRow | null }[];
+    const rows = (data ?? []) as unknown as { exercise: ExerciseRow | null }[];
     return rows
         .map((row) => (row.exercise ? mapRowToExerciseWithRelations(row.exercise) : null))
         .filter((ex): ex is ExerciseWithRelations => ex !== null);

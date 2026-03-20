@@ -312,12 +312,11 @@ export async function getPreviousLoggedPerformanceForExercises(
             'actual_sets_completed.not.is.null,actual_avg_reps_per_set.not.is.null,actual_notes.neq.""'
         )
         .order('ended_at', {
-            referencedTable: 'fitness_workout_sessions',
+            foreignTable: 'fitness_workout_sessions',
             ascending: false,
-            nullsLast: true,
         })
         .order('started_at', {
-            referencedTable: 'fitness_workout_sessions',
+            foreignTable: 'fitness_workout_sessions',
             ascending: false,
         });
 

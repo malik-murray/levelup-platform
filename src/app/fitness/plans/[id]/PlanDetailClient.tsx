@@ -110,14 +110,21 @@ export default function PlanDetailClient({ id }: PlanDetailClientProps) {
         );
     }
 
-    const itemCount = plan.items.length;
+    // Extra narrowing for TypeScript (we handled `plan === undefined` and `plan === null` above).
+    if (!plan) return null;
+
+    // At this point `plan` is guaranteed to be loaded (we returned for `plan === null` and `plan === undefined` above).
+    const itemCount = plan!.items.length;
     const musclesParam =
-        plan.muscle_slugs.length > 0
-            ? `muscles=${encodeURIComponent(plan.muscle_slugs.join(','))}`
+        plan!.muscle_slugs.length > 0
+            ? `muscles=${encodeURIComponent(plan!.muscle_slugs.join(','))}`
             : '';
-    const difficultyParam = plan.difficulty ? `difficulty=${encodeURIComponent(plan.difficulty)}` : '';
+    const difficultyParam = plan!.difficulty
+        ? `difficulty=${encodeURIComponent(plan!.difficulty)}`
+        : '';
     const defaultCount = 5;
-    const countParam = itemCount && itemCount !== defaultCount ? `count=${itemCount}` : '';
+    const countParam =
+        itemCount && itemCount !== defaultCount ? `count=${itemCount}` : '';
     const generatorParams = [musclesParam, difficultyParam, countParam].filter(Boolean).join('&');
     const generatorHref = generatorParams
         ? `/fitness/workout-generator?${generatorParams}`

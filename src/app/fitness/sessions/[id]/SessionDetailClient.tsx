@@ -160,6 +160,9 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
         );
     }
 
+    // Extra narrowing for TypeScript (we handled `session === null` above).
+    if (!session) return null;
+
     const itemCount = session.items.length;
 
     const totalItems = itemCount;
