@@ -19,6 +19,56 @@ function regionIsSelected(region: BodyRegionConfig, selectedSlug: string) {
     return region.muscleSlug === selectedSlug;
 }
 
+/** Human body silhouette – front view. Organic shapes with smooth curves. */
+function FrontSilhouette() {
+    return (
+        <g fill="currentColor" className="text-slate-600 dark:text-slate-500" fillOpacity="0.9">
+            <ellipse cx="60" cy="20" rx="13" ry="16" />
+            <path d="M52 36 Q60 34 68 36 L66 48 Q60 50 54 48 Z" />
+            {/* Torso: tapered from shoulders to waist */}
+            <path d="M30 50 Q28 52 30 55 L32 95 Q34 120 38 128 L42 130 Q60 132 78 130 L82 128 Q86 120 88 95 L90 55 Q92 52 90 50 Q75 46 60 48 Q45 46 30 50 Z" />
+            {/* Left arm: natural hang with slight bend */}
+            <path d="M30 50 Q22 55 18 72 Q16 95 20 118 L24 125 Q28 122 26 98 Q28 72 32 58 Z" />
+            {/* Right arm */}
+            <path d="M90 50 Q98 55 102 72 Q104 95 100 118 L96 125 Q92 122 94 98 Q92 72 88 58 Z" />
+            {/* Hips */}
+            <path d="M38 128 Q42 135 60 136 Q78 135 82 128 L84 152 Q82 156 60 156 Q38 156 36 152 Z" />
+            {/* Left leg */}
+            <path d="M36 152 Q34 158 36 178 Q38 198 40 218 L46 232 Q50 236 54 232 L56 222 Q54 198 52 172 Z" />
+            {/* Right leg */}
+            <path d="M84 152 Q86 158 84 178 Q82 198 80 218 L74 232 Q70 236 66 232 L64 222 Q66 198 68 172 Z" />
+            {/* Feet */}
+            <ellipse cx="52" cy="242" rx="9" ry="5" />
+            <ellipse cx="68" cy="242" rx="9" ry="5" />
+        </g>
+    );
+}
+
+/** Human body silhouette – back view. */
+function BackSilhouette() {
+    return (
+        <g fill="currentColor" className="text-slate-600 dark:text-slate-500" fillOpacity="0.9">
+            <ellipse cx="60" cy="20" rx="13" ry="16" />
+            <path d="M52 36 Q60 34 68 36 L66 48 Q60 50 54 48 Z" />
+            {/* Upper back & torso */}
+            <path d="M30 50 Q28 52 30 55 L32 90 Q34 112 36 122 L38 128 Q60 130 82 128 L84 122 Q86 112 88 90 L90 55 Q92 52 90 50 Q75 46 60 48 Q45 46 30 50 Z" />
+            {/* Left arm (back) */}
+            <path d="M30 50 Q22 55 18 72 Q16 95 20 118 L24 125 Q28 122 26 98 Q28 72 32 58 Z" />
+            {/* Right arm (back) */}
+            <path d="M90 50 Q98 55 102 72 Q104 95 100 118 L96 125 Q92 122 94 98 Q92 72 88 58 Z" />
+            {/* Lower back & glutes */}
+            <path d="M38 128 Q42 135 60 136 Q78 135 82 128 L84 152 Q82 156 60 156 Q38 156 36 152 Z" />
+            {/* Left leg */}
+            <path d="M36 152 Q34 158 36 178 Q38 198 40 218 L46 232 Q50 236 54 232 L56 222 Q54 198 52 172 Z" />
+            {/* Right leg */}
+            <path d="M84 152 Q86 158 84 178 Q82 198 80 218 L74 232 Q70 236 66 232 L64 222 Q66 198 68 172 Z" />
+            {/* Feet */}
+            <ellipse cx="52" cy="242" rx="9" ry="5" />
+            <ellipse cx="68" cy="242" rx="9" ry="5" />
+        </g>
+    );
+}
+
 export function BodyMap({ selectedMuscleSlug, onSelectMuscleSlug }: BodyMapProps) {
     const [view, setView] = useState<BodyView>('front');
 
@@ -36,7 +86,7 @@ export function BodyMap({ selectedMuscleSlug, onSelectMuscleSlug }: BodyMapProps
         <section className="space-y-3">
             <div className="flex items-center justify-between gap-2">
                 <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                    Body map (v1)
+                    Body map
                 </h2>
                 <div className="inline-flex rounded-full border border-slate-300 bg-slate-100 p-0.5 text-xs dark:border-slate-700 dark:bg-slate-900">
                     {(['front', 'back'] as BodyView[]).map(v => (
@@ -57,7 +107,6 @@ export function BodyMap({ selectedMuscleSlug, onSelectMuscleSlug }: BodyMapProps
             </div>
 
             <div className="flex gap-4 items-stretch">
-                {/* Simple SVG silhouette with overlay rectangles */}
                 <div className="flex-1 max-w-xs">
                     <svg
                         viewBox="0 0 120 260"
@@ -65,24 +114,8 @@ export function BodyMap({ selectedMuscleSlug, onSelectMuscleSlug }: BodyMapProps
                         aria-label={`${viewLabel[view]} body view`}
                         className="h-64 w-full"
                     >
-                        {/* Base silhouette (very rough) */}
-                        <g fill="#020617" fillOpacity="0.6">
-                            {/* torso */}
-                            <rect x="40" y="50" width="40" height="70" rx="8" />
-                            {/* hips */}
-                            <rect x="42" y="120" width="36" height="25" rx="6" />
-                            {/* legs */}
-                            <rect x="42" y="145" width="14" height="80" rx="6" />
-                            <rect x="64" y="145" width="14" height="80" rx="6" />
-                            {/* feet */}
-                            <rect x="40" y="225" width="20" height="10" rx="3" />
-                            <rect x="60" y="225" width="20" height="10" rx="3" />
-                            {/* head */}
-                            <circle cx="60" cy="25" r="15" />
-                            {/* arms */}
-                            <rect x="24" y="60" width="14" height="60" rx="6" />
-                            <rect x="82" y="60" width="14" height="60" rx="6" />
-                        </g>
+                        {/* Human body silhouette */}
+                        {view === 'front' ? <FrontSilhouette /> : <BackSilhouette />}
 
                         {/* Overlay clickable regions */}
                         {view === 'front' && (
@@ -433,8 +466,11 @@ type RegionRectProps = {
 };
 
 function RegionRect({ x, y, width, height, label, region, selected, onClick }: RegionRectProps) {
-    const baseFill = selected ? '#f59e0b' : '#e5e7eb';
-    const baseOpacity = selected ? 0.7 : 0.4;
+    const [hover, setHover] = useState(false);
+    const baseFill = selected ? '#f59e0b' : '#94a3b8';
+    const baseOpacity = selected ? 0.6 : hover ? 0.35 : 0.2;
+    const strokeColor = selected ? '#f97316' : hover ? '#64748b' : 'transparent';
+    const strokeWidth = selected ? 2 : hover ? 0.5 : 0;
 
     return (
         <g>
@@ -443,13 +479,15 @@ function RegionRect({ x, y, width, height, label, region, selected, onClick }: R
                 y={y}
                 width={width}
                 height={height}
-                rx={4}
+                rx={6}
                 fill={baseFill}
                 fillOpacity={baseOpacity}
-                stroke={selected ? '#f97316' : '#334155'}
-                strokeWidth={selected ? 2 : 1}
-                className="cursor-pointer transition-colors"
+                stroke={strokeColor}
+                strokeWidth={strokeWidth}
+                className="cursor-pointer transition-opacity duration-150"
                 onClick={() => onClick(region)}
+                onMouseEnter={() => setHover(true)}
+                onMouseLeave={() => setHover(false)}
             />
             <title>{label}</title>
         </g>

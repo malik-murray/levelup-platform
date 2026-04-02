@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 
 const apps = [
   { name: 'Dashboard (Daily Entry)', href: '/preview/dashboard', icon: '📊' },
-  { name: 'Habit Tracker', href: '/preview/habit', icon: '📈' },
+  { name: "This Week's Plan", href: '/preview/habit/weekly-plan', icon: '📅' },
   { name: 'Finance Tracker', href: '/preview/finance', icon: '💰' },
   { name: 'Fitness Tracker', href: '/preview/fitness', icon: '💪' },
 ];

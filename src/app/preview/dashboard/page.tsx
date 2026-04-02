@@ -7,7 +7,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { usePreviewSidebar } from '../PreviewShellContext';
 
 const modules = [
-  { name: 'Habit Tracker', href: '/preview/habit', icon: '📈', description: 'Track daily habits, priorities, and todos' },
+  { name: "This Week's Plan", href: '/preview/habit/weekly-plan', icon: '📅', description: 'Weekly focus, items, and score bars' },
   { name: 'Finance Tracker', href: '/preview/finance', icon: '💰', description: 'Accounts, transactions, and budgets' },
   { name: 'Fitness Tracker', href: '/preview/fitness', icon: '💪', description: 'Workouts, meals, and goals' },
 ];

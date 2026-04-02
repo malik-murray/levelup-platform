@@ -106,14 +106,6 @@ export function HabitTodayScreen({
           </div>
           <nav className="p-2">
             <Link
-              href="/habit"
-              className="flex items-center gap-3 px-4 py-3 rounded-xl text-[var(--lu-text)] hover:bg-white/10 active:bg-white/15 min-h-[48px]"
-              onClick={() => setMenuOpen(false)}
-            >
-              <span>📋</span>
-              <span>Full habit tracker</span>
-            </Link>
-            <Link
               href="/dashboard"
               className="flex items-center gap-3 px-4 py-3 rounded-xl text-[var(--lu-text)] hover:bg-white/10 active:bg-white/15 min-h-[48px]"
               onClick={() => setMenuOpen(false)}

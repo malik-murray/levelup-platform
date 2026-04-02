@@ -1,5 +1,6 @@
 // Database utilities for Resume Generator App
 import { createClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
   UserProfileDefaults,
   Template,
@@ -11,14 +12,16 @@ import type {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-// Server-side Supabase client (for API routes)
-export function getSupabaseClient() {
+/** Anon client (e.g. public template catalog). User-scoped calls must use a session-scoped client. */
+export function getSupabaseClient(): SupabaseClient {
   return createClient(supabaseUrl, supabaseAnonKey);
 }
 
-// User Profile Defaults
-export async function getUserProfileDefaults(userId: string): Promise<UserProfileDefaults | null> {
-  const supabase = getSupabaseClient();
+// User Profile Defaults (RLS: auth.uid() = user_id)
+export async function getUserProfileDefaults(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<UserProfileDefaults | null> {
   const { data, error } = await supabase
     .from('user_profile_defaults')
     .select('*')
@@ -34,10 +37,10 @@ export async function getUserProfileDefaults(userId: string): Promise<UserProfil
 }
 
 export async function upsertUserProfileDefaults(
+  supabase: SupabaseClient,
   userId: string,
   profile: Partial<UserProfileDefaults>
 ): Promise<UserProfileDefaults> {
-  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('user_profile_defaults')
     .upsert(
@@ -61,7 +64,7 @@ export async function upsertUserProfileDefaults(
   return data;
 }
 
-// Templates
+// Templates (public read via RLS)
 export async function getTemplates(type?: 'resume' | 'cover_letter'): Promise<Template[]> {
   const supabase = getSupabaseClient();
   let query = supabase.from('templates').select('*').order('is_default', { ascending: false });
@@ -97,8 +100,10 @@ export async function getTemplate(templateId: string): Promise<Template | null> 
 }
 
 // User Settings
-export async function getUserSettings(userId: string): Promise<UserSettings | null> {
-  const supabase = getSupabaseClient();
+export async function getUserSettings(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<UserSettings | null> {
   const { data, error } = await supabase
     .from('user_settings')
     .select('*')
@@ -114,10 +119,10 @@ export async function getUserSettings(userId: string): Promise<UserSettings | nu
 }
 
 export async function upsertUserSettings(
+  supabase: SupabaseClient,
   userId: string,
   settings: Partial<UserSettings>
 ): Promise<UserSettings> {
-  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('user_settings')
     .upsert(
@@ -142,8 +147,10 @@ export async function upsertUserSettings(
 }
 
 // Credits
-export async function getUserCredits(userId: string): Promise<Credits | null> {
-  const supabase = getSupabaseClient();
+export async function getUserCredits(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<Credits | null> {
   const { data, error } = await supabase
     .from('credits')
     .select('*')
@@ -159,40 +166,41 @@ export async function getUserCredits(userId: string): Promise<Credits | null> {
 }
 
 export async function ensureUserHasCredits(
+  supabase: SupabaseClient,
   userId: string,
   creditsNeeded: number = 1
 ): Promise<boolean> {
-  const credits = await getUserCredits(userId);
+  const credits = await getUserCredits(supabase, userId);
   if (!credits) {
     return false;
   }
   const remaining = credits.total_credits - credits.used_credits;
-  // Allow unlimited credits for testing (999999 or more)
   if (credits.total_credits >= 999999) {
     return true;
   }
   return remaining >= creditsNeeded;
 }
 
-export async function consumeCredits(userId: string, amount: number = 1): Promise<void> {
-  const credits = await getUserCredits(userId);
+export async function consumeCredits(
+  supabase: SupabaseClient,
+  userId: string,
+  amount: number = 1
+): Promise<void> {
+  const credits = await getUserCredits(supabase, userId);
   if (!credits) {
     throw new Error('User credits not found');
   }
 
-  // Don't consume credits if user has unlimited (999999 or more)
   if (credits.total_credits >= 999999) {
     return;
   }
 
-  const supabase = getSupabaseClient();
   const { error } = await supabase.rpc('increment_used_credits', {
     p_user_id: userId,
     p_amount: amount,
   });
 
   if (error) {
-    // Fallback: manual update if RPC doesn't exist
     const { error: updateError } = await supabase
       .from('credits')
       .update({
@@ -208,9 +216,12 @@ export async function consumeCredits(userId: string, amount: number = 1): Promis
   }
 }
 
-export async function addCredits(userId: string, amount: number): Promise<Credits> {
-  const supabase = getSupabaseClient();
-  const credits = await getUserCredits(userId);
+export async function addCredits(
+  supabase: SupabaseClient,
+  userId: string,
+  amount: number
+): Promise<Credits> {
+  const credits = await getUserCredits(supabase, userId);
 
   if (credits) {
     const { data, error } = await supabase
@@ -229,30 +240,31 @@ export async function addCredits(userId: string, amount: number): Promise<Credit
     }
 
     return data;
-  } else {
-    // Create new credits record
-    const { data, error } = await supabase
-      .from('credits')
-      .insert({
-        user_id: userId,
-        total_credits: amount,
-        used_credits: 0,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error creating credits:', error);
-      throw error;
-    }
-
-    return data;
   }
+
+  const { data, error } = await supabase
+    .from('credits')
+    .insert({
+      user_id: userId,
+      total_credits: amount,
+      used_credits: 0,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error creating credits:', error);
+    throw error;
+  }
+
+  return data;
 }
 
 // Generations (Archive)
-export async function createGeneration(generation: Omit<Generation, 'id' | 'created_at'>): Promise<Generation> {
-  const supabase = getSupabaseClient();
+export async function createGeneration(
+  supabase: SupabaseClient,
+  generation: Omit<Generation, 'id' | 'created_at'>
+): Promise<Generation> {
   const { data, error } = await supabase
     .from('generations')
     .insert(generation)
@@ -268,11 +280,11 @@ export async function createGeneration(generation: Omit<Generation, 'id' | 'crea
 }
 
 export async function getGenerations(
+  supabase: SupabaseClient,
   userId: string,
   limit: number = 50,
   offset: number = 0
 ): Promise<Generation[]> {
-  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('generations')
     .select('*')
@@ -288,8 +300,11 @@ export async function getGenerations(
   return data || [];
 }
 
-export async function getGeneration(generationId: string, userId: string): Promise<Generation | null> {
-  const supabase = getSupabaseClient();
+export async function getGeneration(
+  supabase: SupabaseClient,
+  generationId: string,
+  userId: string
+): Promise<Generation | null> {
   const { data, error } = await supabase
     .from('generations')
     .select('*')
@@ -306,11 +321,11 @@ export async function getGeneration(generationId: string, userId: string): Promi
 }
 
 export async function updateGeneration(
+  supabase: SupabaseClient,
   generationId: string,
   userId: string,
   updates: Partial<Generation>
 ): Promise<Generation> {
-  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('generations')
     .update(updates)
@@ -326,13 +341,3 @@ export async function updateGeneration(
 
   return data;
 }
-
-
-
-
-
-
-
-
-
-

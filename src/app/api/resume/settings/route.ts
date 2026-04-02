@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedUser } from '@/lib/resume/auth';
+import { getAuthenticatedUser, getAuthenticatedSupabase } from '@/lib/resume/auth';
 import { getUserSettings, upsertUserSettings } from '@/lib/resume/db';
 import type { UserSettings } from '@/lib/resume/types';
 
@@ -15,7 +15,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const settings = await getUserSettings(user.id);
+    const supabase = await getAuthenticatedSupabase(request);
+    const settings = await getUserSettings(supabase, user.id);
     return NextResponse.json({ settings });
   } catch (error) {
     console.error('Error fetching settings:', error);
@@ -34,8 +35,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const supabase = await getAuthenticatedSupabase(request);
     const body: Partial<UserSettings> = await request.json();
-    const settings = await upsertUserSettings(user.id, body);
+    const settings = await upsertUserSettings(supabase, user.id, body);
 
     return NextResponse.json({ settings, success: true });
   } catch (error) {

@@ -399,7 +399,7 @@ export default function ExercisesClient() {
                         <li key={ex.id}>
                             <Link
                                 href={`/fitness/exercises/${ex.slug}`}
-                                className="block rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 h-full hover:border-amber-500/50 dark:hover-border-amber-400/50 hover:shadow-md transition-colors"
+                                className="block rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 h-full hover:border-amber-500/50 dark:hover:border-amber-400/50 hover:shadow-md transition-colors"
                             >
                                 <div className="flex items-start justify-between gap-2">
                                     <h2 className="font-semibold text-slate-900 dark:text-white">
@@ -462,19 +462,13 @@ export default function ExercisesClient() {
                                 )}
                                 <div className="mt-3 flex flex-wrap gap-1.5 items-center">
                                     {ex.primary_muscle_group && (
-                                        <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                window.location.href = `/fitness/muscles/${encodeURIComponent(
-                                                    ex.primary_muscle_group!.slug
-                                                )}`;
-                                            }}
+                                        <Link
+                                            href={`/fitness/muscles/${encodeURIComponent(ex.primary_muscle_group.slug)}`}
+                                            onClick={(e) => e.stopPropagation()}
                                             className="rounded bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700 hover:bg-slate-300 dark:bg-slate-600 dark:text-slate-200 dark:hover:bg-slate-500"
                                         >
                                             {ex.primary_muscle_group.name}
-                                        </button>
+                                        </Link>
                                     )}
                                     {ex.equipment && (
                                         <span className="rounded bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-600 dark:text-slate-200">

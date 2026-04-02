@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@auth/supabaseClient';
 import { getExerciseBySlug, isExerciseSaved, saveExercise, unsaveExercise } from '@/lib/fitness/exercises';
+import { getExerciseHistoryForUser, type ExerciseHistoryEntry } from '@/lib/fitness/workoutSessions';
 import type { ExerciseWithRelations, MuscleGroup } from '@/lib/fitness/types';
 
 type ExerciseDetailClientProps = {
@@ -21,6 +22,8 @@ export default function ExerciseDetailClient({ slug }: ExerciseDetailClientProps
     const [secondaryMuscles, setSecondaryMuscles] = useState<MuscleGroup[]>([]);
     const [isSaved, setIsSaved] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [history, setHistory] = useState<ExerciseHistoryEntry[] | null>(null);
+    const [showAllHistory, setShowAllHistory] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -61,9 +64,13 @@ export default function ExerciseDetailClient({ slug }: ExerciseDetailClientProps
 
                     if (data) {
                         try {
-                            const saved = await isExerciseSaved(data.id, supabase);
+                            const [saved, historyData] = await Promise.all([
+                                isExerciseSaved(data.id, supabase),
+                                getExerciseHistoryForUser(slug, supabase).catch(() => []),
+                            ]);
                             if (!cancelled) {
                                 setIsSaved(saved);
+                                setHistory(historyData);
                             }
                         } catch (secErr) {
                             console.error('Check saved exercise error:', secErr);
@@ -125,7 +132,7 @@ export default function ExerciseDetailClient({ slug }: ExerciseDetailClientProps
                 </Link>
                 <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-6 text-center text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
                     <p className="font-medium">Exercise not found</p>
-                    <p className="mt-1 text-sm">No exercise with slug &quot;{slug}&quot; in the catalog.</p>
+                    <p className="mt-1 text-sm">This exercise could not be found in the catalog.</p>
                 </div>
             </div>
         );
@@ -187,9 +194,6 @@ export default function ExerciseDetailClient({ slug }: ExerciseDetailClientProps
                 <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
                     {exercise.name}
                 </h1>
-                <p className="mt-1 font-mono text-sm text-slate-500 dark:text-slate-400">
-                    {exercise.slug}
-                </p>
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                     {exercise.primary_muscle_group && (
                         <Link
@@ -376,6 +380,134 @@ export default function ExerciseDetailClient({ slug }: ExerciseDetailClientProps
                 <p className="text-sm text-slate-500 dark:text-slate-400">
                     No instructions, tips, or common mistakes recorded for this exercise.
                 </p>
+            )}
+
+            {history !== null && (
+                <section>
+                    <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">
+                        Your recent performance
+                    </h2>
+                    {history.length === 0 ? (
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                            No logged sessions yet for this exercise.
+                        </p>
+                    ) : (
+                        <>
+                            {(() => {
+                                const uniqueSessions = new Set(history.map((e) => e.session_id)).size;
+                                const totalSets = history.reduce(
+                                    (sum, e) => sum + (e.actual_sets_completed ?? 0),
+                                    0
+                                );
+                                const latest = history[0];
+                                const hasLastLogged =
+                                    latest &&
+                                    (latest.actual_sets_completed != null || latest.actual_avg_reps_per_set != null);
+                                const bestSets = history.reduce(
+                                    (best, e) =>
+                                        e.actual_sets_completed != null
+                                            ? Math.max(best, e.actual_sets_completed)
+                                            : best,
+                                    0
+                                );
+                                const bestAvgReps = history.reduce<number | null>(
+                                    (best, e) => {
+                                        if (e.actual_avg_reps_per_set == null) return best;
+                                        return best == null
+                                            ? e.actual_avg_reps_per_set
+                                            : Math.max(best, e.actual_avg_reps_per_set);
+                                    },
+                                    null
+                                );
+                                const latestNote = latest?.actual_notes?.trim();
+                                return (
+                                    <div className="mb-3 space-y-2">
+                                        <div className="flex flex-wrap gap-3 text-[11px] text-slate-500 dark:text-slate-400">
+                                            <span>Completed sessions: {uniqueSessions}</span>
+                                            {totalSets > 0 && <span>Total logged sets: {totalSets}</span>}
+                                        </div>
+                                        {(hasLastLogged || bestSets > 0 || bestAvgReps != null) && (
+                                            <div className="flex flex-wrap gap-2">
+                                                {hasLastLogged && (
+                                                    <span className="rounded bg-slate-200 px-2 py-1 text-[11px] font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                                                        Last: {latest.actual_sets_completed != null && `${latest.actual_sets_completed} sets`}
+                                                        {latest.actual_sets_completed != null && latest.actual_avg_reps_per_set != null && ', '}
+                                                        {latest.actual_avg_reps_per_set != null && `~${latest.actual_avg_reps_per_set} reps/set`}
+                                                    </span>
+                                                )}
+                                                {bestSets > 0 && (
+                                                    <span className="rounded bg-slate-200 px-2 py-1 text-[11px] font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                                                        Best sets: {bestSets}
+                                                    </span>
+                                                )}
+                                                {bestAvgReps != null && (
+                                                    <span className="rounded bg-slate-200 px-2 py-1 text-[11px] font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                                                        Best avg reps/set:{' '}
+                                                        {Number.isInteger(bestAvgReps)
+                                                            ? bestAvgReps
+                                                            : bestAvgReps.toFixed(1)}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
+                                        {latestNote && latest && (
+                                            <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                                                <span className="font-medium text-slate-500 dark:text-slate-500">Latest note: </span>
+                                                <Link
+                                                    href={`/fitness/sessions/${latest.session_id}`}
+                                                    className="text-amber-600 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-300"
+                                                >
+                                                    {latestNote.length > 120 ? `${latestNote.slice(0, 120)}…` : latestNote}
+                                                </Link>
+                                            </p>
+                                        )}
+                                    </div>
+                                );
+                            })()}
+                            <ul className="space-y-2">
+                                {(showAllHistory ? history : history.slice(0, 5)).map((entry, i) => (
+                                    <li key={`${entry.session_id}-${i}`}>
+                                        <Link
+                                            href={`/fitness/sessions/${entry.session_id}`}
+                                            className="block rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+                                        >
+                                            <div className="flex flex-wrap items-center gap-2 text-slate-700 dark:text-slate-200">
+                                                <span>
+                                                    {new Date(entry.session_started_at).toLocaleDateString('en-US', {
+                                                        month: 'short',
+                                                        day: 'numeric',
+                                                        year: 'numeric',
+                                                    })}
+                                                </span>
+                                                {(entry.actual_sets_completed != null || entry.actual_avg_reps_per_set != null) && (
+                                                    <span className="text-slate-600 dark:text-slate-300">
+                                                        {entry.actual_sets_completed != null && `${entry.actual_sets_completed} sets`}
+                                                        {entry.actual_sets_completed != null && entry.actual_avg_reps_per_set != null && ' · '}
+                                                        {entry.actual_avg_reps_per_set != null && `~${entry.actual_avg_reps_per_set} reps/set`}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {entry.actual_notes && (
+                                                <p className="mt-1 text-slate-600 dark:text-slate-400 line-clamp-2">
+                                                    {entry.actual_notes}
+                                                </p>
+                                            )}
+                                        </Link>
+                                    </li>
+                                ))}
+                            </ul>
+                            {history.length > 5 && !showAllHistory && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAllHistory(true)}
+                                    className="mt-2 text-xs font-medium text-amber-600 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-300"
+                                >
+                                    Show more ({history.length - 5} more)
+                                </button>
+                            )}
+                        </>
+                    )}
+                </section>
             )}
         </div>
     );

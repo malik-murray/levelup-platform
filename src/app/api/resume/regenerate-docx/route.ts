@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateResumeDocx, generateCoverLetterDocx, generateDocxFromText } from '@/lib/resume/docx';
 import { getTemplate, updateGeneration } from '@/lib/resume/db';
-import { getAuthenticatedUser } from '@/lib/resume/auth';
+import { getAuthenticatedUser, getAuthenticatedSupabase } from '@/lib/resume/auth';
 import type {
   GeneratedResumeContent,
   GeneratedCoverLetterContent,
@@ -101,10 +101,9 @@ function parseCoverLetterFromText(text: string, originalCoverLetter: GeneratedCo
 export async function POST(request: NextRequest) {
   try {
     const requestBody = await request.json();
-    const { 
+    const {
       generation_id,
-      userId: requestUserId,
-      resume, 
+      resume,
       cover_letter, 
       resume_formatted_text, 
       cover_letter_formatted_text, 
@@ -120,11 +119,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get user ID - try from request body first (passed from client), then from auth
-    let userId: string | undefined = requestUserId;
-    
-    // If userId not in body and generation_id is provided, try to get from auth
-    if (!userId && generation_id) {
+    let userId: string | undefined;
+    if (generation_id) {
       const user = await getAuthenticatedUser(request);
       if (!user) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -172,6 +168,7 @@ export async function POST(request: NextRequest) {
 
     // Update the generation record in the archive if generation_id is provided
     if (generation_id && userId) {
+      const supabase = await getAuthenticatedSupabase(request);
       const updates: any = {};
       
       // Update resume if provided
@@ -203,7 +200,7 @@ export async function POST(request: NextRequest) {
       }
       
       // Update the generation record
-      await updateGeneration(generation_id, userId, updates);
+      await updateGeneration(supabase, generation_id, userId, updates);
     }
 
     return NextResponse.json({

@@ -49,6 +49,15 @@ type Goal = {
     name: string;
 };
 
+type DailyWeekNote = {
+    date: string;
+    notes: string | null;
+    lessons: string | null;
+    ideas: string | null;
+    feelings: string | null;
+    reflection: string | null;
+};
+
 export default function WeeklyPlanView() {
     const [loading, setLoading] = useState(true);
     const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan | null>(null);
@@ -57,6 +66,7 @@ export default function WeeklyPlanView() {
     const [events, setEvents] = useState<WeeklyEvent[]>([]);
     const [weeklyScores, setWeeklyScores] = useState<WeeklyScores | null>(null);
     const [goals, setGoals] = useState<Goal[]>([]);
+    const [weeklyDailyNotes, setWeeklyDailyNotes] = useState<DailyWeekNote[]>([]);
     
     // Form states
     const [focusIntention, setFocusIntention] = useState('');
@@ -148,6 +158,19 @@ export default function WeeklyPlanView() {
                 .order('name');
 
             setGoals(goalsData || []);
+
+            // Load all daily notes-like content for this week
+            const weekEndForNotes = new Date(selectedWeekStart);
+            weekEndForNotes.setDate(weekEndForNotes.getDate() + 6);
+            const weekEndStrForNotes = formatDate(weekEndForNotes);
+            const { data: weekNotesData } = await supabase
+                .from('habit_daily_content')
+                .select('date, notes, lessons, ideas, feelings, reflection')
+                .eq('user_id', user.id)
+                .gte('date', weekStartStr)
+                .lte('date', weekEndStrForNotes)
+                .order('date', { ascending: true });
+            setWeeklyDailyNotes((weekNotesData || []) as DailyWeekNote[]);
 
             // Load weekly events by date range first (independent of plan so they always persist)
             const weekEndForEvents = new Date(selectedWeekStart);
@@ -915,6 +938,7 @@ export default function WeeklyPlanView() {
 
     const goalsItems = weeklyItems.filter(i => (i.item_type || 'goal') === 'goal');
     const todosItems = weeklyItems.filter(i => i.item_type === 'todo');
+    const notesByDate = new Map(weeklyDailyNotes.map((n) => [n.date, n]));
 
     return (
         <div className="space-y-6">
@@ -999,6 +1023,51 @@ export default function WeeklyPlanView() {
                             rows={3}
                         />
                     </div>
+                    </div>
+                </details>
+            </section>
+
+            {/* Weekly Notes (aggregated from daily content) */}
+            <section className="rounded-lg border border-slate-800 bg-slate-950 p-4">
+                <details open className="group">
+                    <summary className="text-lg font-semibold mb-3 cursor-pointer list-none flex items-center justify-between">
+                        <span>Weekly Notes</span>
+                        <svg className="w-5 h-5 text-slate-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </summary>
+                    <div className="mt-3 space-y-3">
+                        {weekDays.map((day) => {
+                            const dateStr = formatDate(day);
+                            const entry = notesByDate.get(dateStr);
+                            const sections = [
+                                { label: 'Notes', value: entry?.notes },
+                                { label: 'Lessons', value: entry?.lessons },
+                                { label: 'Ideas', value: entry?.ideas },
+                                { label: 'Feelings', value: entry?.feelings },
+                                { label: 'Reflection', value: entry?.reflection },
+                            ].filter((s) => !!s.value && s.value.trim().length > 0);
+
+                            return (
+                                <div key={dateStr} className="rounded border border-slate-700 bg-slate-900/50 p-3">
+                                    <div className="text-sm font-semibold text-slate-200 mb-2">
+                                        {day.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+                                    </div>
+                                    {sections.length === 0 ? (
+                                        <p className="text-xs text-slate-500">No notes for this day.</p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {sections.map((s) => (
+                                                <div key={`${dateStr}-${s.label}`}>
+                                                    <div className="text-xs font-medium text-slate-400">{s.label}</div>
+                                                    <p className="text-sm text-slate-300 whitespace-pre-wrap">{s.value}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
                     </div>
                 </details>
             </section>

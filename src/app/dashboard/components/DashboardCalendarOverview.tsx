@@ -111,7 +111,7 @@ export default function DashboardCalendarOverview({
                     </div>
                     <div className="mb-4 flex justify-center">
                         <Link
-                            href="/habit?tab=weekly-plan"
+                            href="/habit/weekly-plan"
                             onClick={onClose}
                             className="rounded-md border border-amber-500/50 bg-amber-500/10 px-4 py-2 text-sm font-medium text-amber-400 hover:bg-amber-500/20 transition-colors"
                         >

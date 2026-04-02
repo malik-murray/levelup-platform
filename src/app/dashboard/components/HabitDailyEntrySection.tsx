@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate, getGrade, calculateItemScore, calculateDailyScore, type Category, type TimeOfDay, type HabitStatus } from '@/lib/habitHelpers';
+import { ensureDefaultBacklogCategories, syncBacklogCompletion, syncBacklogTitle } from '@/lib/habitBacklog';
 
 type HabitTemplate = {
     id: string;
@@ -32,6 +33,7 @@ type Priority = {
     date: string;
     completed_at: string | null;
     sort_order: number | null;
+    backlog_task_id?: string | null;
 };
 
 type Todo = {
@@ -46,6 +48,23 @@ type Todo = {
     created_at?: string | null;
     start_time?: string | null;
     end_time?: string | null;
+    backlog_task_id?: string | null;
+};
+
+type BacklogCategory = {
+    id: string;
+    name: string;
+};
+
+type BacklogTask = {
+    id: string;
+    title: string;
+    category_id: string | null;
+    priority_rank: number;
+    assigned_date: string | null;
+    daily_item_type: 'priority' | 'todo' | null;
+    completed_at: string | null;
+    created_at: string;
 };
 
 type DailyScore = {
@@ -104,6 +123,12 @@ export default function HabitDailyEntrySection({
     const [todosOpen, setTodosOpen] = useState(true);
     const [habitsOpen, setHabitsOpen] = useState(true);
     const [eventDisplayMap, setEventDisplayMap] = useState<Record<string, { start_time: string | null; end_time: string | null; title: string }>>({});
+    const [backlogTasks, setBacklogTasks] = useState<BacklogTask[]>([]);
+    const [backlogCategories, setBacklogCategories] = useState<BacklogCategory[]>([]);
+    const [showBacklogModal, setShowBacklogModal] = useState(false);
+    const [backlogSearch, setBacklogSearch] = useState('');
+    const [selectedBacklogIds, setSelectedBacklogIds] = useState<string[]>([]);
+    const [selectedBacklogType, setSelectedBacklogType] = useState<Record<string, 'priority' | 'todo'>>({});
 
     useEffect(() => {
         if (userId) {
@@ -179,6 +204,9 @@ export default function HabitDailyEntrySection({
         if (!silent) setLoading(true);
         try {
             const dateStr = formatDate(selectedDate);
+            const todayStr = formatDate(new Date());
+
+            await ensureDefaultBacklogCategories(userId);
 
             // Load habit templates
             const { data: templates } = await supabase
@@ -206,10 +234,22 @@ export default function HabitDailyEntrySection({
             // Load todos (including weekly links and optional time)
             const { data: todosData } = await supabase
                 .from('habit_daily_todos')
-                .select('id, title, category, is_done, date, completed_at, weekly_item_day_id, weekly_event_id, created_at, start_time, end_time')
+                .select('id, title, category, is_done, date, completed_at, weekly_item_day_id, weekly_event_id, created_at, start_time, end_time, backlog_task_id')
                 .eq('user_id', userId)
                 .eq('date', dateStr)
                 .order('created_at');
+
+            const { data: backlogCategoriesData } = await supabase
+                .from('habit_backlog_categories')
+                .select('id, name')
+                .eq('user_id', userId)
+                .order('name');
+
+            const { data: backlogTasksData } = await supabase
+                .from('habit_backlog_tasks')
+                .select('id, title, category_id, priority_rank, assigned_date, daily_item_type, completed_at, created_at')
+                .eq('user_id', userId)
+                .order('created_at', { ascending: false });
 
             // Load event data for todos linked to weekly events (for sort-by-time and display title with time)
             let eventStartTimes: Record<string, string> = {};
@@ -260,6 +300,15 @@ export default function HabitDailyEntrySection({
             setHabitEntries(entries || []);
             setPriorities(prioritiesData || []);
             setTodos(sortedTodos);
+            setBacklogCategories(backlogCategoriesData || []);
+            setBacklogTasks(
+                (backlogTasksData || []).map((task) => {
+                    if (!task.completed_at && task.assigned_date && task.assigned_date < todayStr) {
+                        return { ...task, assigned_date: null, daily_item_type: null };
+                    }
+                    return task;
+                })
+            );
             if (scoreData) {
                 setDailyScore({
                     score_overall: scoreData.score_overall,
@@ -351,11 +400,45 @@ export default function HabitDailyEntrySection({
             )
             .subscribe();
 
+        const backlogTasksChannel = supabase
+            .channel(`backlog_tasks_${userId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'habit_backlog_tasks',
+                    filter: `user_id=eq.${userId}`,
+                },
+                () => {
+                    loadData(true);
+                }
+            )
+            .subscribe();
+
+        const backlogCategoriesChannel = supabase
+            .channel(`backlog_categories_${userId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'habit_backlog_categories',
+                    filter: `user_id=eq.${userId}`,
+                },
+                () => {
+                    loadData(true);
+                }
+            )
+            .subscribe();
+
         return () => {
             habitEntriesChannel.unsubscribe();
             prioritiesChannel.unsubscribe();
             todosChannel.unsubscribe();
             scoresChannel.unsubscribe();
+            backlogTasksChannel.unsubscribe();
+            backlogCategoriesChannel.unsubscribe();
         };
     };
 
@@ -436,6 +519,9 @@ export default function HabitDailyEntrySection({
                         .from('habit_daily_priorities')
                         .update({ text: value.trim() })
                         .eq('id', priority.id);
+                    if (priority.backlog_task_id) {
+                        await syncBacklogTitle(priority.backlog_task_id, value.trim());
+                    }
                 } else {
                     await supabase.from('habit_daily_priorities').insert({
                         user_id: userId,
@@ -484,6 +570,9 @@ export default function HabitDailyEntrySection({
                         .from('habit_daily_todos')
                         .update({ title, start_time, end_time })
                         .eq('id', todo.id);
+                    if (todo.backlog_task_id) {
+                        await syncBacklogTitle(todo.backlog_task_id, title);
+                    }
                 } else {
                     await supabase.from('habit_daily_todos').insert({
                         user_id: userId,
@@ -507,43 +596,55 @@ export default function HabitDailyEntrySection({
         if (!userId) return;
 
         const completedAt = !completed ? new Date().toISOString() : null;
-        const priorityText = priorities.find((p) => p.id === id)?.text ?? '';
+        const selectedPriority = priorities.find((p) => p.id === id);
+        const priorityText = selectedPriority?.text ?? '';
+        const hasBacklogLink = !!selectedPriority?.backlog_task_id;
 
         try {
             await supabase
                 .from('habit_daily_priorities')
                 .update({ completed: !completed, completed_at: completedAt })
-                .eq('id', id);
-            const dateStr = formatDate(selectedDate);
-            if (!completed && priorityText) {
-                const { data: existing } = await supabase
-                    .from('habit_daily_todos')
-                    .select('id')
-                    .eq('user_id', userId)
-                    .eq('date', dateStr)
-                    .eq('title', priorityText)
-                    .maybeSingle();
-                if (existing) {
+                .eq('id', id)
+                .eq('user_id', userId);
+
+            if (selectedPriority?.backlog_task_id) {
+                await syncBacklogCompletion(selectedPriority.backlog_task_id, !completed);
+            }
+
+            // Legacy behavior: sync priority completion into To-Do list by title match.
+            // Disabled for backlog-linked priorities to prevent duplicate/incorrect placements.
+            if (!hasBacklogLink) {
+                const dateStr = formatDate(selectedDate);
+                if (!completed && priorityText) {
+                    const { data: existing } = await supabase
+                        .from('habit_daily_todos')
+                        .select('id')
+                        .eq('user_id', userId)
+                        .eq('date', dateStr)
+                        .eq('title', priorityText)
+                        .maybeSingle();
+                    if (existing) {
+                        await supabase
+                            .from('habit_daily_todos')
+                            .update({ is_done: true, completed_at: completedAt })
+                            .eq('id', existing.id);
+                    } else {
+                        await supabase.from('habit_daily_todos').insert({
+                            user_id: userId,
+                            date: dateStr,
+                            title: priorityText,
+                            is_done: true,
+                            completed_at: completedAt,
+                        });
+                    }
+                } else if (completed && priorityText) {
                     await supabase
                         .from('habit_daily_todos')
-                        .update({ is_done: true, completed_at: completedAt })
-                        .eq('id', existing.id);
-                } else {
-                    await supabase.from('habit_daily_todos').insert({
-                        user_id: userId,
-                        date: dateStr,
-                        title: priorityText,
-                        is_done: true,
-                        completed_at: completedAt,
-                    });
+                        .update({ is_done: false, completed_at: null })
+                        .eq('user_id', userId)
+                        .eq('date', dateStr)
+                        .eq('title', priorityText);
                 }
-            } else if (completed && priorityText) {
-                await supabase
-                    .from('habit_daily_todos')
-                    .update({ is_done: false, completed_at: null })
-                    .eq('user_id', userId)
-                    .eq('date', dateStr)
-                    .eq('title', priorityText);
             }
             loadData(true);
         } catch (error) {
@@ -554,17 +655,21 @@ export default function HabitDailyEntrySection({
     const handleToggleTodo = async (id: string, isDone: boolean) => {
         if (!userId) return;
 
-        const dateStr = formatDate(selectedDate);
         const completedAt = !isDone ? new Date().toISOString() : null;
         const newIsDone = !isDone;
         const todo = todos.find((t) => t.id === id);
         const todoTitle = todo?.title ?? '';
+        const hasBacklogLink = !!todo?.backlog_task_id;
 
         try {
             await supabase
                 .from('habit_daily_todos')
                 .update({ is_done: newIsDone, completed_at: completedAt })
-                .eq('id', id);
+                .eq('id', id)
+                .eq('user_id', userId);
+            if (todo?.backlog_task_id) {
+                await syncBacklogCompletion(todo.backlog_task_id, newIsDone);
+            }
 
             // Two-way sync: update habit_weekly_item_days when todo is linked
             if (todo?.weekly_item_day_id) {
@@ -574,7 +679,7 @@ export default function HabitDailyEntrySection({
                     .eq('id', todo.weekly_item_day_id);
             }
 
-            if (isDone && todoTitle) {
+            if (isDone && todoTitle && !hasBacklogLink) {
                 const templateWithName = habitTemplates.find((t) => t.name === todoTitle);
                 if (templateWithName) {
                     const entry = habitEntries.find((e) => e.habit_template_id === templateWithName.id);
@@ -596,6 +701,116 @@ export default function HabitDailyEntrySection({
             loadData(true);
         } catch (error) {
             console.error('Error updating todo:', error);
+        }
+    };
+
+    const filteredBacklogTasks = useMemo(() => {
+        const todayStr = formatDate(new Date());
+        return backlogTasks
+            .filter((task) => !task.completed_at)
+            .map((task) => {
+                if (task.assigned_date && task.assigned_date < todayStr) {
+                    return { ...task, assigned_date: null, daily_item_type: null };
+                }
+                return task;
+            })
+            .filter((task) => task.title.toLowerCase().includes(backlogSearch.toLowerCase()))
+            .sort((a, b) => a.priority_rank - b.priority_rank || a.title.localeCompare(b.title));
+    }, [backlogTasks, backlogSearch]);
+
+    const openBacklogCount = backlogTasks.filter((task) => !task.completed_at).length;
+    const scheduledBacklogCount = backlogTasks.filter(
+        (task) => !task.completed_at && task.assigned_date && task.assigned_date >= formatDate(new Date())
+    ).length;
+    const unscheduledBacklogCount = Math.max(0, openBacklogCount - scheduledBacklogCount);
+    const backlogCategoryNameById = useMemo(
+        () => Object.fromEntries(backlogCategories.map((category) => [category.id, category.name])),
+        [backlogCategories]
+    );
+
+    const handleAddSelectedBacklogToDay = async () => {
+        if (!userId || selectedBacklogIds.length === 0) return;
+        const dateStr = formatDate(selectedDate);
+        try {
+            for (const backlogId of selectedBacklogIds) {
+                const task = backlogTasks.find((item) => item.id === backlogId);
+                if (!task) continue;
+                const targetType = selectedBacklogType[backlogId] ?? task.daily_item_type ?? 'todo';
+                await supabase
+                    .from('habit_backlog_tasks')
+                    .update({ assigned_date: dateStr, daily_item_type: targetType })
+                    .eq('id', backlogId)
+                    .eq('user_id', userId);
+
+                // Enforce a single active daily placement for a backlog task.
+                await supabase
+                    .from('habit_daily_priorities')
+                    .delete()
+                    .eq('user_id', userId)
+                    .eq('backlog_task_id', backlogId)
+                    .neq('date', dateStr);
+                await supabase
+                    .from('habit_daily_todos')
+                    .delete()
+                    .eq('user_id', userId)
+                    .eq('backlog_task_id', backlogId)
+                    .neq('date', dateStr);
+
+                if (targetType === 'priority') {
+                    await supabase
+                        .from('habit_daily_todos')
+                        .delete()
+                        .eq('user_id', userId)
+                        .eq('date', dateStr)
+                        .eq('backlog_task_id', backlogId);
+                    const { data: existingPriority } = await supabase
+                        .from('habit_daily_priorities')
+                        .select('id')
+                        .eq('user_id', userId)
+                        .eq('date', dateStr)
+                        .eq('backlog_task_id', backlogId)
+                        .maybeSingle();
+                    if (!existingPriority) {
+                        await supabase.from('habit_daily_priorities').insert({
+                            user_id: userId,
+                            date: dateStr,
+                            text: task.title,
+                            completed: false,
+                            backlog_task_id: backlogId,
+                            sort_order: task.priority_rank,
+                        });
+                    }
+                } else {
+                    await supabase
+                        .from('habit_daily_priorities')
+                        .delete()
+                        .eq('user_id', userId)
+                        .eq('date', dateStr)
+                        .eq('backlog_task_id', backlogId);
+                    const { data: existingTodo } = await supabase
+                        .from('habit_daily_todos')
+                        .select('id')
+                        .eq('user_id', userId)
+                        .eq('date', dateStr)
+                        .eq('backlog_task_id', backlogId)
+                        .maybeSingle();
+                    if (!existingTodo) {
+                        await supabase.from('habit_daily_todos').insert({
+                            user_id: userId,
+                            date: dateStr,
+                            title: task.title,
+                            is_done: false,
+                            backlog_task_id: backlogId,
+                        });
+                    }
+                }
+            }
+            setSelectedBacklogIds([]);
+            setSelectedBacklogType({});
+            setShowBacklogModal(false);
+            await loadData(true);
+        } catch (error) {
+            console.error('Error adding backlog items:', error);
         }
     };
 
@@ -700,6 +915,28 @@ export default function HabitDailyEntrySection({
             </button>
             {dailyPlanOpen && (
             <div className="px-4 pb-4 space-y-6 min-w-0 overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap gap-2 text-xs">
+                    <span className="rounded-full border border-slate-700 bg-slate-800 px-2 py-1 text-slate-300">Open backlog: {openBacklogCount}</span>
+                    <span className="rounded-full border border-slate-700 bg-slate-800 px-2 py-1 text-slate-300">Scheduled: {scheduledBacklogCount}</span>
+                    <span className="rounded-full border border-slate-700 bg-slate-800 px-2 py-1 text-slate-300">Unscheduled: {unscheduledBacklogCount}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={() => setShowBacklogModal(true)}
+                        className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-300 hover:bg-amber-500/20 transition-colors"
+                    >
+                        Add from Backlog
+                    </button>
+                    <Link
+                        href="/habit/backlog"
+                        className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+                    >
+                        Open Backlog
+                    </Link>
+                </div>
+            </div>
             {/* Top Priorities - collapsible */}
             <div className="rounded-lg border border-slate-700 bg-slate-900 min-w-0 overflow-hidden">
                 <button
@@ -840,7 +1077,7 @@ export default function HabitDailyEntrySection({
                         </span>
                     </div>
                     <Link
-                        href="/habit?tab=habits"
+                        href="/habit/today"
                         className="shrink-0 rounded-md border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm font-medium text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
                     >
                         Edit habits
@@ -908,17 +1145,81 @@ export default function HabitDailyEntrySection({
                 )}
             </div>
 
-            {/* Link to full app */}
-            <div className="text-center">
-                <Link
-                    href="/habit"
-                    className="inline-flex items-center gap-2 text-amber-400 hover:text-amber-300 transition-colors"
+            </div>
+            )}
+            {showBacklogModal && (
+                <div
+                    className="fixed inset-0 z-50 bg-black/60 p-4"
+                    onClick={() => setShowBacklogModal(false)}
                 >
-                    <span>View full Daily Plan</span>
-                    <span>→</span>
-                </Link>
-            </div>
-            </div>
+                    <div
+                        className="mx-auto mt-10 w-full max-w-2xl rounded-lg border border-slate-700 bg-slate-900 p-4"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="mb-3 flex items-center justify-between">
+                            <h3 className="text-lg font-semibold text-white">Add from Backlog</h3>
+                            <button
+                                type="button"
+                                className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                                onClick={() => setShowBacklogModal(false)}
+                            >
+                                Close
+                            </button>
+                        </div>
+                        <input
+                            value={backlogSearch}
+                            onChange={(e) => setBacklogSearch(e.target.value)}
+                            placeholder="Search open backlog tasks..."
+                            className="mb-3 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
+                        />
+                        <div className="max-h-[50vh] space-y-2 overflow-y-auto">
+                            {filteredBacklogTasks.length === 0 && (
+                                <p className="py-4 text-center text-sm text-slate-400">No open backlog tasks found.</p>
+                            )}
+                            {filteredBacklogTasks.map((task) => (
+                                <label key={task.id} className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-800 p-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedBacklogIds.includes(task.id)}
+                                        onChange={(e) => {
+                                            setSelectedBacklogIds((prev) =>
+                                                e.target.checked ? [...prev, task.id] : prev.filter((id) => id !== task.id)
+                                            );
+                                        }}
+                                        className="h-4 w-4 rounded border-slate-600 text-amber-500 focus:ring-amber-500"
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                        <p className="truncate text-sm text-white">{task.title}</p>
+                                        <p className="text-xs text-slate-400">
+                                            Rank {task.priority_rank}
+                                            {task.category_id ? ` • ${backlogCategoryNameById[task.category_id] ?? 'Category'}` : ''}
+                                        </p>
+                                    </div>
+                                    <select
+                                        value={selectedBacklogType[task.id] ?? task.daily_item_type ?? 'todo'}
+                                        onChange={(e) =>
+                                            setSelectedBacklogType((prev) => ({ ...prev, [task.id]: e.target.value as 'priority' | 'todo' }))
+                                        }
+                                        className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300"
+                                    >
+                                        <option value="priority">Priority</option>
+                                        <option value="todo">To-Do</option>
+                                    </select>
+                                </label>
+                            ))}
+                        </div>
+                        <div className="mt-3 flex justify-end">
+                            <button
+                                type="button"
+                                onClick={handleAddSelectedBacklogToDay}
+                                className="rounded-md bg-amber-400 px-3 py-2 text-sm font-medium text-black hover:bg-amber-300 disabled:opacity-60"
+                                disabled={selectedBacklogIds.length === 0}
+                            >
+                                Add selected
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

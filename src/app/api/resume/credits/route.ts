@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedUser } from '@/lib/resume/auth';
+import { getAuthenticatedUser, getAuthenticatedSupabase } from '@/lib/resume/auth';
 import { getUserCredits, addCredits } from '@/lib/resume/db';
 
 /**
@@ -14,7 +14,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const credits = await getUserCredits(user.id);
+    const supabase = await getAuthenticatedSupabase(request);
+    const credits = await getUserCredits(supabase, user.id);
     const remaining = credits
       ? credits.total_credits - credits.used_credits
       : 0;
@@ -47,7 +48,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid amount' }, { status: 400 });
     }
 
-    const credits = await addCredits(user.id, amount);
+    const supabase = await getAuthenticatedSupabase(request);
+    const credits = await addCredits(supabase, user.id, amount);
     const remaining = credits.total_credits - credits.used_credits;
 
     return NextResponse.json({

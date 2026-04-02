@@ -143,6 +143,76 @@ export async function getExerciseBySlug(
 }
 
 /**
+ * Returns a map of exercise_slug -> primary muscle slug for the given exercise slugs.
+ * Only includes exercises that have a primary_muscle_group. V1 uses primary muscle only.
+ */
+export async function getPrimaryMuscleSlugsByExerciseSlugs(
+    exerciseSlugs: string[],
+    supabase?: SupabaseClient
+): Promise<Record<string, string>> {
+    const trimmed = exerciseSlugs.map((s) => s?.trim()).filter(Boolean);
+    if (trimmed.length === 0) return {};
+    const client = getClient(supabase);
+    const { data, error } = await client
+        .from('exercises')
+        .select('slug, primary_muscle_group:muscle_groups!primary_muscle_group_id(slug)')
+        .in('slug', trimmed);
+
+    if (error) {
+        console.error('getPrimaryMuscleSlugsByExerciseSlugs:', error);
+        throw error;
+    }
+    const result: Record<string, string> = {};
+    for (const row of data ?? []) {
+        const r = row as { slug: string; primary_muscle_group: { slug: string } | null };
+        if (r.primary_muscle_group?.slug) {
+            result[r.slug] = r.primary_muscle_group.slug;
+        }
+    }
+    return result;
+}
+
+/**
+ * Returns a map of exercise_slug -> exercise.name for the given slugs.
+ * Used to display human-readable names in plans and sessions.
+ */
+export async function getExerciseNamesBySlugs(
+    slugs: string[],
+    supabase?: SupabaseClient
+): Promise<Record<string, string>> {
+    const trimmed = slugs.map((s) => s?.trim()).filter(Boolean);
+    if (trimmed.length === 0) return {};
+    const client = getClient(supabase);
+    const { data, error } = await client
+        .from('exercises')
+        .select('slug, name')
+        .in('slug', trimmed);
+
+    if (error) {
+        console.error('getExerciseNamesBySlugs:', error);
+        throw error;
+    }
+    const map: Record<string, string> = {};
+    (data ?? []).forEach((row: { slug: string; name: string }) => {
+        map[row.slug] = row.name;
+    });
+    return map;
+}
+
+/**
+ * Formats a slug as a human-readable title (e.g. "bench-press" -> "Bench Press").
+ * Fallback when exercise name cannot be resolved from the catalog.
+ */
+export function formatSlugAsTitle(slug: string): string {
+    if (!slug?.trim()) return slug ?? '';
+    return slug
+        .trim()
+        .split('-')
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+}
+
+/**
  * Returns published exercises whose primary muscle group has the given slug.
  * Includes relations. Order: name ascending.
  */

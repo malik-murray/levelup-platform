@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedUser } from '@/lib/resume/auth';
+import { getAuthenticatedUser, getAuthenticatedSupabase } from '@/lib/resume/auth';
 import { getGenerations, getGeneration } from '@/lib/resume/db';
 
 /**
@@ -11,25 +11,21 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '50', 10);
     const offset = parseInt(searchParams.get('offset') || '0', 10);
     const generationId = searchParams.get('id');
-    const requestUserId = searchParams.get('userId');
 
-    // Try to get user ID from query param first (passed from client), then from auth
-    let userId: string | undefined = requestUserId || undefined;
-    
-    if (!userId) {
-      const user = await getAuthenticatedUser(request);
-      if (!user) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-      }
-      userId = user.id;
+    const user = await getAuthenticatedUser(request);
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const supabase = await getAuthenticatedSupabase(request);
+    const userId = user.id;
+
     if (generationId) {
-      const generation = await getGeneration(generationId, userId);
+      const generation = await getGeneration(supabase, generationId, userId);
       return NextResponse.json({ generation });
     }
 
-    const generations = await getGenerations(userId, limit, offset);
+    const generations = await getGenerations(supabase, userId, limit, offset);
     return NextResponse.json({ generations });
   } catch (error) {
     console.error('Error fetching generations:', error);

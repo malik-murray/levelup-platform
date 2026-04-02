@@ -7,6 +7,7 @@ import type {
     WorkoutSessionWithItems,
     WorkoutSessionItem,
     PreviousWorkoutPerformanceItem,
+    SessionAdaptiveUpdate,
 } from '@/lib/fitness/workoutSessions';
 import {
     getSessionWithItems,
@@ -14,7 +15,11 @@ import {
     abandonWorkoutSession,
     updateWorkoutSessionItemActuals,
     getPreviousLoggedPerformanceForExercises,
+    getExecutionAdaptiveInsightsForUser,
 } from '@/lib/fitness/workoutSessions';
+import { getExerciseNamesBySlugs, formatSlugAsTitle } from '@/lib/fitness/exercises';
+import { getWorkoutPlanName } from '@/lib/fitness/workoutPlans';
+import { getProgramScheduleEntryById } from '@/lib/fitness/programEngine';
 
 type SessionDetailClientProps = {
     id: string;
@@ -50,6 +55,108 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
     const [previousByExercise, setPreviousByExercise] = useState<
         Record<string, PreviousWorkoutPerformanceItem | null>
     >({});
+    const [exerciseNames, setExerciseNames] = useState<Record<string, string>>({});
+    const [sourcePlanName, setSourcePlanName] = useState<string | null>(null);
+    const [restTimerInitialSeconds, setRestTimerInitialSeconds] = useState(60);
+    const [restTimerRemainingSeconds, setRestTimerRemainingSeconds] = useState(60);
+    const [restTimerRunning, setRestTimerRunning] = useState(false);
+    const [restTimerSourceItemId, setRestTimerSourceItemId] = useState<string | null>(null);
+    const [adaptiveUpdate, setAdaptiveUpdate] = useState<SessionAdaptiveUpdate | null>(null);
+    const [adaptiveInsights, setAdaptiveInsights] = useState<{
+        expectedDaysPerWeek: number;
+        completedDaysThisWeek: number;
+        missedDaysThisWeek: number;
+        recentAverageCompletionRate: number;
+        suggestions: string[];
+    } | null>(null);
+    const [scheduledInfo, setScheduledInfo] = useState<{ scheduled_date: string; day_index: number } | null>(null);
+
+    const formatCountdown = (seconds: number): string => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    };
+
+    const parseNumberOrNull = (v: string): number | null =>
+        v.trim() === '' ? null : Number(v);
+
+    const saveItemActuals = async (
+        itemId: string,
+        edit: { actual_sets: string; actual_reps: string; actual_notes: string },
+        successMessage = 'Saved.'
+    ) => {
+        const actual_sets = parseNumberOrNull(edit.actual_sets);
+        const actual_reps = parseNumberOrNull(edit.actual_reps);
+
+        setItemEdits((prev) => ({
+            ...prev,
+            [itemId]: {
+                ...edit,
+                saving: true,
+                saveError: undefined,
+                saveSuccess: undefined,
+            },
+        }));
+        try {
+            const updated = await updateWorkoutSessionItemActuals(
+                itemId,
+                {
+                    actual_sets,
+                    actual_reps,
+                    actual_notes: edit.actual_notes.trim() || null,
+                },
+                supabase
+            );
+            setSession((prev) => {
+                if (!prev) return prev;
+                return {
+                    ...prev,
+                    items: prev.items.map((it) =>
+                        it.id === updated.id ? (updated as WorkoutSessionItem) : it
+                    ),
+                };
+            });
+            setItemEdits((prev) => ({
+                ...prev,
+                [itemId]: {
+                    ...prev[itemId],
+                    actual_sets:
+                        updated.actual_sets_completed != null
+                            ? String(updated.actual_sets_completed)
+                            : '',
+                    actual_reps:
+                        updated.actual_avg_reps_per_set != null
+                            ? String(updated.actual_avg_reps_per_set)
+                            : '',
+                    actual_notes: updated.actual_notes ?? '',
+                    saving: false,
+                    saveSuccess: successMessage,
+                    saveError: undefined,
+                },
+            }));
+        } catch (e) {
+            console.error('Save item actuals error:', e);
+            setItemEdits((prev) => ({
+                ...prev,
+                [itemId]: {
+                    ...prev[itemId],
+                    saving: false,
+                    saveError:
+                        e instanceof Error
+                            ? e.message
+                            : 'Failed to save actual performance',
+                },
+            }));
+        }
+    };
+
+    const startRestTimer = (seconds: number, itemId?: string) => {
+        const safeSeconds = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 60;
+        setRestTimerInitialSeconds(safeSeconds);
+        setRestTimerRemainingSeconds(safeSeconds);
+        setRestTimerRunning(true);
+        setRestTimerSourceItemId(itemId ?? null);
+    };
 
     useEffect(() => {
         let cancelled = false;
@@ -70,6 +177,39 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                 const data = await getSessionWithItems(id, supabase);
                 if (cancelled) return;
                 setSession(data);
+                if (data?.items?.length) {
+                    const slugs = [...new Set(data.items.map((i) => i.exercise_slug))];
+                    const names = await getExerciseNamesBySlugs(slugs, supabase);
+                    if (!cancelled) setExerciseNames(names);
+                } else {
+                    setExerciseNames({});
+                }
+                if (data?.plan_id) {
+                    try {
+                        const name = await getWorkoutPlanName(data.plan_id, supabase);
+                        if (!cancelled) setSourcePlanName(name);
+                    } catch (e) {
+                        console.error('Error loading source plan name:', e);
+                        if (!cancelled) setSourcePlanName(null);
+                    }
+                } else {
+                    setSourcePlanName(null);
+                }
+                if (data?.program_schedule_id) {
+                    try {
+                        const sched = await getProgramScheduleEntryById(data.program_schedule_id, supabase);
+                        if (!cancelled && sched) {
+                            setScheduledInfo({
+                                scheduled_date: sched.scheduled_date,
+                                day_index: sched.day_index,
+                            });
+                        }
+                    } catch {
+                        if (!cancelled) setScheduledInfo(null);
+                    }
+                } else {
+                    setScheduledInfo(null);
+                }
                 if (data && data.items) {
                     const initial: typeof itemEdits = {};
                     data.items.forEach((item) => {
@@ -100,6 +240,14 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                         }
                     }
                 }
+                if (data) {
+                    try {
+                        const insights = await getExecutionAdaptiveInsightsForUser(data.user_id, supabase);
+                        if (!cancelled) setAdaptiveInsights(insights);
+                    } catch {
+                        if (!cancelled) setAdaptiveInsights(null);
+                    }
+                }
             } catch (e) {
                 console.error('Error loading workout session detail:', e);
                 if (cancelled) return;
@@ -113,6 +261,25 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
             cancelled = true;
         };
     }, [id]);
+
+    useEffect(() => {
+        if (!restTimerRunning) return;
+        if (restTimerRemainingSeconds <= 0) {
+            setRestTimerRunning(false);
+            return;
+        }
+        const interval = window.setInterval(() => {
+            setRestTimerRemainingSeconds((prev) => {
+                if (prev <= 1) {
+                    window.clearInterval(interval);
+                    setRestTimerRunning(false);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+        return () => window.clearInterval(interval);
+    }, [restTimerRunning, restTimerRemainingSeconds]);
 
     if (session === undefined && !error) {
         return (
@@ -190,6 +357,14 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
     } else if (totalItems > 0 && itemsWithActuals === totalItems) {
         helperLine = "You've logged every exercise in this session.";
     }
+    const restTimerSourceItem =
+        restTimerSourceItemId != null
+            ? session.items.find((it) => it.id === restTimerSourceItemId) ?? null
+            : null;
+    const restTimerSourceName = restTimerSourceItem
+        ? exerciseNames[restTimerSourceItem.exercise_slug] ??
+          formatSlugAsTitle(restTimerSourceItem.exercise_slug)
+        : null;
 
     return (
         <div className="space-y-6 pb-8">
@@ -223,6 +398,22 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                     Started: {formatDateTime(session.started_at)}{' '}
                     {session.ended_at && <>• Ended: {formatDateTime(session.ended_at)}</>}
                 </p>
+                {session.plan_id && (
+                    <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                        Source plan:{' '}
+                        <Link
+                            href={`/fitness/plans/${session.plan_id}`}
+                            className="font-medium text-amber-600 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-300 underline underline-offset-1"
+                        >
+                            {sourcePlanName ?? 'View plan'}
+                        </Link>
+                    </p>
+                )}
+                {scheduledInfo && (
+                    <p className="mt-1 text-[11px] text-indigo-300">
+                        Scheduled session • Day {scheduledInfo.day_index} • {new Date(`${scheduledInfo.scheduled_date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </p>
+                )}
                 {session.notes && (
                     <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
                         {session.notes}
@@ -237,8 +428,9 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                                 setActionError(null);
                                 try {
                                     setCompleting(true);
-                                    const updated = await completeWorkoutSession(session.id, supabase);
-                                    setSession({ ...session, ...updated });
+                                    const result = await completeWorkoutSession(session.id, supabase);
+                                    setSession({ ...session, ...result.session });
+                                    setAdaptiveUpdate(result.adaptation);
                                 } catch (e) {
                                     console.error('Complete session error:', e);
                                     setActionError(
@@ -281,6 +473,25 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                         {actionError}
                     </p>
                 )}
+                {adaptiveUpdate && (
+                    <div className={`mt-2 rounded-md border px-3 py-2 text-[11px] ${
+                        adaptiveUpdate.applied
+                            ? 'border-emerald-500/40 bg-emerald-950/30 text-emerald-300'
+                            : 'border-slate-600 bg-slate-900/60 text-slate-300'
+                    }`}>
+                        <p className="font-medium">
+                            {adaptiveUpdate.applied ? 'Adaptive update applied' : 'Adaptive update not required'}
+                        </p>
+                        <p className="mt-0.5">{adaptiveUpdate.reason}</p>
+                        {adaptiveUpdate.suggestions.length > 0 && (
+                            <ul className="mt-1 list-disc list-inside space-y-0.5">
+                                {adaptiveUpdate.suggestions.slice(0, 2).map((s, idx) => (
+                                    <li key={`${s}-${idx}`}>{s}</li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
+                )}
             </header>
 
             <section className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
@@ -309,6 +520,79 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                 </p>
             </section>
 
+            {adaptiveInsights && (
+                <section className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                    <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-1">
+                        Adherence & adaptive guidance
+                    </h2>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                        <span><span className="font-semibold">Expected days/week:</span> {adaptiveInsights.expectedDaysPerWeek}</span>
+                        <span><span className="font-semibold">Completed days (7d):</span> {adaptiveInsights.completedDaysThisWeek}</span>
+                        <span><span className="font-semibold">Missed days (7d):</span> {adaptiveInsights.missedDaysThisWeek}</span>
+                        <span><span className="font-semibold">Avg completion:</span> {adaptiveInsights.recentAverageCompletionRate}%</span>
+                    </div>
+                    <ul className="mt-1 list-disc list-inside text-[11px] text-slate-500 dark:text-slate-400 space-y-0.5">
+                        {adaptiveInsights.suggestions.map((s, idx) => (
+                            <li key={`${s}-${idx}`}>{s}</li>
+                        ))}
+                    </ul>
+                </section>
+            )}
+
+            {session.status === 'in_progress' && (
+                <section className="rounded-md border border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900">
+                    <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-1">
+                        Rest timer
+                    </h2>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <p className="text-xl font-bold text-slate-900 dark:text-white">
+                            {formatCountdown(restTimerRemainingSeconds)}
+                        </p>
+                        <div className="flex flex-wrap gap-2 text-xs">
+                            <button
+                                type="button"
+                                onClick={() => setRestTimerRunning(true)}
+                                disabled={restTimerRemainingSeconds <= 0}
+                                className="inline-flex items-center rounded-md bg-amber-500 px-3 py-1 font-medium text-black hover:bg-amber-400 disabled:opacity-60 dark:bg-amber-400 dark:hover:bg-amber-300"
+                            >
+                                Start
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setRestTimerRunning(false)}
+                                className="inline-flex items-center rounded-md border border-slate-300 bg-slate-100 px-3 py-1 font-medium text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                            >
+                                Stop
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setRestTimerRunning(false);
+                                    setRestTimerRemainingSeconds(restTimerInitialSeconds);
+                                }}
+                                className="inline-flex items-center rounded-md border border-slate-300 bg-slate-100 px-3 py-1 font-medium text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                            >
+                                Reset
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    setRestTimerRemainingSeconds((prev) => prev + 15)
+                                }
+                                className="inline-flex items-center rounded-md border border-slate-300 bg-slate-100 px-3 py-1 font-medium text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                            >
+                                +15 sec
+                            </button>
+                        </div>
+                    </div>
+                    {restTimerSourceName && (
+                        <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                            Started from: {restTimerSourceName}
+                        </p>
+                    )}
+                </section>
+            )}
+
             <section className="space-y-3">
                 <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                     Session items
@@ -334,7 +618,7 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                                                 href={`/fitness/exercises/${encodeURIComponent(item.exercise_slug)}`}
                                                 className="font-semibold text-slate-900 hover:text-amber-600 dark:text-white dark:hover:text-amber-300"
                                             >
-                                                {item.exercise_slug}
+                                                {exerciseNames[item.exercise_slug] ?? formatSlugAsTitle(item.exercise_slug)}
                                             </Link>
                                             <div className="flex flex-wrap gap-2 text-[11px] text-slate-600 dark:text-slate-300">
                                                 <span>
@@ -346,6 +630,20 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                                                 <span>
                                                     <span className="font-semibold">Rest:</span> {item.target_rest_seconds} sec
                                                 </span>
+                                                {canEdit && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            startRestTimer(
+                                                                item.target_rest_seconds || 60,
+                                                                item.id
+                                                            )
+                                                        }
+                                                        className="rounded border border-amber-500 px-2 py-0.5 font-medium text-amber-700 hover:bg-amber-100 dark:border-amber-400 dark:text-amber-300 dark:hover:bg-amber-950/40"
+                                                    >
+                                                        Start rest
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                         <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-slate-600 dark:text-slate-300">
@@ -362,7 +660,7 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                                         </div>
                                         {item.target_note && (
                                             <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                                                {item.target_note}
+                                                <span className="font-medium">Plan note:</span> {item.target_note}
                                             </p>
                                         )}
                                         <div className="mt-3 border-t border-slate-200 pt-2 text-[11px] text-slate-600 dark:border-slate-700 dark:text-slate-300">
@@ -372,6 +670,90 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                                             {canEdit ? (
                                                 <>
                                                     <div className="flex flex-wrap gap-2 mb-2">
+                                                        <div className="flex flex-col gap-0.5">
+                                                            <span className="text-slate-500 dark:text-slate-400">
+                                                                Set tracker
+                                                            </span>
+                                                            <div className="flex items-center gap-1">
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={!!edit.saving}
+                                                                    onClick={() => {
+                                                                        const current = Number(
+                                                                            edit.actual_sets || '0'
+                                                                        );
+                                                                        const nextSets = Math.max(
+                                                                            0,
+                                                                            Number.isNaN(current)
+                                                                                ? 0
+                                                                                : current - 1
+                                                                        );
+                                                                        const nextEdit = {
+                                                                            ...edit,
+                                                                            actual_sets: String(nextSets),
+                                                                        };
+                                                                        setItemEdits((prev) => ({
+                                                                            ...prev,
+                                                                            [item.id]: {
+                                                                                ...nextEdit,
+                                                                                saveError: undefined,
+                                                                                saveSuccess: undefined,
+                                                                            },
+                                                                        }));
+                                                                        void saveItemActuals(
+                                                                            item.id,
+                                                                            nextEdit,
+                                                                            'Set count updated.'
+                                                                        );
+                                                                    }}
+                                                                    className="h-7 w-7 rounded border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                                                                >
+                                                                    -
+                                                                </button>
+                                                                <span className="min-w-7 text-center text-xs font-semibold text-slate-700 dark:text-slate-200">
+                                                                    {edit.actual_sets.trim() === ''
+                                                                        ? '0'
+                                                                        : edit.actual_sets}
+                                                                </span>
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={!!edit.saving}
+                                                                    onClick={() => {
+                                                                        const current = Number(
+                                                                            edit.actual_sets || '0'
+                                                                        );
+                                                                        const nextSets =
+                                                                            (Number.isNaN(current)
+                                                                                ? 0
+                                                                                : current) + 1;
+                                                                        const nextEdit = {
+                                                                            ...edit,
+                                                                            actual_sets: String(nextSets),
+                                                                        };
+                                                                        setItemEdits((prev) => ({
+                                                                            ...prev,
+                                                                            [item.id]: {
+                                                                                ...nextEdit,
+                                                                                saveError: undefined,
+                                                                                saveSuccess: undefined,
+                                                                            },
+                                                                        }));
+                                                                        void saveItemActuals(
+                                                                            item.id,
+                                                                            nextEdit,
+                                                                            'Set count updated.'
+                                                                        );
+                                                                        startRestTimer(
+                                                                            item.target_rest_seconds || 60,
+                                                                            item.id
+                                                                        );
+                                                                    }}
+                                                                    className="h-7 w-7 rounded border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                                                                >
+                                                                    +
+                                                                </button>
+                                                            </div>
+                                                        </div>
                                                         <label className="flex flex-col gap-0.5">
                                                             <span className="text-slate-500 dark:text-slate-400">Sets completed</span>
                                                             <input
@@ -436,57 +818,7 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                                                         type="button"
                                                         disabled={!!edit.saving}
                                                         onClick={async () => {
-                                                            const parseNumber = (v: string): number | null =>
-                                                                v.trim() === '' ? null : Number(v);
-                                                            const actual_sets = parseNumber(edit.actual_sets);
-                                                            const actual_reps = parseNumber(edit.actual_reps);
-                                                            setItemEdits((prev) => ({
-                                                                ...prev,
-                                                                [item.id]: { ...edit, saving: true, saveError: undefined, saveSuccess: undefined },
-                                                            }));
-                                                            try {
-                                                                const updated = await updateWorkoutSessionItemActuals(
-                                                                    item.id,
-                                                                    {
-                                                                        actual_sets,
-                                                                        actual_reps,
-                                                                        actual_notes: edit.actual_notes.trim() || null,
-                                                                    },
-                                                                    supabase
-                                                                );
-                                                                // update session items
-                                                                setSession((prev) => {
-                                                                    if (!prev) return prev;
-                                                                    const newItems = prev.items.map((it) =>
-                                                                        it.id === updated.id ? (updated as WorkoutSessionItem) : it
-                                                                    );
-                                                                    return { ...prev, items: newItems };
-                                                                });
-                                                                setItemEdits((prev) => ({
-                                                                    ...prev,
-                                                                    [item.id]: {
-                                                                        ...edit,
-                                                                        actual_sets: updated.actual_sets_completed != null ? String(updated.actual_sets_completed) : '',
-                                                                        actual_reps: updated.actual_avg_reps_per_set != null ? String(updated.actual_avg_reps_per_set) : '',
-                                                                        actual_notes: updated.actual_notes ?? '',
-                                                                        saving: false,
-                                                                        saveSuccess: 'Saved.',
-                                                                    },
-                                                                }));
-                                                            } catch (e) {
-                                                                console.error('Save item actuals error:', e);
-                                                                setItemEdits((prev) => ({
-                                                                    ...prev,
-                                                                    [item.id]: {
-                                                                        ...edit,
-                                                                        saving: false,
-                                                                        saveError:
-                                                                            e instanceof Error
-                                                                                ? e.message
-                                                                                : 'Failed to save actual performance',
-                                                                    },
-                                                                }));
-                                                            }
+                                                            await saveItemActuals(item.id, edit, 'Saved.');
                                                         }}
                                                         className="inline-flex items-center rounded-md bg-slate-900 px-3 py-1 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
                                                     >

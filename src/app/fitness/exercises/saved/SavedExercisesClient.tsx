@@ -125,7 +125,7 @@ export default function SavedExercisesClient() {
                         <li key={ex.id}>
                             <Link
                                 href={`/fitness/exercises/${ex.slug}`}
-                                className="block rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 h-full hover:border-amber-500/50 dark:hover-border-amber-400/50 hover:shadow-md transition-colors"
+                                className="block rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 h-full hover:border-amber-500/50 dark:hover:border-amber-400/50 hover:shadow-md transition-colors"
                             >
                                 <h2 className="font-semibold text-slate-900 dark:text-white">
                                     {ex.name}

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedUser } from '@/lib/resume/auth';
+import { getAuthenticatedUser, getAuthenticatedSupabase } from '@/lib/resume/auth';
 import OpenAI from 'openai';
 import {
   getUserProfileDefaults,
@@ -38,17 +38,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
     }
 
-    // Try to get user ID from request body first (passed from client)
-    let userId: string | undefined = requestBody.userId;
-
-    // If not in body, try to get from auth
-    if (!userId) {
-      const user = await getAuthenticatedUser(request);
-      if (!user) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-      }
-      userId = user.id;
+    const user = await getAuthenticatedUser(request);
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const userId = user.id;
+    const supabase = await getAuthenticatedSupabase(request);
 
     // Extract generation request (without userId)
     const generationRequest: GenerationRequest = {
@@ -71,7 +66,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check credits
-    const hasCredits = await ensureUserHasCredits(userId, 1);
+    const hasCredits = await ensureUserHasCredits(supabase, userId, 1);
     if (!hasCredits) {
       return NextResponse.json(
         { error: 'Insufficient credits. Please purchase more credits to continue.' },
@@ -80,7 +75,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get user profile defaults
-    const userProfile = await getUserProfileDefaults(userId);
+    const userProfile = await getUserProfileDefaults(supabase, userId);
     if (!userProfile) {
       return NextResponse.json(
         { error: 'Please complete your profile setup first' },
@@ -207,10 +202,10 @@ export async function POST(request: NextRequest) {
       (resumeResponse.usage?.total_tokens || 0) + (coverLetterResponse.usage?.total_tokens || 0);
 
     // Consume credits
-    await consumeCredits(userId, 1);
+    await consumeCredits(supabase, userId, 1);
 
     // Create generation record
-    const generation = await createGeneration({
+    const generation = await createGeneration(supabase, {
       user_id: userId,
       job_title: generationRequest.job_title,
       company_name: generationRequest.company_name,

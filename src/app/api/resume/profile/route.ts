@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedUser } from '@/lib/resume/auth';
+import { getAuthenticatedUser, getAuthenticatedSupabase } from '@/lib/resume/auth';
 import {
   getUserProfileDefaults,
   upsertUserProfileDefaults,
@@ -18,7 +18,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const profile = await getUserProfileDefaults(user.id);
+    const supabase = await getAuthenticatedSupabase(request);
+    const profile = await getUserProfileDefaults(supabase, user.id);
     return NextResponse.json({ profile });
   } catch (error) {
     console.error('Error fetching profile:', error);
@@ -37,8 +38,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const supabase = await getAuthenticatedSupabase(request);
     const body: Partial<UserProfileDefaults> = await request.json();
-    const profile = await upsertUserProfileDefaults(user.id, body);
+    const profile = await upsertUserProfileDefaults(supabase, user.id, body);
 
     return NextResponse.json({ profile, success: true });
   } catch (error) {

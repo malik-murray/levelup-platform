@@ -5,6 +5,20 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
 import { usePreview } from '@/lib/previewStore';
+import {
+    listInProgressSessionsForUser,
+    getProgressSummaryForUser,
+    getTrainNextRecommendationForUser,
+    getTrainingConsistencyForUser,
+    getExecutionAdaptiveInsightsForUser,
+} from '@/lib/fitness/workoutSessions';
+import { getFitnessUserProfileForUser } from '@/lib/fitness/profile';
+import type { FitnessUserProfile } from '@/lib/fitness/profile';
+import FitnessOnboardingWizard from './FitnessOnboardingWizard';
+import { listWorkoutPlansForUser } from '@/lib/fitness/workoutPlans';
+import { generatePersonalizedStarterPlanForUser } from '@/lib/fitness/personalizedPlans';
+import { getCurrentProgramAssignmentForUser } from '@/lib/fitness/programEngine';
+import { getOrCreateScheduledSessionForAssignment } from '@/lib/fitness/programEngine';
 
 type Workout = {
     id: string;
@@ -56,6 +70,44 @@ export default function FitnessPage() {
     const [loading, setLoading] = useState(true);
     const [notification, setNotification] = useState<string | null>(null);
     const [schemaMissing, setSchemaMissing] = useState(false);
+    const [latestInProgressSession, setLatestInProgressSession] = useState<{ id: string; name: string | null; started_at: string } | null>(null);
+    const [progressSummary, setProgressSummary] = useState<{
+        completedSessionsCount: number;
+        totalLoggedSets: number;
+        latestCompletedSession: { id: string; name: string | null; ended_at: string | null } | null;
+    } | null>(null);
+    const [trainNextRecommendation, setTrainNextRecommendation] = useState<{
+        recommendedMuscleSlug: string | null;
+        recommendedLabel: string;
+        reason: string;
+        lastTrainedContext?: string;
+    } | null>(null);
+    const [trainingConsistency, setTrainingConsistency] = useState<{
+        trainedToday: boolean;
+        currentStreak: number;
+    } | null>(null);
+    const [executionInsights, setExecutionInsights] = useState<{
+        expectedDaysPerWeek: number;
+        completedDaysThisWeek: number;
+        missedDaysThisWeek: number;
+        recentAverageCompletionRate: number;
+        suggestions: string[];
+    } | null>(null);
+    const [programAssignment, setProgramAssignment] = useState<{
+        scheduleEntryId: string;
+        planId: string;
+        dayIndex: number;
+        scheduledDate: string;
+        carryForward: boolean;
+    } | null>(null);
+    const [startingScheduledWorkout, setStartingScheduledWorkout] = useState(false);
+    const [showOnboarding, setShowOnboarding] = useState(false);
+    const [fitnessProfile, setFitnessProfile] = useState<FitnessUserProfile | null>(null);
+    const [hasWorkoutPlans, setHasWorkoutPlans] = useState(false);
+    const [generatingStarterPlan, setGeneratingStarterPlan] = useState(false);
+    const [starterPlanStatus, setStarterPlanStatus] = useState<'idle' | 'generating' | 'success' | 'failed'>('idle');
+    const [starterPlanError, setStarterPlanError] = useState<string | null>(null);
+    const [starterPlanId, setStarterPlanId] = useState<string | null>(null);
 
     const today = useMemo(() => {
         const date = new Date();
@@ -92,6 +144,28 @@ export default function FitnessPage() {
             if (!user) {
                 window.location.href = '/login';
                 return;
+            }
+
+            // Gate dashboard until onboarding profile is completed.
+            const profile = await getFitnessUserProfileForUser(user.id, supabase);
+            if (!profile || !profile.is_onboarding_complete) {
+                setShowOnboarding(true);
+                setFitnessProfile(null);
+                setStarterPlanStatus('idle');
+                setStarterPlanError(null);
+                setStarterPlanId(null);
+                setLoading(false);
+                return;
+            }
+            setShowOnboarding(false);
+            setFitnessProfile(profile);
+
+            // Read whether the user already has workout plans.
+            try {
+                const plans = await listWorkoutPlansForUser(user.id, supabase);
+                setHasWorkoutPlans(plans.length > 0);
+            } catch {
+                setHasWorkoutPlans(false);
             }
 
             // Load today's workouts
@@ -158,6 +232,72 @@ export default function FitnessPage() {
             setWorkouts(workoutsData as Workout[] || []);
             setMeals(mealsData as Meal[] || []);
             setMetrics(metricsData as Metric || null);
+
+            // Load latest in-progress workout session (plan-based)
+            try {
+                const inProgress = await listInProgressSessionsForUser(user.id, supabase);
+                if (inProgress.length > 0) {
+                    const s = inProgress[0];
+                    setLatestInProgressSession({ id: s.id, name: s.name, started_at: s.started_at });
+                } else {
+                    setLatestInProgressSession(null);
+                }
+            } catch {
+                setLatestInProgressSession(null);
+            }
+
+            // Load progress summary (completed sessions)
+            try {
+                const progress = await getProgressSummaryForUser(user.id, supabase);
+                setProgressSummary(progress);
+            } catch {
+                setProgressSummary(null);
+            }
+
+            // Load "what to train next" recommendation
+            try {
+                const rec = await getTrainNextRecommendationForUser(user.id, supabase);
+                setTrainNextRecommendation(rec);
+            } catch {
+                setTrainNextRecommendation(null);
+            }
+
+            // Load training consistency (streak, trained today)
+            try {
+                const consistency = await getTrainingConsistencyForUser(user.id, supabase);
+                setTrainingConsistency({
+                    trainedToday: consistency.trainedToday,
+                    currentStreak: consistency.currentStreak,
+                });
+            } catch {
+                setTrainingConsistency(null);
+            }
+
+            // Load execution adherence + adaptive update guidance.
+            try {
+                const insights = await getExecutionAdaptiveInsightsForUser(user.id, supabase);
+                setExecutionInsights(insights);
+            } catch {
+                setExecutionInsights(null);
+            }
+
+            // Load strict training-day assignment (includes shift-forward carry).
+            try {
+                const assignment = await getCurrentProgramAssignmentForUser(user.id, supabase);
+                if (assignment) {
+                    setProgramAssignment({
+                        scheduleEntryId: assignment.entry.id,
+                        planId: assignment.activeProgram.plan_id,
+                        dayIndex: assignment.entry.day_index,
+                        scheduledDate: assignment.entry.scheduled_date,
+                        carryForward: assignment.carryForward,
+                    });
+                } else {
+                    setProgramAssignment(null);
+                }
+            } catch {
+                setProgramAssignment(null);
+            }
 
             // Load weekly summary
             const weekStart = new Date();
@@ -235,8 +375,188 @@ export default function FitnessPage() {
         );
     }
 
+    if (!loading && showOnboarding) {
+        return (
+            <section className="px-6 py-4">
+                <FitnessOnboardingWizard
+                    onCompleted={async () => {
+                        setShowOnboarding(false);
+                        setStarterPlanStatus('generating');
+                        setStarterPlanError(null);
+                        setStarterPlanId(null);
+                        setLoading(true);
+                        setNotification(null);
+                        try {
+                            const { data: { user } } = await supabase.auth.getUser();
+                            if (!user) {
+                                window.location.href = '/login';
+                                return;
+                            }
+                            const profile = await getFitnessUserProfileForUser(user.id, supabase);
+                            if (!profile || !profile.is_onboarding_complete) {
+                                setStarterPlanStatus('failed');
+                                setStarterPlanError('Onboarding profile was not found after save. Please try again.');
+                                return;
+                            }
+                            setFitnessProfile(profile);
+                            const created = await generatePersonalizedStarterPlanForUser(user.id, profile, supabase);
+                            setStarterPlanStatus('success');
+                            setStarterPlanId(created.id);
+                            setHasWorkoutPlans(true);
+                        } catch (err) {
+                            setStarterPlanStatus('failed');
+                            setStarterPlanError(
+                                err instanceof Error
+                                    ? err.message
+                                    : 'We could not auto-generate your starter plan yet.'
+                            );
+                            setHasWorkoutPlans(false);
+                        } finally {
+                            await loadDashboardData();
+                            setLoading(false);
+                        }
+                    }}
+                />
+            </section>
+        );
+    }
+
     return (
         <section className="space-y-6 px-6 py-4">
+            {starterPlanStatus === 'generating' && (
+                <div className="rounded-lg border border-sky-500/30 bg-sky-950/20 p-4">
+                    <h3 className="text-sm font-semibold text-sky-300">Creating your personalized starter plan...</h3>
+                    <p className="mt-1 text-xs text-slate-300">
+                        This uses your onboarding answers to generate your first tailored plan.
+                    </p>
+                </div>
+            )}
+
+            {starterPlanStatus === 'success' && (
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-950/20 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 className="text-sm font-semibold text-emerald-300">Your starter plan is ready</h3>
+                            <p className="mt-1 text-xs text-slate-300">
+                                We auto-generated your first personalized workout plan from your onboarding profile.
+                            </p>
+                        </div>
+                        <div className="flex gap-2">
+                            <Link
+                                href={starterPlanId ? `/fitness/plans/${starterPlanId}` : '/fitness/plans'}
+                                className="rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-black hover:bg-emerald-400"
+                            >
+                                Open starter plan
+                            </Link>
+                            <Link
+                                href="/fitness/plans"
+                                className="rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
+                            >
+                                View all plans
+                            </Link>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {starterPlanStatus === 'failed' && !hasWorkoutPlans && (
+                <div className="rounded-lg border border-red-500/30 bg-red-950/20 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 className="text-sm font-semibold text-red-300">We could not auto-generate your starter plan</h3>
+                            <p className="mt-1 text-xs text-slate-300">
+                                {starterPlanError ?? 'You can still generate it manually below.'}
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            disabled={generatingStarterPlan}
+                            onClick={async () => {
+                                if (!fitnessProfile) return;
+                                setGeneratingStarterPlan(true);
+                                setNotification(null);
+                                try {
+                                    const { data: { user } } = await supabase.auth.getUser();
+                                    if (!user) {
+                                        window.location.href = '/login';
+                                        return;
+                                    }
+                                    const created = await generatePersonalizedStarterPlanForUser(
+                                        user.id,
+                                        fitnessProfile,
+                                        supabase
+                                    );
+                                    setStarterPlanStatus('success');
+                                    setStarterPlanId(created.id);
+                                    setHasWorkoutPlans(true);
+                                    window.location.href = `/fitness/plans/${created.id}`;
+                                } catch (err) {
+                                    setStarterPlanError(
+                                        err instanceof Error
+                                            ? err.message
+                                            : 'Failed to generate your personalized starter plan'
+                                    );
+                                } finally {
+                                    setGeneratingStarterPlan(false);
+                                }
+                            }}
+                            className="rounded-md bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {generatingStarterPlan ? 'Generating...' : 'Generate manually'}
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {!loading && fitnessProfile && !hasWorkoutPlans && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-950/20 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 className="text-sm font-semibold text-amber-300">Your personalized starter plan</h3>
+                            <p className="mt-1 text-xs text-slate-300">
+                                We can generate your first tailored plan from your onboarding profile.
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            disabled={generatingStarterPlan || starterPlanStatus === 'generating'}
+                            onClick={async () => {
+                                if (!fitnessProfile) return;
+                                setGeneratingStarterPlan(true);
+                                setNotification(null);
+                                try {
+                                    const { data: { user } } = await supabase.auth.getUser();
+                                    if (!user) {
+                                        window.location.href = '/login';
+                                        return;
+                                    }
+                                    const created = await generatePersonalizedStarterPlanForUser(
+                                        user.id,
+                                        fitnessProfile,
+                                        supabase
+                                    );
+                                    setStarterPlanStatus('success');
+                                    setStarterPlanId(created.id);
+                                    setHasWorkoutPlans(true);
+                                    window.location.href = `/fitness/plans/${created.id}`;
+                                } catch (err) {
+                                    setNotification(
+                                        err instanceof Error
+                                            ? err.message
+                                            : 'Failed to generate your personalized starter plan'
+                                    );
+                                } finally {
+                                    setGeneratingStarterPlan(false);
+                                }
+                            }}
+                            className="rounded-md bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {generatingStarterPlan ? 'Generating...' : 'Generate starter plan'}
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {notification && !schemaMissing && (
                 <div className={`rounded-lg border p-3 text-xs ${
                     notification.includes('Error') || notification.includes('Failed')
@@ -254,6 +574,248 @@ export default function FitnessPage() {
                     <p className="text-xs text-slate-400 mt-1">Today's Progress</p>
                 </div>
             </div>
+
+            {/* Resume latest session */}
+            {latestInProgressSession && !loading && (
+                <div className="rounded-lg border-2 border-emerald-500 bg-emerald-950/40 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <p className="text-xs font-medium text-emerald-400">In progress</p>
+                            <p className="mt-0.5 text-sm font-semibold text-white">
+                                {latestInProgressSession.name || 'Workout Session'}
+                            </p>
+                            <p className="text-xs text-slate-400">
+                                Started {new Date(latestInProgressSession.started_at).toLocaleString('en-US', {
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                })}
+                            </p>
+                        </div>
+                        <Link
+                            href={`/fitness/sessions/${latestInProgressSession.id}`}
+                            className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-black hover:bg-emerald-400"
+                        >
+                            Continue session
+                        </Link>
+                    </div>
+                </div>
+            )}
+
+            {/* Session progress summary */}
+            {progressSummary && (progressSummary.completedSessionsCount > 0 || progressSummary.totalLoggedSets > 0) && (
+                <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-xs font-semibold text-slate-400">Session progress</h3>
+                        <Link
+                            href="/fitness/sessions"
+                            className="text-xs font-medium text-amber-400 hover:text-amber-300"
+                        >
+                            View all sessions
+                        </Link>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        <div>
+                            <div className="text-xs text-slate-500">Completed sessions</div>
+                            <div className="text-lg font-semibold text-white">{progressSummary.completedSessionsCount}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-slate-500">Total logged sets</div>
+                            <div className="text-lg font-semibold text-white">{progressSummary.totalLoggedSets}</div>
+                        </div>
+                        {progressSummary.latestCompletedSession && (
+                            <div>
+                                <div className="text-xs text-slate-500">Latest workout</div>
+                                <Link
+                                    href={`/fitness/sessions/${progressSummary.latestCompletedSession.id}`}
+                                    className="text-sm font-medium text-amber-400 hover:text-amber-300 truncate block"
+                                >
+                                    {progressSummary.latestCompletedSession.name || 'Session'}
+                                </Link>
+                                <div className="text-[11px] text-slate-500">
+                                    {progressSummary.latestCompletedSession.ended_at
+                                        ? new Date(progressSummary.latestCompletedSession.ended_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                        : '—'}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Training consistency */}
+            {trainingConsistency && !loading && (
+                <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
+                    <h3 className="text-xs font-semibold text-slate-400 mb-2">Consistency</h3>
+                    <div className="flex flex-wrap items-baseline gap-4">
+                        <div>
+                            <span className="text-xs text-slate-500">Trained today</span>
+                            <span className="ml-2 text-sm font-medium text-white">
+                                {trainingConsistency.trainedToday ? 'Yes' : 'Not yet'}
+                            </span>
+                        </div>
+                        <div>
+                            <span className="text-xs text-slate-500">Current streak</span>
+                            <span className="ml-2 text-sm font-medium text-white">
+                                {trainingConsistency.currentStreak} day{trainingConsistency.currentStreak !== 1 ? 's' : ''}
+                            </span>
+                        </div>
+                    </div>
+                    {!trainingConsistency.trainedToday && (
+                        <p className="text-[11px] text-slate-500 mt-2">
+                            Complete a workout today to extend your streak.
+                        </p>
+                    )}
+                </div>
+            )}
+
+            {programAssignment && !loading && (
+                <div className="rounded-lg border border-indigo-500/30 bg-indigo-950/20 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 className="text-xs font-semibold text-indigo-300 mb-1">Today's scheduled workout</h3>
+                            <p className="text-sm font-medium text-white">
+                                Day {programAssignment.dayIndex}
+                                {programAssignment.carryForward ? ' (carry-forward)' : ''}
+                            </p>
+                            <p className="text-[11px] text-slate-400">
+                                Scheduled: {new Date(`${programAssignment.scheduledDate}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            </p>
+                        </div>
+                        <div className="flex gap-2">
+                            <button
+                                type="button"
+                                disabled={startingScheduledWorkout}
+                                onClick={async () => {
+                                    setStartingScheduledWorkout(true);
+                                    setNotification(null);
+                                    try {
+                                        const { data: { user } } = await supabase.auth.getUser();
+                                        if (!user) {
+                                            window.location.href = '/login';
+                                            return;
+                                        }
+                                        const started = await getOrCreateScheduledSessionForAssignment({
+                                            userId: user.id,
+                                            planId: programAssignment.planId,
+                                            dayIndex: programAssignment.dayIndex,
+                                            scheduleEntryId: programAssignment.scheduleEntryId,
+                                            supabase,
+                                        });
+                                        window.location.href = `/fitness/sessions/${started.sessionId}`;
+                                    } catch (err) {
+                                        setNotification(
+                                            err instanceof Error
+                                                ? err.message
+                                                : 'Failed to start today\'s scheduled workout'
+                                        );
+                                    } finally {
+                                        setStartingScheduledWorkout(false);
+                                    }
+                                }}
+                                className="rounded-md bg-indigo-400 px-3 py-1.5 text-xs font-semibold text-black hover:bg-indigo-300 disabled:opacity-60"
+                            >
+                                {startingScheduledWorkout ? 'Starting…' : 'Start today\'s workout'}
+                            </button>
+                            <Link
+                                href={`/fitness/plans/${programAssignment.planId}`}
+                                className="rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
+                            >
+                                View plan
+                            </Link>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {executionInsights && !loading && (
+                <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
+                    <h3 className="text-xs font-semibold text-slate-400 mb-2">Execution & adaptive updates</h3>
+                    <div className="flex flex-wrap items-baseline gap-4">
+                        <div>
+                            <span className="text-xs text-slate-500">Completed days (7d)</span>
+                            <span className="ml-2 text-sm font-medium text-white">
+                                {executionInsights.completedDaysThisWeek}/{executionInsights.expectedDaysPerWeek}
+                            </span>
+                        </div>
+                        <div>
+                            <span className="text-xs text-slate-500">Missed days</span>
+                            <span className="ml-2 text-sm font-medium text-white">
+                                {executionInsights.missedDaysThisWeek}
+                            </span>
+                        </div>
+                        <div>
+                            <span className="text-xs text-slate-500">Avg completion</span>
+                            <span className="ml-2 text-sm font-medium text-white">
+                                {executionInsights.recentAverageCompletionRate}%
+                            </span>
+                        </div>
+                    </div>
+                    {executionInsights.suggestions.length > 0 && (
+                        <p className="mt-2 text-[11px] text-slate-500">
+                            {executionInsights.suggestions[0]}
+                        </p>
+                    )}
+                </div>
+            )}
+
+            {/* What to train next */}
+            {trainNextRecommendation && !loading && (
+                <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
+                    <h3 className="text-xs font-semibold text-slate-400 mb-2">What to train next</h3>
+                    {trainNextRecommendation.recommendedMuscleSlug ? (
+                        <>
+                            <p className="text-sm font-medium text-white">
+                                {trainNextRecommendation.recommendedLabel}
+                            </p>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                                {trainNextRecommendation.reason}
+                            </p>
+                            {trainNextRecommendation.lastTrainedContext && (
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                    {trainNextRecommendation.lastTrainedContext}
+                                </p>
+                            )}
+                            <div className="flex flex-wrap gap-2 mt-3">
+                                <Link
+                                    href={`/fitness/workout-generator?muscle=${encodeURIComponent(trainNextRecommendation.recommendedMuscleSlug)}`}
+                                    className="rounded-md bg-amber-400 px-3 py-1.5 text-xs font-semibold text-black hover:bg-amber-300"
+                                >
+                                    Generate workout
+                                </Link>
+                                <Link
+                                    href={`/fitness/exercises?muscle=${encodeURIComponent(trainNextRecommendation.recommendedMuscleSlug)}`}
+                                    className="rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
+                                >
+                                    Browse exercises
+                                </Link>
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <p className="text-sm text-slate-300">Get started</p>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                                {trainNextRecommendation.reason}
+                            </p>
+                            <div className="flex flex-wrap gap-2 mt-3">
+                                <Link
+                                    href="/fitness/plans"
+                                    className="rounded-md bg-amber-400 px-3 py-1.5 text-xs font-semibold text-black hover:bg-amber-300"
+                                >
+                                    Browse plans
+                                </Link>
+                                <Link
+                                    href="/fitness/workout-generator"
+                                    className="rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
+                                >
+                                    Workout generator
+                                </Link>
+                            </div>
+                        </>
+                    )}
+                </div>
+            )}
 
             {/* Quick Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

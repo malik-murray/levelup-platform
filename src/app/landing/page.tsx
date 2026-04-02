@@ -7,9 +7,9 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 
 const areas = [
   {
-    title: 'Habits & Life Tracker',
+    title: 'Habits & Daily Dashboard',
     description: 'Build routines, track daily habits, priorities, and todos. Score your day across physical, mental, and spiritual dimensions.',
-    href: '/preview/habit',
+    href: '/preview/dashboard',
     icon: '📈',
   },
   {

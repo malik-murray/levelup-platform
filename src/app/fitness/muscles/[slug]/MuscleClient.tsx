@@ -173,7 +173,7 @@ export default function MuscleClient({ slug }: MuscleClientProps) {
                         View in exercise browser
                     </Link>
                     <Link
-                        href={`/fitness/workout-generator?muscles=${encodeURIComponent(muscle.slug)}`}
+                        href={`/fitness/workout-generator?muscle=${encodeURIComponent(muscle.slug)}`}
                         className="inline-flex items-center rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                     >
                         Generate workout for this muscle

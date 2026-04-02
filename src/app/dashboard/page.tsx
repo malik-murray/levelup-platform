@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
 import { supabase } from "@auth/supabaseClient";
 import logo from "../logo.png";
 import { formatDate } from "@/lib/habitHelpers";
@@ -12,14 +11,15 @@ import DashboardNotesSection from "./components/DashboardNotesSection";
 import FitnessWidget from "./components/FitnessWidget";
 import MarketsWidget from "./components/MarketsWidget";
 import FinanceWidget from "./components/FinanceWidget";
+import BacklogWidget from "./components/BacklogWidget";
 import AppSidebar from "./components/AppSidebar";
 import DashboardScoreBars, { type DashboardScores } from "./components/DashboardScoreBars";
 import DashboardCalendarOverview from "./components/DashboardCalendarOverview";
+import Link from "next/link";
 
 type Timeframe = 'daily' | 'weekly' | 'custom';
 
 export default function DashboardPage() {
-    const router = useRouter();
     const [email, setEmail] = useState<string | null>(null);
     const [userId, setUserId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
@@ -91,8 +91,8 @@ export default function DashboardPage() {
     const handleSetupNextDay = () => {
         const nextDay = new Date(selectedDate);
         nextDay.setDate(nextDay.getDate() + 1);
-        const nextDayStr = formatDate(nextDay);
-        router.push(`/habit?tab=daily&date=${nextDayStr}`);
+        setSelectedDate(nextDay);
+        setTimeframe('daily');
     };
 
 
@@ -190,6 +190,12 @@ export default function DashboardPage() {
                             >
                                 Calendar overview
                             </button>
+                            <Link
+                                href="/trends"
+                                className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-2 text-sm font-medium text-amber-300 hover:bg-amber-500/20 transition-colors whitespace-nowrap"
+                            >
+                                Trends
+                            </Link>
                             <button
                                 onClick={handleNextDay}
                                 className="rounded-md border border-slate-700 bg-slate-900 p-2 text-slate-300 hover:bg-slate-800 transition-colors shrink-0"
@@ -275,7 +281,8 @@ export default function DashboardPage() {
                         </div>
 
                         {/* Right Sidebar Widgets */}
-                        <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                            <BacklogWidget userId={userId} />
                             <FitnessWidget 
                                 selectedDate={selectedDate}
                                 userId={userId}
