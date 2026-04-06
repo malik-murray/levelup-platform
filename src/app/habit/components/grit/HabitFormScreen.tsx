@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import type { GritHabitFormDraft } from '../../lib/gritTypes';
+import { HabitFlowShell } from '../HabitFlowShell';
+import { neon } from '@/app/dashboard/neonTheme';
 
 interface HabitFormScreenProps {
   draft: GritHabitFormDraft;
@@ -41,100 +43,98 @@ export function HabitFormScreen({
   const returnPath = isEdit && habitId ? `/habit/${habitId}/edit` : '/habit/new';
 
   return (
-    <div className="min-h-screen bg-[var(--lu-bg)] text-[var(--lu-text)] flex flex-col safe-area-pb">
-      <header className="sticky top-0 z-10 flex items-center justify-between h-14 px-4 bg-[var(--lu-bg)]/95 backdrop-blur border-b border-white/5">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="min-w-[44px] min-h-[44px] flex items-center justify-center -ml-2 rounded-full active:bg-white/10"
-          aria-label="Cancel"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-        <h1 className="text-lg font-semibold">{isEdit ? 'Edit Habit' : 'New Habit'}</h1>
+    <HabitFlowShell
+      title={isEdit ? 'Edit Habit' : 'New Habit'}
+      onBack={onCancel}
+      headerRight={
         <button
           type="button"
           onClick={onSave}
           disabled={saving || !draft.name.trim()}
-          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full text-[var(--lu-accent)] disabled:opacity-50 disabled:pointer-events-none"
+          className="min-h-[44px] rounded-xl border-2 border-[#ff9d00]/60 bg-[#ff9d00]/15 px-4 py-2 text-sm font-semibold text-[#ffe066] shadow-[0_0_18px_rgba(255,157,0,0.15)] transition hover:bg-[#ff9d00]/25 disabled:pointer-events-none disabled:opacity-40"
         >
           {saving ? (
-            <span className="w-5 h-5 border-2 border-[var(--lu-accent)] border-t-transparent rounded-full animate-spin" />
+            <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-[#ff9d00] border-t-transparent" />
           ) : (
             'Save'
           )}
         </button>
-      </header>
-
-      <main className="flex-1 overflow-y-auto px-4 py-6">
-        {/* Preview pill */}
-        <div className="mb-8 flex justify-center">
-          <div
-            className="inline-flex items-center gap-3 px-5 py-3 rounded-full border border-white/10 bg-white/5 shadow-lg"
-            style={draft.color ? { borderColor: draft.color, backgroundColor: `${draft.color}20` } : undefined}
-          >
-            <span className="text-2xl">{draft.icon || '📝'}</span>
-            <div className="text-left">
-              <p className="font-semibold">{draft.name || 'Habit name'}</p>
-              <p className="text-xs text-white/60">{frequencyLabel}</p>
-            </div>
+      }
+    >
+      <div className="mb-8 flex justify-center px-1">
+        <div
+          className={`${neon.panel} flex max-w-full min-w-0 items-center gap-3 rounded-2xl px-5 py-3`}
+          style={
+            draft.color
+              ? { borderColor: `${draft.color}99`, boxShadow: `0 0 24px ${draft.color}33` }
+              : undefined
+          }
+        >
+          <span className="shrink-0 text-2xl">{draft.icon || '📝'}</span>
+          <div className="min-w-0 text-left">
+            <p className="break-words font-semibold text-white [overflow-wrap:anywhere]">
+              {draft.name || 'Habit name'}
+            </p>
+            <p className="text-xs text-[#ff9d00]/75">{frequencyLabel}</p>
           </div>
         </div>
+      </div>
 
-        {/* Color */}
-        <SectionRow
-          label="Color"
-          value={draft.color ? 'Selected' : 'Default'}
-          href={`/habit/color?return=${encodeURIComponent(returnPath)}`}
+      <SectionRow
+        label="Color"
+        value={draft.color ? 'Selected' : 'Default'}
+        href={`/habit/color?return=${encodeURIComponent(returnPath)}`}
+      />
+
+      <SectionRow
+        label="Icon"
+        value={draft.icon || '📝'}
+        href={`/habit/icon?return=${encodeURIComponent(returnPath)}`}
+      />
+
+      <SectionRow
+        label="Description"
+        value={draft.description || 'Add description'}
+        inlineEditor
+        onInlineChange={(v) => setDraft({ ...draft, description: v || null })}
+        inlineValue={draft.description ?? ''}
+      />
+
+      <div className="h-6" />
+
+      <p className="mb-2 px-1 text-xs font-bold uppercase tracking-[0.18em] text-[#ff9d00]/85">General</p>
+      <div className={`${neon.panel} overflow-hidden`}>
+        <SettingsRow
+          label="Type"
+          value={TYPE_LABELS[draft.type] || draft.type}
+          href={isEdit ? `/habit/type?return=/habit/${habitId}/edit` : '/habit/type?return=/habit/new'}
         />
-
-        {/* Icon */}
-        <SectionRow
-          label="Icon"
-          value={draft.icon || '📝'}
-          href={`/habit/icon?return=${encodeURIComponent(returnPath)}`}
+        <SettingsRow
+          label="Groups"
+          value="None"
+          href={`/habit/groups?return=${encodeURIComponent(returnPath)}`}
         />
-
-        {/* Description */}
-        <SectionRow
-          label="Description"
-          value={draft.description || 'Add description'}
-          inlineEditor
-          onInlineChange={(v) => setDraft({ ...draft, description: v || null })}
-          inlineValue={draft.description ?? ''}
+        <SettingsRow label="Goal" value={draft.goal_id ? 'Linked' : 'None'} comingSoon />
+        <SettingsRow label="Average" value="—" comingSoon />
+        <SettingsRow
+          label="Repeat"
+          value={frequencyLabel}
+          href={`/habit/repeat?return=${encodeURIComponent(returnPath)}`}
         />
+        <SettingsRow label="Notifications" value="Off" comingSoon />
+        <SettingsRow label="URL" value="—" comingSoon />
+        <SettingsRow label="Starts on" value="—" comingSoon />
+        <SettingsRow label="Ends" value="—" comingSoon last />
+      </div>
 
-        <div className="h-4" />
-
-        {/* General settings */}
-        <p className="text-sm font-medium text-white/60 mb-2 px-1">General</p>
-        <div className="rounded-2xl border border-white/10 overflow-hidden">
-          <SettingsRow
-            label="Type"
-            value={TYPE_LABELS[draft.type] || draft.type}
-            href={isEdit ? `/habit/type?return=/habit/${habitId}/edit` : '/habit/type?return=/habit/new'}
-          />
-          <SettingsRow
-            label="Groups"
-            value="None"
-            href={`/habit/groups?return=${encodeURIComponent(returnPath)}`}
-          />
-          <SettingsRow label="Goal" value={draft.goal_id ? 'Linked' : 'None'} comingSoon />
-          <SettingsRow label="Average" value="—" comingSoon />
-          <SettingsRow
-            label="Repeat"
-            value={frequencyLabel}
-            href={`/habit/repeat?return=${encodeURIComponent(returnPath)}`}
-          />
-          <SettingsRow label="Notifications" value="Off" comingSoon />
-          <SettingsRow label="URL" value="—" comingSoon />
-          <SettingsRow label="Starts on" value="—" comingSoon />
-          <SettingsRow label="Ends" value="—" comingSoon last />
-        </div>
-      </main>
-    </div>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="mt-8 w-full min-h-[48px] rounded-xl border-2 border-dashed border-[#ff9d00]/35 py-3 text-sm font-semibold text-slate-300 transition hover:border-[#ff9d00]/60 hover:text-[#ffe066]"
+      >
+        Cancel
+      </button>
+    </HabitFlowShell>
   );
 }
 
@@ -149,44 +149,39 @@ function SectionRow({
   label: string;
   value: string;
   href?: string;
-  onClick?: () => void;
-  hrefPath?: string;
   inlineEditor?: boolean;
   onInlineChange?: (v: string) => void;
   inlineValue?: string;
 }) {
   const content = (
-    <div className="flex items-center justify-between py-4 px-4 min-h-[56px]">
-      <span className="text-white/70">{label}</span>
+    <div className="flex min-h-[56px] items-center justify-between px-4 py-4">
+      <span className="text-slate-400">{label}</span>
       {inlineEditor && onInlineChange ? (
         <input
           type="text"
           value={inlineValue}
           onChange={(e) => onInlineChange(e.target.value)}
           placeholder="Add description"
-          className="flex-1 ml-4 bg-transparent text-right text-[var(--lu-text)] placeholder:text-white/40 focus:outline-none"
+          className="ml-4 flex-1 bg-transparent text-right text-white placeholder:text-slate-500 focus:outline-none focus:ring-0"
         />
       ) : (
-        <span className="text-[var(--lu-text)]">{value}</span>
+        <span className="text-white">{value}</span>
       )}
-      {!inlineEditor && href && (
-        <span className="ml-2 text-white/40">›</span>
-      )}
+      {!inlineEditor && href ? <span className="ml-2 text-[#ff9d00]/50">›</span> : null}
     </div>
   );
 
   if (href && !inlineEditor) {
     return (
-      <Link href={href} className="block rounded-2xl bg-white/5 border border-white/10 mb-2">
+      <Link
+        href={href}
+        className={`${neon.section} mb-3 block transition-colors hover:border-[#ff9d00]/55 hover:bg-[#ff9d00]/5`}
+      >
         {content}
       </Link>
     );
   }
-  return (
-    <div className="rounded-2xl bg-white/5 border border-white/10 mb-2">
-      {content}
-    </div>
-  );
+  return <div className={`${neon.section} mb-3`}>{content}</div>;
 }
 
 function SettingsRow({
@@ -202,15 +197,15 @@ function SettingsRow({
   comingSoon?: boolean;
   last?: boolean;
 }) {
-  const borderClass = last ? '' : 'border-b border-white/5';
+  const borderClass = last ? '' : 'border-b border-[#ff9d00]/15';
   const inner = (
-    <div className={`flex items-center justify-between py-4 px-4 min-h-[56px] ${borderClass}`}>
-      <span className="text-white/70">{label}</span>
-      <span className="text-[var(--lu-text)]">
+    <div className={`flex min-h-[56px] items-center justify-between px-4 py-4 ${borderClass}`}>
+      <span className="text-slate-400">{label}</span>
+      <span className="flex items-center text-white">
         {value}
-        {comingSoon && <span className="ml-1 text-xs text-white/40">(Coming soon)</span>}
+        {comingSoon ? <span className="ml-1 text-xs text-slate-500">(Coming soon)</span> : null}
+        {!comingSoon && href ? <span className="ml-2 text-[#ff9d00]/50">›</span> : null}
       </span>
-      {!comingSoon && href && <span className="ml-2 text-white/40">›</span>}
     </div>
   );
 
@@ -218,7 +213,7 @@ function SettingsRow({
     return <div className="block">{inner}</div>;
   }
   return (
-    <Link href={href} className="block active:bg-white/5">
+    <Link href={href} className="block transition-colors hover:bg-[#ff9d00]/5">
       {inner}
     </Link>
   );

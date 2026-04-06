@@ -410,7 +410,7 @@ export default function NewsfeedPage() {
     // Show loading state while checking preferences
     if (preferencesLoading || hasPreferences === null) {
         return (
-            <main className="min-h-screen bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
+            <main className="min-h-screen min-w-0 max-w-full bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
                 <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-black transition-colors">
                     <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
                         <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
@@ -443,7 +443,7 @@ export default function NewsfeedPage() {
     // Show setup screen if no preferences are set
     if (hasPreferences === false) {
         return (
-            <main className="min-h-screen bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
+            <main className="min-h-screen min-w-0 max-w-full bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
                 <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-black transition-colors">
                     <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
                         <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
@@ -484,7 +484,7 @@ export default function NewsfeedPage() {
     }
 
     return (
-        <main className="min-h-screen bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
+        <main className="min-h-screen min-w-0 max-w-full bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
             {/* Header */}
             <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-black transition-colors sticky top-0 z-10">
                 <div className="mx-auto flex max-w-6xl items-center justify-between px-4 sm:px-6 py-4">

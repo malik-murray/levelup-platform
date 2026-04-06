@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate } from '@/lib/habitHelpers';
+import { neon } from '../neonTheme';
+import CollapsiblePanel from './CollapsiblePanel';
 
 function adjustTextareaHeight(el: HTMLTextAreaElement | null) {
     if (!el) return;
@@ -33,7 +35,7 @@ export default function DashboardNotesSection({
     selectedDate: Date;
     userId: string | null;
 }) {
-    const [notesOpen, setNotesOpen] = useState(true);
+    const [notesOpen, setNotesOpen] = useState(false);
     const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['notes', 'lessons', 'feelings', 'ideas', 'reflection']));
     const [content, setContent] = useState<DailyNotesContent>({
         notes: null,
@@ -127,8 +129,8 @@ export default function DashboardNotesSection({
         });
     };
 
-    const getSummary = (text: string | null | undefined) => {
-        if (!text || !text.trim()) return 'Empty';
+    const getSummary = (text: string | null | undefined): string | null => {
+        if (!text || !text.trim()) return null;
         const len = text.trim().length;
         if (len < 60) return `${len} chars`;
         return `${text.trim().split(/\s+/).filter(Boolean).length} words`;
@@ -137,46 +139,58 @@ export default function DashboardNotesSection({
     if (!userId) return null;
 
     return (
-        <div className="rounded-lg border border-slate-700 bg-slate-900 min-w-0 overflow-hidden">
+        <div className={`${neon.widget} min-w-0 overflow-hidden p-0`}>
             <button
                 type="button"
                 onClick={() => setNotesOpen(!notesOpen)}
-                className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-800/50 transition-colors text-left"
+                aria-expanded={notesOpen}
+                className="flex w-full min-w-0 items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-[#ff9d00]/5"
             >
-                <h2 className="text-2xl font-bold text-white">Notes</h2>
+                <h2
+                    className="text-2xl font-bold text-[#ffe066]"
+                    style={{ textShadow: '0 0 14px rgba(255,200,80,0.25)' }}
+                >
+                    Daily Notes
+                </h2>
                 <svg
-                    className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${notesOpen ? 'rotate-180' : ''}`}
+                    className={`h-5 w-5 shrink-0 text-[#ff9d00] transition-transform duration-300 ease-out motion-reduce:transition-none ${notesOpen ? 'rotate-180' : ''}`}
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
+                    aria-hidden
                 >
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
             </button>
-            {notesOpen && (
-                <div className="border-t border-slate-700">
+            <CollapsiblePanel open={notesOpen} className="border-t border-[#ff9d00]/25">
+                <div>
                     {loading ? (
                         <div className="p-4 text-center text-slate-400 text-sm">Loading...</div>
                     ) : (
                         SECTIONS.map((section) => {
                             const isExpanded = expandedSections.has(section.key);
                             const value = content[section.key] || '';
+                            const summary = getSummary(value);
 
                             return (
-                                <div key={section.key} className="border-b border-slate-700 last:border-b-0">
+                                <div key={section.key} className="border-b border-[#ff9d00]/15 last:border-b-0">
                                     <button
                                         type="button"
                                         onClick={() => toggleSection(section.key)}
-                                        className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-slate-800/30 transition-colors text-left"
+                                        aria-expanded={isExpanded}
+                                        className="flex w-full items-center justify-between px-4 py-2.5 text-left transition-colors hover:bg-[#ff9d00]/5"
                                     >
                                         <span className="text-sm font-medium text-slate-200">{section.title}</span>
                                         <span className="flex items-center gap-2">
-                                            <span className="text-xs text-slate-500">({getSummary(value)})</span>
+                                            {summary ? (
+                                                <span className="text-xs text-slate-500">({summary})</span>
+                                            ) : null}
                                             <svg
-                                                className={`w-4 h-4 text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                                                className={`w-4 h-4 shrink-0 text-slate-500 transition-transform duration-200 ease-out motion-reduce:transition-none ${isExpanded ? 'rotate-180' : ''}`}
                                                 fill="none"
                                                 stroke="currentColor"
                                                 viewBox="0 0 24 24"
+                                                aria-hidden
                                             >
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                             </svg>
@@ -196,7 +210,7 @@ export default function DashboardNotesSection({
                                                 }}
                                                 onBlur={(e) => saveField(section.key, e.target.value || null)}
                                                 placeholder={section.placeholder}
-                                                className="w-full rounded border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 resize-none min-h-[80px] focus:border-amber-500/50 focus:outline-none overflow-hidden"
+                                                className="min-h-[80px] w-full resize-none overflow-hidden rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-[#ff9d00]/55 focus:outline-none"
                                                 rows={1}
                                             />
                                         </div>
@@ -206,7 +220,7 @@ export default function DashboardNotesSection({
                         })
                     )}
                 </div>
-            )}
+            </CollapsiblePanel>
         </div>
     );
 }

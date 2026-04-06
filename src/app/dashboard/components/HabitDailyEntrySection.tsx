@@ -4,7 +4,9 @@ import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate, getGrade, calculateItemScore, calculateDailyScore, type Category, type TimeOfDay, type HabitStatus } from '@/lib/habitHelpers';
-import { ensureDefaultBacklogCategories, syncBacklogCompletion, syncBacklogTitle } from '@/lib/habitBacklog';
+import { syncBacklogCompletion, syncBacklogTitle } from '@/lib/habitBacklog';
+import { neon } from '../neonTheme';
+import CollapsiblePanel from './CollapsiblePanel';
 
 type HabitTemplate = {
     id: string;
@@ -49,22 +51,6 @@ type Todo = {
     start_time?: string | null;
     end_time?: string | null;
     backlog_task_id?: string | null;
-};
-
-type BacklogCategory = {
-    id: string;
-    name: string;
-};
-
-type BacklogTask = {
-    id: string;
-    title: string;
-    category_id: string | null;
-    priority_rank: number;
-    assigned_date: string | null;
-    daily_item_type: 'priority' | 'todo' | null;
-    completed_at: string | null;
-    created_at: string;
 };
 
 type DailyScore = {
@@ -121,14 +107,14 @@ export default function HabitDailyEntrySection({
     const [dailyPlanOpen, setDailyPlanOpen] = useState(true);
     const [prioritiesOpen, setPrioritiesOpen] = useState(true);
     const [todosOpen, setTodosOpen] = useState(true);
-    const [habitsOpen, setHabitsOpen] = useState(true);
+    const [habitsOpen, setHabitsOpen] = useState(false);
+    const [habitSubsectionsOpen, setHabitSubsectionsOpen] = useState({
+        morning: true,
+        afternoon: true,
+        evening: true,
+        bad: true,
+    });
     const [eventDisplayMap, setEventDisplayMap] = useState<Record<string, { start_time: string | null; end_time: string | null; title: string }>>({});
-    const [backlogTasks, setBacklogTasks] = useState<BacklogTask[]>([]);
-    const [backlogCategories, setBacklogCategories] = useState<BacklogCategory[]>([]);
-    const [showBacklogModal, setShowBacklogModal] = useState(false);
-    const [backlogSearch, setBacklogSearch] = useState('');
-    const [selectedBacklogIds, setSelectedBacklogIds] = useState<string[]>([]);
-    const [selectedBacklogType, setSelectedBacklogType] = useState<Record<string, 'priority' | 'todo'>>({});
 
     useEffect(() => {
         if (userId) {
@@ -204,9 +190,6 @@ export default function HabitDailyEntrySection({
         if (!silent) setLoading(true);
         try {
             const dateStr = formatDate(selectedDate);
-            const todayStr = formatDate(new Date());
-
-            await ensureDefaultBacklogCategories(userId);
 
             // Load habit templates
             const { data: templates } = await supabase
@@ -238,18 +221,6 @@ export default function HabitDailyEntrySection({
                 .eq('user_id', userId)
                 .eq('date', dateStr)
                 .order('created_at');
-
-            const { data: backlogCategoriesData } = await supabase
-                .from('habit_backlog_categories')
-                .select('id, name')
-                .eq('user_id', userId)
-                .order('name');
-
-            const { data: backlogTasksData } = await supabase
-                .from('habit_backlog_tasks')
-                .select('id, title, category_id, priority_rank, assigned_date, daily_item_type, completed_at, created_at')
-                .eq('user_id', userId)
-                .order('created_at', { ascending: false });
 
             // Load event data for todos linked to weekly events (for sort-by-time and display title with time)
             let eventStartTimes: Record<string, string> = {};
@@ -300,15 +271,6 @@ export default function HabitDailyEntrySection({
             setHabitEntries(entries || []);
             setPriorities(prioritiesData || []);
             setTodos(sortedTodos);
-            setBacklogCategories(backlogCategoriesData || []);
-            setBacklogTasks(
-                (backlogTasksData || []).map((task) => {
-                    if (!task.completed_at && task.assigned_date && task.assigned_date < todayStr) {
-                        return { ...task, assigned_date: null, daily_item_type: null };
-                    }
-                    return task;
-                })
-            );
             if (scoreData) {
                 setDailyScore({
                     score_overall: scoreData.score_overall,
@@ -400,45 +362,11 @@ export default function HabitDailyEntrySection({
             )
             .subscribe();
 
-        const backlogTasksChannel = supabase
-            .channel(`backlog_tasks_${userId}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: '*',
-                    schema: 'public',
-                    table: 'habit_backlog_tasks',
-                    filter: `user_id=eq.${userId}`,
-                },
-                () => {
-                    loadData(true);
-                }
-            )
-            .subscribe();
-
-        const backlogCategoriesChannel = supabase
-            .channel(`backlog_categories_${userId}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: '*',
-                    schema: 'public',
-                    table: 'habit_backlog_categories',
-                    filter: `user_id=eq.${userId}`,
-                },
-                () => {
-                    loadData(true);
-                }
-            )
-            .subscribe();
-
         return () => {
             habitEntriesChannel.unsubscribe();
             prioritiesChannel.unsubscribe();
             todosChannel.unsubscribe();
             scoresChannel.unsubscribe();
-            backlogTasksChannel.unsubscribe();
-            backlogCategoriesChannel.unsubscribe();
         };
     };
 
@@ -704,116 +632,6 @@ export default function HabitDailyEntrySection({
         }
     };
 
-    const filteredBacklogTasks = useMemo(() => {
-        const todayStr = formatDate(new Date());
-        return backlogTasks
-            .filter((task) => !task.completed_at)
-            .map((task) => {
-                if (task.assigned_date && task.assigned_date < todayStr) {
-                    return { ...task, assigned_date: null, daily_item_type: null };
-                }
-                return task;
-            })
-            .filter((task) => task.title.toLowerCase().includes(backlogSearch.toLowerCase()))
-            .sort((a, b) => a.priority_rank - b.priority_rank || a.title.localeCompare(b.title));
-    }, [backlogTasks, backlogSearch]);
-
-    const openBacklogCount = backlogTasks.filter((task) => !task.completed_at).length;
-    const scheduledBacklogCount = backlogTasks.filter(
-        (task) => !task.completed_at && task.assigned_date && task.assigned_date >= formatDate(new Date())
-    ).length;
-    const unscheduledBacklogCount = Math.max(0, openBacklogCount - scheduledBacklogCount);
-    const backlogCategoryNameById = useMemo(
-        () => Object.fromEntries(backlogCategories.map((category) => [category.id, category.name])),
-        [backlogCategories]
-    );
-
-    const handleAddSelectedBacklogToDay = async () => {
-        if (!userId || selectedBacklogIds.length === 0) return;
-        const dateStr = formatDate(selectedDate);
-        try {
-            for (const backlogId of selectedBacklogIds) {
-                const task = backlogTasks.find((item) => item.id === backlogId);
-                if (!task) continue;
-                const targetType = selectedBacklogType[backlogId] ?? task.daily_item_type ?? 'todo';
-                await supabase
-                    .from('habit_backlog_tasks')
-                    .update({ assigned_date: dateStr, daily_item_type: targetType })
-                    .eq('id', backlogId)
-                    .eq('user_id', userId);
-
-                // Enforce a single active daily placement for a backlog task.
-                await supabase
-                    .from('habit_daily_priorities')
-                    .delete()
-                    .eq('user_id', userId)
-                    .eq('backlog_task_id', backlogId)
-                    .neq('date', dateStr);
-                await supabase
-                    .from('habit_daily_todos')
-                    .delete()
-                    .eq('user_id', userId)
-                    .eq('backlog_task_id', backlogId)
-                    .neq('date', dateStr);
-
-                if (targetType === 'priority') {
-                    await supabase
-                        .from('habit_daily_todos')
-                        .delete()
-                        .eq('user_id', userId)
-                        .eq('date', dateStr)
-                        .eq('backlog_task_id', backlogId);
-                    const { data: existingPriority } = await supabase
-                        .from('habit_daily_priorities')
-                        .select('id')
-                        .eq('user_id', userId)
-                        .eq('date', dateStr)
-                        .eq('backlog_task_id', backlogId)
-                        .maybeSingle();
-                    if (!existingPriority) {
-                        await supabase.from('habit_daily_priorities').insert({
-                            user_id: userId,
-                            date: dateStr,
-                            text: task.title,
-                            completed: false,
-                            backlog_task_id: backlogId,
-                            sort_order: task.priority_rank,
-                        });
-                    }
-                } else {
-                    await supabase
-                        .from('habit_daily_priorities')
-                        .delete()
-                        .eq('user_id', userId)
-                        .eq('date', dateStr)
-                        .eq('backlog_task_id', backlogId);
-                    const { data: existingTodo } = await supabase
-                        .from('habit_daily_todos')
-                        .select('id')
-                        .eq('user_id', userId)
-                        .eq('date', dateStr)
-                        .eq('backlog_task_id', backlogId)
-                        .maybeSingle();
-                    if (!existingTodo) {
-                        await supabase.from('habit_daily_todos').insert({
-                            user_id: userId,
-                            date: dateStr,
-                            title: task.title,
-                            is_done: false,
-                            backlog_task_id: backlogId,
-                        });
-                    }
-                }
-            }
-            setSelectedBacklogIds([]);
-            setSelectedBacklogType({});
-            setShowBacklogModal(false);
-            await loadData(true);
-        } catch (error) {
-            console.error('Error adding backlog items:', error);
-        }
-    };
-
     const habitsWithEntries = habitTemplates.map(template => {
         const entry = habitEntries.find(e => e.habit_template_id === template.id);
         return {
@@ -894,62 +712,56 @@ export default function HabitDailyEntrySection({
 
     if (loading) {
         return (
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-6">
-                <div className="text-center py-8 text-slate-400">Loading...</div>
+            <div className={`${neon.panel} p-6`}>
+                <div className="py-8 text-center text-slate-400">Loading...</div>
             </div>
         );
     }
 
     return (
-        <div className="rounded-lg border border-slate-700 bg-slate-900 min-w-0 overflow-hidden">
+        <div className={`${neon.panel} min-w-0 overflow-hidden`}>
             {/* Daily Plan - collapsible header */}
             <button
                 type="button"
                 onClick={() => setDailyPlanOpen((o) => !o)}
-                className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left hover:bg-slate-800/50 transition-colors min-w-0"
+                aria-expanded={dailyPlanOpen}
+                className="flex w-full min-w-0 items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-[#ff9d00]/5"
             >
-                <h2 className="text-2xl font-bold text-white">Daily Plan</h2>
-                <svg className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${dailyPlanOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <h2 className="text-2xl font-bold text-[#ffe066]" style={{ textShadow: '0 0 14px rgba(255,200,80,0.25)' }}>
+                    Daily Plan
+                </h2>
+                <svg
+                    className={`h-5 w-5 shrink-0 text-[#ff9d00] transition-transform duration-300 ease-out motion-reduce:transition-none ${dailyPlanOpen ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    aria-hidden
+                >
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
             </button>
-            {dailyPlanOpen && (
-            <div className="px-4 pb-4 space-y-6 min-w-0 overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap gap-2 text-xs">
-                    <span className="rounded-full border border-slate-700 bg-slate-800 px-2 py-1 text-slate-300">Open backlog: {openBacklogCount}</span>
-                    <span className="rounded-full border border-slate-700 bg-slate-800 px-2 py-1 text-slate-300">Scheduled: {scheduledBacklogCount}</span>
-                    <span className="rounded-full border border-slate-700 bg-slate-800 px-2 py-1 text-slate-300">Unscheduled: {unscheduledBacklogCount}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={() => setShowBacklogModal(true)}
-                        className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-300 hover:bg-amber-500/20 transition-colors"
-                    >
-                        Add from Backlog
-                    </button>
-                    <Link
-                        href="/habit/backlog"
-                        className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
-                    >
-                        Open Backlog
-                    </Link>
-                </div>
-            </div>
-            {/* Top Priorities - collapsible */}
-            <div className="rounded-lg border border-slate-700 bg-slate-900 min-w-0 overflow-hidden">
+            <CollapsiblePanel open={dailyPlanOpen}>
+            <div className="min-w-0 space-y-6 overflow-hidden px-4 pb-4">
+            {/* Priorities - collapsible */}
+            <div className={`relative min-w-0 overflow-hidden ${neon.section}`}>
                 <button
                     type="button"
                     onClick={() => setPrioritiesOpen((o) => !o)}
-                    className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left hover:bg-slate-800/50 transition-colors"
+                    aria-expanded={prioritiesOpen}
+                    className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-[#ff9d00]/5"
                 >
-                    <h3 className="text-lg font-semibold text-purple-400">Top Priorities</h3>
-                    <svg className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${prioritiesOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <span className="text-base font-bold tracking-tight text-[#ffe066]">Priorities</span>
+                    <svg
+                        className={`h-5 w-5 shrink-0 text-[#ff9d00] transition-transform duration-300 ease-out motion-reduce:transition-none ${prioritiesOpen ? 'rotate-180' : ''}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden
+                    >
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                 </button>
-                {prioritiesOpen && (
+                <CollapsiblePanel open={prioritiesOpen}>
                 <div className="p-4 pt-0 space-y-2 min-w-0 overflow-hidden">
                 <ol className="list-decimal list-inside space-y-2 min-w-0">
                     {Array.from({ length: sortedPrioritiesForSlots.length + 1 }, (_, slotIndex) => {
@@ -962,7 +774,7 @@ export default function HabitDailyEntrySection({
                                         type="checkbox"
                                         checked={priority.completed}
                                         onChange={() => handleTogglePriority(priority.id, priority.completed)}
-                                        className="h-5 w-5 shrink-0 rounded border-slate-600 text-amber-500 focus:ring-amber-500 mt-2.5"
+                                        className="mt-2.5 h-5 w-5 shrink-0 rounded border-[#ff9d00]/50 text-[#ff9d00] focus:ring-[#ff9d00]/40"
                                     />
                                 ) : (
                                     <span className="w-5 shrink-0 mt-2.5" aria-hidden />
@@ -980,29 +792,36 @@ export default function HabitDailyEntrySection({
                                     onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
                                     placeholder={isAddRow ? 'Add priority' : `Priority ${slotIndex + 1}`}
                                     rows={2}
-                                    className={`flex-1 min-w-0 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none resize-none overflow-y-auto break-words min-h-[2.5rem] ${priority?.completed ? 'line-through text-slate-500' : ''}`}
+                                    className={`min-h-[2.5rem] flex-1 resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${priority?.completed ? 'text-slate-500 line-through' : ''}`}
                                 />
                             </li>
                         );
                     })}
                 </ol>
                 </div>
-                )}
+                </CollapsiblePanel>
             </div>
 
-            {/* To-Do List - collapsible */}
-            <div className="rounded-lg border border-slate-700 bg-slate-900 min-w-0 overflow-hidden">
+            {/* Today's To-Do List - collapsible */}
+            <div className={`min-w-0 overflow-hidden ${neon.section}`}>
                 <button
                     type="button"
                     onClick={() => setTodosOpen((o) => !o)}
-                    className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left hover:bg-slate-800/50 transition-colors"
+                    aria-expanded={todosOpen}
+                    className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-[#ff9d00]/5"
                 >
-                    <h3 className="text-lg font-semibold text-green-400">To-Do List</h3>
-                    <svg className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${todosOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <span className="text-base font-bold tracking-tight text-[#a7f3d0]">Today&apos;s To-Do List</span>
+                    <svg
+                        className={`h-5 w-5 shrink-0 text-[#ff9d00] transition-transform duration-300 ease-out motion-reduce:transition-none ${todosOpen ? 'rotate-180' : ''}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden
+                    >
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                 </button>
-                {todosOpen && (
+                <CollapsiblePanel open={todosOpen}>
                 <div className="p-4 pt-0 space-y-2 min-w-0 overflow-hidden">
                 <ol className="list-decimal list-inside space-y-2 min-w-0">
                     {Array.from({ length: todos.length + 1 }, (_, slotIndex) => {
@@ -1015,7 +834,7 @@ export default function HabitDailyEntrySection({
                                         type="checkbox"
                                         checked={todo.is_done}
                                         onChange={() => handleToggleTodo(todo.id, todo.is_done)}
-                                        className="h-5 w-5 shrink-0 rounded border-slate-600 text-amber-500 focus:ring-amber-500 mt-2.5"
+                                        className="mt-2.5 h-5 w-5 shrink-0 rounded border-[#ff9d00]/50 text-[#ff9d00] focus:ring-[#ff9d00]/40"
                                     />
                                 ) : (
                                     <span className="w-5 shrink-0 mt-2.5" aria-hidden />
@@ -1033,194 +852,179 @@ export default function HabitDailyEntrySection({
                                     onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
                                     placeholder={isAddRow ? 'Add to-do' : `To-do ${slotIndex + 1}`}
                                     rows={2}
-                                    className={`flex-1 min-w-0 rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none resize-none overflow-y-auto break-words min-h-[2.5rem] ${todo?.is_done ? 'line-through text-slate-500' : ''}`}
+                                    className={`min-h-[2.5rem] flex-1 resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${todo?.is_done ? 'text-slate-500 line-through' : ''}`}
                                 />
                             </li>
                         );
                     })}
                 </ol>
                 </div>
-                )}
+                </CollapsiblePanel>
             </div>
 
             {/* Habits Checklist - collapsible (Morning, Afternoon, Evening, Bad Habits) */}
-            <div className="rounded-lg border border-slate-700 bg-slate-900 min-w-0 overflow-hidden">
-                <div className="flex items-center justify-between gap-2 px-4 py-3 min-w-0">
-                    <h3 className="text-lg font-semibold text-blue-400 min-w-0">Habits Checklist</h3>
+            <div className={`min-w-0 overflow-hidden ${neon.section}`}>
+                <div className="flex min-w-0 items-center justify-between gap-2 px-4 py-3">
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+                        <h3 className="min-w-0 text-base font-bold text-[#93c5fd]">Habits Checklist</h3>
+                        {habitsOpen ? (
+                            <Link
+                                href="/habit/today"
+                                className="shrink-0 rounded-lg border border-[#ff9d00]/35 bg-[#060a14]/90 px-3 py-1 text-xs font-medium text-slate-200 transition-colors hover:border-[#ff9d00]/55 hover:text-white sm:py-1.5 sm:text-sm"
+                            >
+                                Edit habits
+                            </Link>
+                        ) : null}
+                    </div>
                     <button
                         type="button"
                         onClick={() => setHabitsOpen((o) => !o)}
-                        className="rounded p-1.5 text-slate-400 hover:bg-slate-800 transition-colors shrink-0"
-                        aria-label={habitsOpen ? 'Collapse' : 'Expand'}
+                        className="shrink-0 rounded p-1.5 text-[#ff9d00] transition-colors hover:bg-[#ff9d00]/10"
+                        aria-expanded={habitsOpen}
+                        aria-label={habitsOpen ? 'Collapse habits checklist' : 'Expand habits checklist'}
                     >
-                        <svg className={`w-5 h-5 transition-transform ${habitsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg
+                            className={`h-5 w-5 transition-transform duration-300 ease-out motion-reduce:transition-none ${habitsOpen ? 'rotate-180' : ''}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                            aria-hidden
+                        >
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                         </svg>
                     </button>
                 </div>
-                {habitsOpen && (
+                <CollapsiblePanel open={habitsOpen}>
                 <div className="px-4 pb-4 space-y-3 min-w-0 overflow-hidden">
-                {/* Category key + Edit habits on same line */}
-                <div className="flex flex-wrap items-center justify-between gap-3 mb-3 min-w-0">
-                    <div className="flex flex-wrap gap-3 text-xs">
-                        <span className="flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-full bg-blue-500/80 shrink-0" aria-hidden />
-                            <span className="text-slate-400">Physical</span>
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-full bg-purple-500/80 shrink-0" aria-hidden />
-                            <span className="text-slate-400">Mental</span>
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80 shrink-0" aria-hidden />
-                            <span className="text-slate-400">Spiritual</span>
-                        </span>
-                    </div>
-                    <Link
-                        href="/habit/today"
-                        className="shrink-0 rounded-md border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm font-medium text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
-                    >
-                        Edit habits
-                    </Link>
+                {/* Category key */}
+                <div className="mb-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                    <span className="flex items-center gap-1.5">
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-blue-500/80" aria-hidden />
+                        <span className="text-slate-400">Physical</span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-purple-500/80" aria-hidden />
+                        <span className="text-slate-400">Mental</span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-500/80" aria-hidden />
+                        <span className="text-slate-400">Spiritual</span>
+                    </span>
                 </div>
                 {timeOfDayOrder.map((time) => {
                     const timeHabits = habitsByTimeOfDay(time);
                     if (timeHabits.length === 0) return null;
+                    const subOpen = habitSubsectionsOpen[time];
 
                     return (
-                        <div key={time} className="rounded-lg border border-slate-600 bg-slate-800/50 p-3 min-w-0 overflow-hidden">
-                            <h4 className="text-sm font-semibold mb-2 text-slate-200">{timeOfDayLabels[time]}</h4>
-                            <div className="space-y-2 min-w-0">
-                                {timeHabits.map((habit) => (
-                                    <label key={habit.id} className="flex items-center gap-3 cursor-pointer min-w-0">
-                                        <input
-                                            type="checkbox"
-                                            checked={habit.status === 'checked'}
-                                            onChange={() => handleHabitToggle(habit.id)}
-                                            className="h-5 w-5 shrink-0 rounded border-slate-600 text-amber-500 focus:ring-amber-500"
-                                        />
-                                        <span className="text-lg shrink-0">{habit.icon}</span>
-                                        <span className={`flex-1 min-w-0 break-words ${habit.status === 'checked' ? 'line-through text-slate-500' : 'text-white'}`}>
-                                            {habit.status === 'checked' && habit.checked_at
-                                                ? `(${formatCompletedTime(habit.checked_at)}) ${habit.name}`
-                                                : habit.name}
-                                        </span>
-                                        <span
-                                            className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium capitalize border ${categoryColors[habit.category]}`}
-                                            title={habit.category}
-                                        >
-                                            {habit.category}
-                                        </span>
-                                    </label>
-                                ))}
-                            </div>
+                        <div
+                            key={time}
+                            className="min-w-0 overflow-hidden rounded-lg border border-[#ff9d00]/25 bg-[#060a14]/70"
+                        >
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    setHabitSubsectionsOpen((p) => ({ ...p, [time]: !p[time] }))
+                                }
+                                className="flex w-full min-w-0 items-center justify-between gap-2 px-3 py-2.5 text-left transition-colors hover:bg-[#ff9d00]/5"
+                                aria-expanded={subOpen}
+                                aria-label={`${subOpen ? 'Collapse' : 'Expand'} ${timeOfDayLabels[time]}`}
+                            >
+                                <h4 className="text-sm font-semibold text-slate-200">{timeOfDayLabels[time]}</h4>
+                                <svg
+                                    className={`h-5 w-5 shrink-0 text-[#ff9d00] transition-transform duration-300 ease-out motion-reduce:transition-none ${subOpen ? 'rotate-180' : ''}`}
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                    aria-hidden
+                                >
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </button>
+                            <CollapsiblePanel open={subOpen}>
+                                <div className="space-y-2 min-w-0 px-3 pb-3">
+                                    {timeHabits.map((habit) => (
+                                        <label key={habit.id} className="flex min-w-0 cursor-pointer items-center gap-3">
+                                            <input
+                                                type="checkbox"
+                                                checked={habit.status === 'checked'}
+                                                onChange={() => handleHabitToggle(habit.id)}
+                                                className="h-5 w-5 shrink-0 rounded border-[#ff9d00]/50 text-[#ff9d00] focus:ring-[#ff9d00]/40"
+                                            />
+                                            <span className="shrink-0 text-lg">{habit.icon}</span>
+                                            <span
+                                                className={`min-w-0 flex-1 break-words ${habit.status === 'checked' ? 'line-through text-slate-500' : 'text-white'}`}
+                                            >
+                                                {habit.status === 'checked' && habit.checked_at
+                                                    ? `(${formatCompletedTime(habit.checked_at)}) ${habit.name}`
+                                                    : habit.name}
+                                            </span>
+                                            <span
+                                                className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium capitalize ${categoryColors[habit.category]}`}
+                                                title={habit.category}
+                                            >
+                                                {habit.category}
+                                            </span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </CollapsiblePanel>
                         </div>
                     );
                 })}
                 {badHabits.length > 0 && (
-                    <div className="rounded-lg border border-red-500/30 bg-red-950/20 p-3 min-w-0 overflow-hidden">
-                        <h4 className="text-sm font-semibold mb-2 text-red-400">Bad habits</h4>
-                        <div className="space-y-2 min-w-0">
-                            {badHabits.map((habit) => (
-                                <label key={habit.id} className="flex items-center gap-3 cursor-pointer min-w-0">
-                                    <input
-                                        type="checkbox"
-                                        checked={habit.status === 'checked'}
-                                        onChange={() => handleHabitToggle(habit.id)}
-                                        className="h-5 w-5 shrink-0 rounded border-slate-600 text-amber-500 focus:ring-amber-500"
-                                    />
-                                    <span className="text-lg mr-2 shrink-0">{habit.icon}</span>
-                                    <span className={`flex-1 min-w-0 break-words ${habit.status === 'checked' ? 'line-through text-slate-500' : 'text-white'}`}>
-                                        {habit.name}
-                                    </span>
-                                </label>
-                            ))}
-                        </div>
+                    <div className="min-w-0 overflow-hidden rounded-lg border border-red-500/30 bg-red-950/20">
+                        <button
+                            type="button"
+                            onClick={() =>
+                                setHabitSubsectionsOpen((p) => ({ ...p, bad: !p.bad }))
+                            }
+                            className="flex w-full min-w-0 items-center justify-between gap-2 px-3 py-2.5 text-left transition-colors hover:bg-red-500/10"
+                            aria-expanded={habitSubsectionsOpen.bad}
+                            aria-label={`${habitSubsectionsOpen.bad ? 'Collapse' : 'Expand'} bad habits`}
+                        >
+                            <h4 className="text-sm font-semibold text-red-400">Bad habits</h4>
+                            <svg
+                                className={`h-5 w-5 shrink-0 text-red-400 transition-transform duration-300 ease-out motion-reduce:transition-none ${habitSubsectionsOpen.bad ? 'rotate-180' : ''}`}
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                                aria-hidden
+                            >
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </button>
+                        <CollapsiblePanel open={habitSubsectionsOpen.bad}>
+                            <div className="min-w-0 space-y-2 px-3 pb-3">
+                                {badHabits.map((habit) => (
+                                    <label key={habit.id} className="flex min-w-0 cursor-pointer items-center gap-3">
+                                        <input
+                                            type="checkbox"
+                                            checked={habit.status === 'checked'}
+                                            onChange={() => handleHabitToggle(habit.id)}
+                                            className="h-5 w-5 shrink-0 rounded border-[#ff9d00]/50 text-[#ff9d00] focus:ring-[#ff9d00]/40"
+                                        />
+                                        <span className="mr-2 shrink-0 text-lg">{habit.icon}</span>
+                                        <span
+                                            className={`min-w-0 flex-1 break-words ${habit.status === 'checked' ? 'line-through text-slate-500' : 'text-white'}`}
+                                        >
+                                            {habit.name}
+                                        </span>
+                                    </label>
+                                ))}
+                            </div>
+                        </CollapsiblePanel>
                     </div>
                 )}
                 {habitsWithEntries.length === 0 && (
                     <p className="text-sm text-slate-400 text-center py-4">No habits for today</p>
                 )}
                 </div>
-                )}
+                </CollapsiblePanel>
             </div>
 
             </div>
-            )}
-            {showBacklogModal && (
-                <div
-                    className="fixed inset-0 z-50 bg-black/60 p-4"
-                    onClick={() => setShowBacklogModal(false)}
-                >
-                    <div
-                        className="mx-auto mt-10 w-full max-w-2xl rounded-lg border border-slate-700 bg-slate-900 p-4"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="mb-3 flex items-center justify-between">
-                            <h3 className="text-lg font-semibold text-white">Add from Backlog</h3>
-                            <button
-                                type="button"
-                                className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
-                                onClick={() => setShowBacklogModal(false)}
-                            >
-                                Close
-                            </button>
-                        </div>
-                        <input
-                            value={backlogSearch}
-                            onChange={(e) => setBacklogSearch(e.target.value)}
-                            placeholder="Search open backlog tasks..."
-                            className="mb-3 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-400 focus:border-amber-500 focus:outline-none"
-                        />
-                        <div className="max-h-[50vh] space-y-2 overflow-y-auto">
-                            {filteredBacklogTasks.length === 0 && (
-                                <p className="py-4 text-center text-sm text-slate-400">No open backlog tasks found.</p>
-                            )}
-                            {filteredBacklogTasks.map((task) => (
-                                <label key={task.id} className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-800 p-2">
-                                    <input
-                                        type="checkbox"
-                                        checked={selectedBacklogIds.includes(task.id)}
-                                        onChange={(e) => {
-                                            setSelectedBacklogIds((prev) =>
-                                                e.target.checked ? [...prev, task.id] : prev.filter((id) => id !== task.id)
-                                            );
-                                        }}
-                                        className="h-4 w-4 rounded border-slate-600 text-amber-500 focus:ring-amber-500"
-                                    />
-                                    <div className="min-w-0 flex-1">
-                                        <p className="truncate text-sm text-white">{task.title}</p>
-                                        <p className="text-xs text-slate-400">
-                                            Rank {task.priority_rank}
-                                            {task.category_id ? ` • ${backlogCategoryNameById[task.category_id] ?? 'Category'}` : ''}
-                                        </p>
-                                    </div>
-                                    <select
-                                        value={selectedBacklogType[task.id] ?? task.daily_item_type ?? 'todo'}
-                                        onChange={(e) =>
-                                            setSelectedBacklogType((prev) => ({ ...prev, [task.id]: e.target.value as 'priority' | 'todo' }))
-                                        }
-                                        className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300"
-                                    >
-                                        <option value="priority">Priority</option>
-                                        <option value="todo">To-Do</option>
-                                    </select>
-                                </label>
-                            ))}
-                        </div>
-                        <div className="mt-3 flex justify-end">
-                            <button
-                                type="button"
-                                onClick={handleAddSelectedBacklogToDay}
-                                className="rounded-md bg-amber-400 px-3 py-2 text-sm font-medium text-black hover:bg-amber-300 disabled:opacity-60"
-                                disabled={selectedBacklogIds.length === 0}
-                            >
-                                Add selected
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            </CollapsiblePanel>
         </div>
     );
 }

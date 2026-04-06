@@ -5,13 +5,9 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
 import { usePreview } from '@/lib/previewStore';
-import {
-    listInProgressSessionsForUser,
-    getProgressSummaryForUser,
-    getTrainNextRecommendationForUser,
-    getTrainingConsistencyForUser,
-    getExecutionAdaptiveInsightsForUser,
-} from '@/lib/fitness/workoutSessions';
+import { listInProgressSessionsForUser, listSessionsForHomeFeed } from '@/lib/fitness/workoutSessions';
+import type { WorkoutSession } from '@/lib/fitness/workoutSessions';
+import FitnessShortsHome from './components/FitnessShortsHome';
 import { getFitnessUserProfileForUser } from '@/lib/fitness/profile';
 import type { FitnessUserProfile } from '@/lib/fitness/profile';
 import FitnessOnboardingWizard from './FitnessOnboardingWizard';
@@ -20,79 +16,55 @@ import { generatePersonalizedStarterPlanForUser } from '@/lib/fitness/personaliz
 import { getCurrentProgramAssignmentForUser } from '@/lib/fitness/programEngine';
 import { getOrCreateScheduledSessionForAssignment } from '@/lib/fitness/programEngine';
 
-type Workout = {
-    id: string;
-    date: string;
-    type: string;
-    muscle_group: string | null;
-    duration_minutes: number;
-    intensity: number | null;
-    calories_burned: number | null;
-    notes: string | null;
-};
-
-type Meal = {
-    id: string;
-    date: string;
-    meal_type: string;
-    description: string;
-    calories: number;
-    protein_g: number | null;
-    carbs_g: number | null;
-    fat_g: number | null;
-};
-
-type Metric = {
-    id: string;
-    date: string;
-    weight_kg: number | null;
-    steps: number | null;
-    water_ml: number | null;
-    sleep_hours: number | null;
-};
-
-type Goal = {
-    daily_steps_target: number;
-    daily_calories_target: number;
-    daily_water_ml_target: number;
-    weekly_workout_minutes_target: number;
-};
+/** Sample grid cards for /preview/fitness */
+const PREVIEW_SESSION_FEED: WorkoutSession[] = [
+    {
+        id: '11111111-1111-4111-8111-111111111111',
+        user_id: '00000000-0000-0000-0000-000000000001',
+        plan_id: null,
+        started_at: new Date(Date.now() - 3600000).toISOString(),
+        ended_at: null,
+        status: 'in_progress',
+        name: 'Upper body — AI walkthrough',
+        notes: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+    },
+    {
+        id: '22222222-2222-4222-8222-222222222222',
+        user_id: '00000000-0000-0000-0000-000000000001',
+        plan_id: null,
+        started_at: new Date(Date.now() - 86400000 * 2).toISOString(),
+        ended_at: new Date(Date.now() - 86400000 * 2 + 3600000).toISOString(),
+        status: 'completed',
+        name: 'Leg day — full session demo',
+        notes: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+    },
+    {
+        id: '33333333-3333-4333-8333-333333333333',
+        user_id: '00000000-0000-0000-0000-000000000001',
+        plan_id: null,
+        started_at: new Date(Date.now() - 86400000 * 5).toISOString(),
+        ended_at: new Date(Date.now() - 86400000 * 5 + 2700000).toISOString(),
+        status: 'completed',
+        name: 'Core & conditioning',
+        notes: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+    },
+];
 
 export default function FitnessPage() {
     const pathname = usePathname();
     const preview = usePreview();
     const isPreview = preview.isPreview || pathname?.startsWith('/preview') === true;
 
-    const [workouts, setWorkouts] = useState<Workout[]>([]);
-    const [meals, setMeals] = useState<Meal[]>([]);
-    const [metrics, setMetrics] = useState<Metric | null>(null);
-    const [goals, setGoals] = useState<Goal | null>(null);
     const [loading, setLoading] = useState(true);
     const [notification, setNotification] = useState<string | null>(null);
     const [schemaMissing, setSchemaMissing] = useState(false);
     const [latestInProgressSession, setLatestInProgressSession] = useState<{ id: string; name: string | null; started_at: string } | null>(null);
-    const [progressSummary, setProgressSummary] = useState<{
-        completedSessionsCount: number;
-        totalLoggedSets: number;
-        latestCompletedSession: { id: string; name: string | null; ended_at: string | null } | null;
-    } | null>(null);
-    const [trainNextRecommendation, setTrainNextRecommendation] = useState<{
-        recommendedMuscleSlug: string | null;
-        recommendedLabel: string;
-        reason: string;
-        lastTrainedContext?: string;
-    } | null>(null);
-    const [trainingConsistency, setTrainingConsistency] = useState<{
-        trainedToday: boolean;
-        currentStreak: number;
-    } | null>(null);
-    const [executionInsights, setExecutionInsights] = useState<{
-        expectedDaysPerWeek: number;
-        completedDaysThisWeek: number;
-        missedDaysThisWeek: number;
-        recentAverageCompletionRate: number;
-        suggestions: string[];
-    } | null>(null);
     const [programAssignment, setProgramAssignment] = useState<{
         scheduleEntryId: string;
         planId: string;
@@ -108,11 +80,7 @@ export default function FitnessPage() {
     const [starterPlanStatus, setStarterPlanStatus] = useState<'idle' | 'generating' | 'success' | 'failed'>('idle');
     const [starterPlanError, setStarterPlanError] = useState<string | null>(null);
     const [starterPlanId, setStarterPlanId] = useState<string | null>(null);
-
-    const today = useMemo(() => {
-        const date = new Date();
-        return date.toISOString().split('T')[0];
-    }, []);
+    const [feedSessions, setFeedSessions] = useState<WorkoutSession[]>([]);
 
     const todayStr = useMemo(() => {
         const date = new Date();
@@ -130,12 +98,7 @@ export default function FitnessPage() {
 
         try {
             if (isPreview) {
-                const f = preview.fitness;
-                const today = new Date().toISOString().split('T')[0];
-                setWorkouts((f.workouts || []).filter(w => w.date === today));
-                setMeals((f.meals || []).filter(m => m.date === today));
-                setMetrics(f.metrics?.[today] ?? null);
-                setGoals(f.goals);
+                setFeedSessions(PREVIEW_SESSION_FEED);
                 setLoading(false);
                 return;
             }
@@ -154,6 +117,7 @@ export default function FitnessPage() {
                 setStarterPlanStatus('idle');
                 setStarterPlanError(null);
                 setStarterPlanId(null);
+                setFeedSessions([]);
                 setLoading(false);
                 return;
             }
@@ -168,71 +132,6 @@ export default function FitnessPage() {
                 setHasWorkoutPlans(false);
             }
 
-            // Load today's workouts
-            const { data: workoutsData, error: workoutsError } = await supabase
-                .from('fitness_workouts')
-                .select('*')
-                .eq('user_id', user.id)
-                .eq('date', today)
-                .order('created_at', { ascending: false });
-
-            if (workoutsError) throw workoutsError;
-
-            // Load today's meals
-            const { data: mealsData, error: mealsError } = await supabase
-                .from('fitness_meals')
-                .select('*')
-                .eq('user_id', user.id)
-                .eq('date', today)
-                .order('created_at', { ascending: false });
-
-            if (mealsError) throw mealsError;
-
-            // Load today's metrics
-            const { data: metricsData, error: metricsError } = await supabase
-                .from('fitness_metrics')
-                .select('*')
-                .eq('user_id', user.id)
-                .eq('date', today)
-                .single();
-
-            if (metricsError && metricsError.code !== 'PGRST116') {
-                throw metricsError;
-            }
-
-            // Load goals (or create defaults)
-            const { data: goalsData, error: goalsError } = await supabase
-                .from('fitness_goals')
-                .select('*')
-                .eq('user_id', user.id)
-                .single();
-
-            if (goalsError && goalsError.code === 'PGRST116') {
-                // Create default goals
-                const { data: newGoals, error: insertError } = await supabase
-                    .from('fitness_goals')
-                    .insert({
-                        user_id: user.id,
-                        daily_steps_target: 10000,
-                        daily_calories_target: 2000,
-                        daily_water_ml_target: 2500,
-                        weekly_workout_minutes_target: 150,
-                    })
-                    .select()
-                    .single();
-
-                if (insertError) throw insertError;
-                setGoals(newGoals as Goal);
-            } else if (goalsError) {
-                throw goalsError;
-            } else {
-                setGoals(goalsData as Goal);
-            }
-
-            setWorkouts(workoutsData as Workout[] || []);
-            setMeals(mealsData as Meal[] || []);
-            setMetrics(metricsData as Metric || null);
-
             // Load latest in-progress workout session (plan-based)
             try {
                 const inProgress = await listInProgressSessionsForUser(user.id, supabase);
@@ -244,41 +143,6 @@ export default function FitnessPage() {
                 }
             } catch {
                 setLatestInProgressSession(null);
-            }
-
-            // Load progress summary (completed sessions)
-            try {
-                const progress = await getProgressSummaryForUser(user.id, supabase);
-                setProgressSummary(progress);
-            } catch {
-                setProgressSummary(null);
-            }
-
-            // Load "what to train next" recommendation
-            try {
-                const rec = await getTrainNextRecommendationForUser(user.id, supabase);
-                setTrainNextRecommendation(rec);
-            } catch {
-                setTrainNextRecommendation(null);
-            }
-
-            // Load training consistency (streak, trained today)
-            try {
-                const consistency = await getTrainingConsistencyForUser(user.id, supabase);
-                setTrainingConsistency({
-                    trainedToday: consistency.trainedToday,
-                    currentStreak: consistency.currentStreak,
-                });
-            } catch {
-                setTrainingConsistency(null);
-            }
-
-            // Load execution adherence + adaptive update guidance.
-            try {
-                const insights = await getExecutionAdaptiveInsightsForUser(user.id, supabase);
-                setExecutionInsights(insights);
-            } catch {
-                setExecutionInsights(null);
             }
 
             // Load strict training-day assignment (includes shift-forward carry).
@@ -299,23 +163,14 @@ export default function FitnessPage() {
                 setProgramAssignment(null);
             }
 
-            // Load weekly summary
-            const weekStart = new Date();
-            weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-            const weekStartStr = weekStart.toISOString().split('T')[0];
-
-            // Weekly workout minutes
-            const { data: weeklyWorkouts, error: weeklyError } = await supabase
-                .from('fitness_workouts')
-                .select('duration_minutes')
-                .eq('user_id', user.id)
-                .gte('date', weekStartStr);
-
-            if (!weeklyError && weeklyWorkouts) {
-                // Store for display (we'll show this in summary)
-                // For now, just load it but don't display yet
+            try {
+                const feed = await listSessionsForHomeFeed(user.id, supabase);
+                setFeedSessions(feed);
+            } catch {
+                setFeedSessions([]);
             }
         } catch (error) {
+            setFeedSessions([]);
             const err = error as Record<string, unknown> | null;
             const errMessage = (error instanceof Error && error.message) || (err && typeof err.message === 'string' ? err.message : null);
             const errCode = err && typeof err.code === 'string' ? err.code : null;
@@ -339,22 +194,6 @@ export default function FitnessPage() {
             setLoading(false);
         }
     };
-
-    const todayCalories = useMemo(() => {
-        return meals.reduce((sum, meal) => sum + meal.calories, 0);
-    }, [meals]);
-
-    const todayWorkoutMinutes = useMemo(() => {
-        return workouts.reduce((sum, workout) => sum + workout.duration_minutes, 0);
-    }, [workouts]);
-
-    const caloriesBurned = useMemo(() => {
-        return workouts.reduce((sum, workout) => sum + (workout.calories_burned || 0), 0);
-    }, [workouts]);
-
-    const waterIntake = metrics?.water_ml || 0;
-    const steps = metrics?.steps || 0;
-    const weight = metrics?.weight_kg || null;
 
     if (!loading && schemaMissing) {
         return (
@@ -422,7 +261,11 @@ export default function FitnessPage() {
     }
 
     return (
-        <section className="space-y-6 px-6 py-4">
+        <FitnessShortsHome
+            sessions={feedSessions}
+            sessionsLoading={loading}
+            alertSlot={
+            <>
             {starterPlanStatus === 'generating' && (
                 <div className="rounded-lg border border-sky-500/30 bg-sky-950/20 p-4">
                     <h3 className="text-sm font-semibold text-sky-300">Creating your personalized starter plan...</h3>
@@ -567,12 +410,21 @@ export default function FitnessPage() {
                 </div>
             )}
 
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h2 className="text-2xl font-bold text-white dark:text-white">{todayStr}</h2>
-                    <p className="text-xs text-slate-400 mt-1">Today's Progress</p>
-                </div>
+            <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-500">
+                <span className="font-medium text-zinc-400">{todayStr}</span>
+                <span aria-hidden className="text-zinc-600">·</span>
+                <Link href="/fitness/meals" className="text-amber-400/90 hover:text-amber-300">
+                    Meals
+                </Link>
+                <Link href="/fitness/metrics" className="text-amber-400/90 hover:text-amber-300">
+                    Metrics
+                </Link>
+                <Link href="/fitness/workouts" className="text-amber-400/90 hover:text-amber-300">
+                    Workouts
+                </Link>
+                <Link href="/fitness/progress" className="text-amber-400/90 hover:text-amber-300">
+                    Progress
+                </Link>
             </div>
 
             {/* Resume latest session */}
@@ -603,78 +455,11 @@ export default function FitnessPage() {
                 </div>
             )}
 
-            {/* Session progress summary */}
-            {progressSummary && (progressSummary.completedSessionsCount > 0 || progressSummary.totalLoggedSets > 0) && (
-                <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-                    <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-xs font-semibold text-slate-400">Session progress</h3>
-                        <Link
-                            href="/fitness/sessions"
-                            className="text-xs font-medium text-amber-400 hover:text-amber-300"
-                        >
-                            View all sessions
-                        </Link>
-                    </div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                        <div>
-                            <div className="text-xs text-slate-500">Completed sessions</div>
-                            <div className="text-lg font-semibold text-white">{progressSummary.completedSessionsCount}</div>
-                        </div>
-                        <div>
-                            <div className="text-xs text-slate-500">Total logged sets</div>
-                            <div className="text-lg font-semibold text-white">{progressSummary.totalLoggedSets}</div>
-                        </div>
-                        {progressSummary.latestCompletedSession && (
-                            <div>
-                                <div className="text-xs text-slate-500">Latest workout</div>
-                                <Link
-                                    href={`/fitness/sessions/${progressSummary.latestCompletedSession.id}`}
-                                    className="text-sm font-medium text-amber-400 hover:text-amber-300 truncate block"
-                                >
-                                    {progressSummary.latestCompletedSession.name || 'Session'}
-                                </Link>
-                                <div className="text-[11px] text-slate-500">
-                                    {progressSummary.latestCompletedSession.ended_at
-                                        ? new Date(progressSummary.latestCompletedSession.ended_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                                        : '—'}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            {/* Training consistency */}
-            {trainingConsistency && !loading && (
-                <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-                    <h3 className="text-xs font-semibold text-slate-400 mb-2">Consistency</h3>
-                    <div className="flex flex-wrap items-baseline gap-4">
-                        <div>
-                            <span className="text-xs text-slate-500">Trained today</span>
-                            <span className="ml-2 text-sm font-medium text-white">
-                                {trainingConsistency.trainedToday ? 'Yes' : 'Not yet'}
-                            </span>
-                        </div>
-                        <div>
-                            <span className="text-xs text-slate-500">Current streak</span>
-                            <span className="ml-2 text-sm font-medium text-white">
-                                {trainingConsistency.currentStreak} day{trainingConsistency.currentStreak !== 1 ? 's' : ''}
-                            </span>
-                        </div>
-                    </div>
-                    {!trainingConsistency.trainedToday && (
-                        <p className="text-[11px] text-slate-500 mt-2">
-                            Complete a workout today to extend your streak.
-                        </p>
-                    )}
-                </div>
-            )}
-
             {programAssignment && !loading && (
                 <div className="rounded-lg border border-indigo-500/30 bg-indigo-950/20 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
-                            <h3 className="text-xs font-semibold text-indigo-300 mb-1">Today's scheduled workout</h3>
+                            <h3 className="text-xs font-semibold text-indigo-300 mb-1">Today&apos;s scheduled workout</h3>
                             <p className="text-sm font-medium text-white">
                                 Day {programAssignment.dayIndex}
                                 {programAssignment.carryForward ? ' (carry-forward)' : ''}
@@ -729,266 +514,9 @@ export default function FitnessPage() {
                 </div>
             )}
 
-            {executionInsights && !loading && (
-                <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-                    <h3 className="text-xs font-semibold text-slate-400 mb-2">Execution & adaptive updates</h3>
-                    <div className="flex flex-wrap items-baseline gap-4">
-                        <div>
-                            <span className="text-xs text-slate-500">Completed days (7d)</span>
-                            <span className="ml-2 text-sm font-medium text-white">
-                                {executionInsights.completedDaysThisWeek}/{executionInsights.expectedDaysPerWeek}
-                            </span>
-                        </div>
-                        <div>
-                            <span className="text-xs text-slate-500">Missed days</span>
-                            <span className="ml-2 text-sm font-medium text-white">
-                                {executionInsights.missedDaysThisWeek}
-                            </span>
-                        </div>
-                        <div>
-                            <span className="text-xs text-slate-500">Avg completion</span>
-                            <span className="ml-2 text-sm font-medium text-white">
-                                {executionInsights.recentAverageCompletionRate}%
-                            </span>
-                        </div>
-                    </div>
-                    {executionInsights.suggestions.length > 0 && (
-                        <p className="mt-2 text-[11px] text-slate-500">
-                            {executionInsights.suggestions[0]}
-                        </p>
-                    )}
-                </div>
-            )}
-
-            {/* What to train next */}
-            {trainNextRecommendation && !loading && (
-                <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-                    <h3 className="text-xs font-semibold text-slate-400 mb-2">What to train next</h3>
-                    {trainNextRecommendation.recommendedMuscleSlug ? (
-                        <>
-                            <p className="text-sm font-medium text-white">
-                                {trainNextRecommendation.recommendedLabel}
-                            </p>
-                            <p className="text-xs text-slate-400 mt-0.5">
-                                {trainNextRecommendation.reason}
-                            </p>
-                            {trainNextRecommendation.lastTrainedContext && (
-                                <p className="text-[11px] text-slate-500 mt-0.5">
-                                    {trainNextRecommendation.lastTrainedContext}
-                                </p>
-                            )}
-                            <div className="flex flex-wrap gap-2 mt-3">
-                                <Link
-                                    href={`/fitness/workout-generator?muscle=${encodeURIComponent(trainNextRecommendation.recommendedMuscleSlug)}`}
-                                    className="rounded-md bg-amber-400 px-3 py-1.5 text-xs font-semibold text-black hover:bg-amber-300"
-                                >
-                                    Generate workout
-                                </Link>
-                                <Link
-                                    href={`/fitness/exercises?muscle=${encodeURIComponent(trainNextRecommendation.recommendedMuscleSlug)}`}
-                                    className="rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
-                                >
-                                    Browse exercises
-                                </Link>
-                            </div>
-                        </>
-                    ) : (
-                        <>
-                            <p className="text-sm text-slate-300">Get started</p>
-                            <p className="text-xs text-slate-400 mt-0.5">
-                                {trainNextRecommendation.reason}
-                            </p>
-                            <div className="flex flex-wrap gap-2 mt-3">
-                                <Link
-                                    href="/fitness/plans"
-                                    className="rounded-md bg-amber-400 px-3 py-1.5 text-xs font-semibold text-black hover:bg-amber-300"
-                                >
-                                    Browse plans
-                                </Link>
-                                <Link
-                                    href="/fitness/workout-generator"
-                                    className="rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
-                                >
-                                    Workout generator
-                                </Link>
-                            </div>
-                        </>
-                    )}
-                </div>
-            )}
-
-            {/* Quick Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-                    <div className="text-xs text-slate-400 mb-1">Steps</div>
-                    <div className="text-2xl font-bold text-white">
-                        {steps.toLocaleString()}
-                    </div>
-                    {goals && (
-                        <div className="text-xs text-slate-500 mt-1">
-                            of {goals.daily_steps_target.toLocaleString()} goal
-                        </div>
-                    )}
-                </div>
-                <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-                    <div className="text-xs text-slate-400 mb-1">Calories In</div>
-                    <div className="text-2xl font-bold text-white">{todayCalories}</div>
-                    {goals && (
-                        <div className="text-xs text-slate-500 mt-1">
-                            of {goals.daily_calories_target} goal
-                        </div>
-                    )}
-                </div>
-                <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-                    <div className="text-xs text-slate-400 mb-1">Calories Out</div>
-                    <div className="text-2xl font-bold text-white">{caloriesBurned}</div>
-                </div>
-                <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-                    <div className="text-xs text-slate-400 mb-1">Water</div>
-                    <div className="text-2xl font-bold text-white">
-                        {(waterIntake / 1000).toFixed(1)}L
-                    </div>
-                    {goals && (
-                        <div className="text-xs text-slate-500 mt-1">
-                            of {(goals.daily_water_ml_target / 1000).toFixed(1)}L goal
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* Today's Workouts */}
-            <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-                <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-semibold">Today's Workouts</h3>
-                    <Link
-                        href="/fitness/workouts?add=true"
-                        className="rounded-md bg-amber-400 px-3 py-1.5 text-xs font-semibold text-black hover:bg-amber-300"
-                    >
-                        + Add Workout
-                    </Link>
-                </div>
-                {loading ? (
-                    <div className="text-xs text-slate-400">Loading...</div>
-                ) : workouts.length === 0 ? (
-                    <div className="text-xs text-slate-400 text-center py-4">
-                        No workouts logged today. Add your first workout!
-                    </div>
-                ) : (
-                    <div className="space-y-2">
-                        {workouts.map(workout => (
-                            <div key={workout.id} className="rounded-md border border-slate-800 bg-slate-900 p-3">
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <div className="text-sm font-medium text-white capitalize">
-                                            {workout.type} {workout.muscle_group ? `- ${workout.muscle_group}` : ''}
-                                        </div>
-                                        <div className="text-xs text-slate-400 mt-1">
-                                            {workout.duration_minutes} min
-                                            {workout.intensity && ` • Intensity: ${workout.intensity}/10`}
-                                            {workout.calories_burned && ` • ${workout.calories_burned} cal`}
-                                        </div>
-                                        {workout.notes && (
-                                            <div className="text-xs text-slate-500 mt-1">{workout.notes}</div>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </div>
-
-            {/* Today's Meals */}
-            <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-                <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-semibold">Today's Meals</h3>
-                    <Link
-                        href="/fitness/meals?add=true"
-                        className="rounded-md bg-amber-400 px-3 py-1.5 text-xs font-semibold text-black hover:bg-amber-300"
-                    >
-                        + Add Meal
-                    </Link>
-                </div>
-                {loading ? (
-                    <div className="text-xs text-slate-400">Loading...</div>
-                ) : meals.length === 0 ? (
-                    <div className="text-xs text-slate-400 text-center py-4">
-                        No meals logged today. Add your first meal!
-                    </div>
-                ) : (
-                    <div className="space-y-2">
-                        {meals.map(meal => (
-                            <div key={meal.id} className="rounded-md border border-slate-800 bg-slate-900 p-3">
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <div className="text-sm font-medium text-white capitalize">
-                                            {meal.meal_type}: {meal.description}
-                                        </div>
-                                        <div className="text-xs text-slate-400 mt-1">
-                                            {meal.calories} cal
-                                            {meal.protein_g && ` • P: ${meal.protein_g}g`}
-                                            {meal.carbs_g && ` • C: ${meal.carbs_g}g`}
-                                            {meal.fat_g && ` • F: ${meal.fat_g}g`}
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </div>
-
-            {/* Today's Metrics */}
-            <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-                <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-semibold">Today's Metrics</h3>
-                    <Link
-                        href="/fitness/metrics?date=today"
-                        className="rounded-md bg-amber-400 px-3 py-1.5 text-xs font-semibold text-black hover:bg-amber-300"
-                    >
-                        Log Metrics
-                    </Link>
-                </div>
-                {loading ? (
-                    <div className="text-xs text-slate-400">Loading...</div>
-                ) : !metrics ? (
-                    <div className="text-xs text-slate-400 text-center py-4">
-                        No metrics logged today. Log your weight, steps, water, and sleep!
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        {weight && (
-                            <div>
-                                <div className="text-xs text-slate-400">Weight</div>
-                                <div className="text-lg font-semibold text-white">{weight} kg</div>
-                            </div>
-                        )}
-                        <div>
-                            <div className="text-xs text-slate-400">Steps</div>
-                            <div className="text-lg font-semibold text-white">{steps.toLocaleString()}</div>
-                        </div>
-                        <div>
-                            <div className="text-xs text-slate-400">Water</div>
-                            <div className="text-lg font-semibold text-white">{(waterIntake / 1000).toFixed(1)}L</div>
-                        </div>
-                        {metrics.sleep_hours && (
-                            <div>
-                                <div className="text-xs text-slate-400">Sleep</div>
-                                <div className="text-lg font-semibold text-white">{metrics.sleep_hours}h</div>
-                            </div>
-                        )}
-                    </div>
-                )}
-            </div>
-
-            {/* Weekly Summary */}
-            <div className="rounded-lg border border-slate-800 bg-slate-950 p-4">
-                <h3 className="text-sm font-semibold mb-3">Weekly Summary</h3>
-                <div className="text-xs text-slate-400">
-                    Weekly summary coming soon. Track your consistency and progress over time.
-                </div>
-            </div>
-        </section>
+            </>
+            }
+        />
     );
 }
 

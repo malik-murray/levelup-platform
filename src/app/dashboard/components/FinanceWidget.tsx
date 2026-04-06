@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate } from '@/lib/habitHelpers';
+import { neon } from '../neonTheme';
 
 type Transaction = {
     id: string;
@@ -81,8 +82,8 @@ export default function FinanceWidget({
 
     if (loading) {
         return (
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-                <div className="text-center py-4 text-slate-400 text-sm">Loading...</div>
+            <div className={`${neon.widget} p-4`}>
+                <div className="py-4 text-center text-sm text-slate-400">Loading...</div>
             </div>
         );
     }
@@ -91,16 +92,16 @@ export default function FinanceWidget({
     const budgetPercentage = monthBudget > 0 ? (monthSpending / monthBudget) * 100 : 0;
 
     return (
-        <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-3">
+        <div className={`${neon.widget} space-y-3 p-4`}>
             <div className="flex items-center justify-between">
-                <Link href="/finance" className="hover:underline">
-                    <h3 className="text-lg font-semibold">Finance</h3>
+                <Link href="/finance" className="transition-colors hover:text-[#ffe066]">
+                    <h3 className="text-lg font-semibold text-[#ffe066]">Finance</h3>
                 </Link>
             </div>
 
             <div className="space-y-2 text-sm">
                 <div>
-                    <div className="text-slate-400">Today's Spending</div>
+                    <div className="text-slate-400">Today&apos;s spending</div>
                     <div className="text-white font-semibold">${todaySpending.toFixed(2)}</div>
                 </div>
 

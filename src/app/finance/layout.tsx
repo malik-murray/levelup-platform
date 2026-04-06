@@ -26,7 +26,7 @@ export default function FinanceLayout({
     const pathname = usePathname();
 
     return (
-        <main className="min-h-screen bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
+        <main className="min-h-screen min-w-0 max-w-full bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
             {/* Header + tabs */}
             <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-black transition-colors">
                 <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">

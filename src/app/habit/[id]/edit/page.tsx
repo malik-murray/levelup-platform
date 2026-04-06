@@ -15,6 +15,7 @@ import {
 } from '../../lib/habitFormStore';
 import type { GritHabitFormDraft, GritHabitTemplate } from '../../lib/gritTypes';
 import { HabitFormScreen } from '../../components/grit/HabitFormScreen';
+import { HabitFlowLoading } from '../../components/HabitFlowShell';
 
 export default function EditHabitPage() {
   const router = useRouter();
@@ -131,11 +132,7 @@ export default function EditHabitPage() {
   };
 
   if (loading || !draft) {
-    return (
-      <div className="min-h-screen bg-[var(--lu-bg)] flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-[var(--lu-accent)] border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
+    return <HabitFlowLoading />;
   }
 
   return (

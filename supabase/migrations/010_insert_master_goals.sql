@@ -229,7 +229,7 @@ BEGIN
     INSERT INTO habit_templates (user_id, name, icon, category, time_of_day, goal_id, is_bad_habit, is_active, sort_order)
     VALUES 
         (sample_user_id, 'Deep work session daily', '🎯', 'mental', 'morning', goal_business_id, false, true, 1),
-        (sample_user_id, 'Study/Learn (business, AI, dev, marketing)', '📚', 'mental', null, goal_business_id, false, true, 2),
+        (sample_user_id, 'Study / learn', '📚', 'mental', null, goal_business_id, false, true, 2),
         (sample_user_id, 'Research top creators weekly', '🔍', 'mental', null, goal_business_id, false, true, 3),
         (sample_user_id, 'Analyze performance weekly', '📊', 'mental', null, goal_business_id, false, true, 4),
         (sample_user_id, 'Create daily video', '🎥', 'mental', null, goal_business_id, false, true, 5),

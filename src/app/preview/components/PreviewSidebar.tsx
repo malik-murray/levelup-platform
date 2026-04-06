@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const apps = [
-  { name: 'Dashboard (Daily Entry)', href: '/preview/dashboard', icon: '📊' },
-  { name: "This Week's Plan", href: '/preview/habit/weekly-plan', icon: '📅' },
+  { name: 'Dashboard', href: '/preview/dashboard', icon: '📊' },
+  { name: 'Weekly plan', href: '/preview/habit/weekly-plan', icon: '📅' },
   { name: 'Finance Tracker', href: '/preview/finance', icon: '💰' },
   { name: 'Fitness Tracker', href: '/preview/fitness', icon: '💪' },
 ];

@@ -21,8 +21,8 @@ export default function RootLayout({
     children: React.ReactNode;
 }) {
     return (
-        <html lang="en" suppressHydrationWarning>
-        <body className="antialiased bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
+        <html lang="en" className="min-w-0 max-w-full overflow-x-clip" suppressHydrationWarning>
+        <body className="min-w-0 max-w-full overflow-x-clip antialiased bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
         <ThemeProvider>
             <AuthHashErrorHandler />
             {children}

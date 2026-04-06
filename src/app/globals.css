@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Manual theme: `ThemeProvider` sets `light` / `dark` on `document.documentElement`. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
     --lu-bg: #000000;
     --lu-accent: #f4b73f;
@@ -23,6 +26,8 @@ body {
     color: var(--lu-text);
     transition: background-color 0.2s ease, color 0.2s ease;
     overflow-x: hidden;
+    overflow-x: clip;
+    max-width: 100%;
 }
 
 /* Optional: reusable gold button */
@@ -40,10 +45,9 @@ body {
 }
 
 /* Mobile-friendly improvements */
-/* Ensure touch targets are at least 44x44px for interactive elements */
+/* Touch targets: buttons/inputs (links omitted — min-width on all anchors widens flex rows and causes horizontal overflow) */
 @media (max-width: 768px) {
     button:not(.no-touch-target),
-    a:not(.no-touch-target),
     input[type="button"]:not(.no-touch-target),
     input[type="submit"]:not(.no-touch-target),
     input[type="checkbox"],
@@ -66,11 +70,13 @@ body {
     }
 }
 
-/* Smooth scrolling for mobile; prevent horizontal scroll site-wide */
+/* Smooth scrolling for mobile; clip horizontal overflow without widening scroll width like 100vw */
 html {
     -webkit-overflow-scrolling: touch;
     scroll-behavior: smooth;
     overflow-x: hidden;
+    overflow-x: clip;
+    max-width: 100%;
 }
 
 /* Prevent text size adjustment on orientation change */
@@ -99,4 +105,280 @@ body {
         rgba(0, 0, 0, 0.25) 4px
     );
     border-left: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+@keyframes score-change-pulse {
+    0%,
+    100% {
+        transform: scale(1);
+        text-shadow: 0 0 0 rgba(255, 157, 0, 0);
+    }
+    50% {
+        transform: scale(1.04);
+        text-shadow:
+            0 0 12px rgba(255, 200, 100, 0.65),
+            0 0 22px rgba(255, 157, 0, 0.45);
+    }
+}
+
+.score-change-pulse {
+    animation: score-change-pulse 0.95s ease-out;
+}
+
+.score-change-glow {
+    box-shadow:
+        0 0 0 1px rgba(255, 157, 0, 0.12) inset,
+        0 0 20px rgba(255, 157, 0, 0.3);
+}
+
+/* Landing: motion background + accents (respect reduced motion below) */
+@keyframes landing-hero-kenburns {
+    0% {
+        transform: scale(1.05) translate(0%, 0%);
+    }
+    33% {
+        transform: scale(1.1) translate(-1.2%, -0.6%);
+    }
+    66% {
+        transform: scale(1.07) translate(0.8%, 0.4%);
+    }
+    100% {
+        transform: scale(1.05) translate(0%, 0%);
+    }
+}
+
+@keyframes landing-grid-flow {
+    0% {
+        background-position: 0 0, 0 0;
+    }
+    100% {
+        background-position: 0 40px, 40px 0;
+    }
+}
+
+@keyframes landing-twinkle {
+    0%,
+    100% {
+        opacity: 0.25;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.2);
+    }
+}
+
+@keyframes landing-nebula-shift {
+    0%,
+    100% {
+        transform: translate(0, 0) scale(1);
+        opacity: 0.35;
+    }
+    50% {
+        transform: translate(3%, -2%) scale(1.08);
+        opacity: 0.5;
+    }
+}
+
+@keyframes landing-ember-rise {
+    0% {
+        transform: translate3d(0, 0, 0);
+        opacity: 0;
+    }
+    12% {
+        opacity: 0.55;
+    }
+    88% {
+        opacity: 0.35;
+    }
+    100% {
+        transform: translate3d(var(--ember-dx, 12px), -110vh, 0);
+        opacity: 0;
+    }
+}
+
+@keyframes landing-btn-glow-pulse {
+    0%,
+    100% {
+        box-shadow:
+            0 0 14px rgba(255, 160, 40, 0.45),
+            inset 0 0 18px rgba(255, 160, 40, 0.06);
+    }
+    50% {
+        box-shadow:
+            0 0 26px rgba(255, 200, 100, 0.7),
+            inset 0 0 22px rgba(255, 160, 40, 0.12);
+    }
+}
+
+@keyframes landing-title-glow {
+    0%,
+    100% {
+        text-shadow:
+            0 0 22px rgba(255, 200, 80, 0.95),
+            0 0 44px rgba(255, 150, 40, 0.55),
+            0 0 72px rgba(255, 100, 30, 0.28);
+    }
+    50% {
+        text-shadow:
+            0 0 30px rgba(255, 220, 120, 1),
+            0 0 56px rgba(255, 170, 60, 0.65),
+            0 0 88px rgba(255, 120, 40, 0.38);
+    }
+}
+
+.landing-hero-kenburns {
+    animation: landing-hero-kenburns 32s ease-in-out infinite;
+    will-change: transform;
+}
+
+.landing-grid-flow {
+    animation: landing-grid-flow 2.8s linear infinite;
+}
+
+.landing-nebula-shift {
+    animation: landing-nebula-shift 18s ease-in-out infinite;
+}
+
+.landing-twinkle-star {
+    animation: landing-twinkle 3s ease-in-out infinite;
+}
+
+.landing-btn-glow-pulse {
+    animation: landing-btn-glow-pulse 3.8s ease-in-out infinite;
+}
+
+.landing-title-glow {
+    animation: landing-title-glow 4.5s ease-in-out infinite;
+}
+
+@keyframes landing-logo-breathe {
+    0%,
+    100% {
+        transform: translateY(0);
+        filter: drop-shadow(0 0 14px rgba(255, 180, 60, 0.42))
+            drop-shadow(0 0 36px rgba(255, 130, 40, 0.22));
+    }
+    50% {
+        transform: translateY(-10px);
+        filter: drop-shadow(0 0 22px rgba(255, 205, 100, 0.58))
+            drop-shadow(0 0 52px rgba(255, 155, 55, 0.32));
+    }
+}
+
+.landing-logo-breathe {
+    animation: landing-logo-breathe 9s ease-in-out infinite;
+    will-change: transform, filter;
+}
+
+@keyframes landing-player-flicker {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    11% {
+        opacity: 0.94;
+    }
+    12% {
+        opacity: 1;
+    }
+    48% {
+        opacity: 0.97;
+    }
+    49% {
+        opacity: 1;
+    }
+    71% {
+        opacity: 0.96;
+    }
+    72% {
+        opacity: 1;
+    }
+    88% {
+        opacity: 0.98;
+    }
+}
+
+.landing-player-flicker {
+    animation: landing-player-flicker 6.5s ease-in-out infinite;
+}
+
+/* Glow pulse + subtle flicker together (single animation property) */
+.landing-player-one-hero {
+    animation:
+        landing-title-glow 4.5s ease-in-out infinite,
+        landing-player-flicker 6.5s ease-in-out infinite;
+}
+
+.landing-grain {
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.1;
+}
+
+/* Rocket exhaust–style smoke at bottom of landing */
+@keyframes landing-smoke-rise-a {
+    0%,
+    100% {
+        transform: translateX(-4%) translateY(6%) scale(1) scaleX(1);
+        opacity: 0.35;
+    }
+    50% {
+        transform: translateX(5%) translateY(-12%) scale(1.06) scaleX(1.12);
+        opacity: 0.55;
+    }
+}
+
+@keyframes landing-smoke-rise-b {
+    0%,
+    100% {
+        transform: translateX(3%) translateY(4%) scale(1.02) scaleX(0.95);
+        opacity: 0.28;
+    }
+    50% {
+        transform: translateX(-6%) translateY(-18%) scale(1.1) scaleX(1.18);
+        opacity: 0.48;
+    }
+}
+
+@keyframes landing-smoke-rise-c {
+    0%,
+    100% {
+        transform: translateX(0) translateY(8%) scale(1);
+        opacity: 0.22;
+    }
+    45% {
+        transform: translateX(4%) translateY(-22%) scale(1.12) scaleX(1.08);
+        opacity: 0.42;
+    }
+}
+
+.landing-smoke-a {
+    animation: landing-smoke-rise-a 14s ease-in-out infinite;
+}
+
+.landing-smoke-b {
+    animation: landing-smoke-rise-b 18s ease-in-out infinite;
+    animation-delay: -4s;
+}
+
+.landing-smoke-c {
+    animation: landing-smoke-rise-c 22s ease-in-out infinite;
+    animation-delay: -9s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .landing-hero-kenburns,
+    .landing-grid-flow,
+    .landing-nebula-shift,
+    .landing-twinkle-star,
+    .landing-btn-glow-pulse,
+    .landing-title-glow,
+    .landing-logo-breathe,
+    .landing-player-flicker,
+    .landing-player-one-hero,
+    .landing-smoke-a,
+    .landing-smoke-b,
+    .landing-smoke-c {
+        animation: none !important;
+    }
 }

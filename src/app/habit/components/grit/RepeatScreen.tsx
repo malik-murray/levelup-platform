@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { getStoredDraft, setStoredDraft } from '../../lib/habitFormStore';
 import type { TimeOfDay } from '../../lib/gritTypes';
+import { HabitFlowShell, HabitFlowLoading } from '../HabitFlowShell';
+import { neon } from '@/app/dashboard/neonTheme';
 
 const OPTIONS: { value: TimeOfDay | null; label: string }[] = [
   { value: null, label: 'Daily' },
@@ -28,49 +30,32 @@ export function RepeatScreen({ returnTo }: { returnTo: string }) {
   };
 
   if (!draft) {
-    return (
-      <div className="min-h-screen bg-[var(--lu-bg)] flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-[var(--lu-accent)] border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
+    return <HabitFlowLoading />;
   }
 
   return (
-    <div className="min-h-screen bg-[var(--lu-bg)] text-[var(--lu-text)] flex flex-col">
-      <header className="flex items-center justify-between h-14 px-4 border-b border-white/10">
-        <button
-          type="button"
-          onClick={() => router.push(returnTo)}
-          className="min-w-[44px] min-h-[44px] flex items-center justify-center -ml-2 rounded-full active:bg-white/10"
-          aria-label="Back"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
-        <h1 className="text-lg font-semibold">Repeat</h1>
-        <div className="w-12" />
-      </header>
+    <HabitFlowShell title="Repeat" onBack={() => router.push(returnTo)}>
+      <p className="mb-4 text-sm text-slate-400">When do you want to do this habit?</p>
 
-      <main className="flex-1 overflow-y-auto px-4 py-6">
-        <p className="text-sm text-white/60 mb-4">When do you want to do this habit?</p>
-
-        <div className="space-y-2">
-          {OPTIONS.map(({ value, label }) => (
-            <button
-              key={label}
-              type="button"
-              onClick={() => select(value)}
-              className={`
-                w-full text-left py-4 px-4 rounded-2xl border min-h-[56px]
-                ${draft.time_of_day === value ? 'bg-[var(--lu-accent)]/20 border-[var(--lu-accent)]' : 'bg-white/5 border-white/10'}
-              `}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </main>
-    </div>
+      <div className="space-y-2">
+        {OPTIONS.map(({ value, label }) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => select(value)}
+            className={`
+              min-h-[56px] w-full rounded-2xl border-2 px-4 py-4 text-left font-medium transition-all
+              ${
+                draft.time_of_day === value
+                  ? 'border-[#ff9d00] bg-[#ff9d00]/15 text-[#ffe066] shadow-[0_0_20px_rgba(255,157,0,0.2)]'
+                  : `${neon.section} text-white hover:border-[#ff9d00]/50 hover:bg-[#ff9d00]/5`
+              }
+            `}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </HabitFlowShell>
   );
 }

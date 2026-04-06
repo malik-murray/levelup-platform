@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { neon } from '../neonTheme';
 import { supabase } from '@auth/supabaseClient';
 
 type WatchlistItem = {
@@ -69,17 +70,17 @@ export default function MarketsWidget({ userId }: { userId: string | null }) {
 
     if (loading) {
         return (
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-                <div className="text-center py-4 text-slate-400 text-sm">Loading...</div>
+            <div className={`${neon.widget} p-4`}>
+                <div className="py-4 text-center text-sm text-slate-400">Loading...</div>
             </div>
         );
     }
 
     return (
-        <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-3">
+        <div className={`${neon.widget} space-y-3 p-4`}>
             <div className="flex items-center justify-between">
-                <Link href="/markets" className="hover:underline">
-                    <h3 className="text-lg font-semibold">Markets</h3>
+                <Link href="/markets" className="transition-colors hover:text-[#ffe066]">
+                    <h3 className="text-lg font-semibold text-[#ffe066]">Markets</h3>
                 </Link>
             </div>
 

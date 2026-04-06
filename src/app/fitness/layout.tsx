@@ -28,13 +28,20 @@ export default function FitnessLayout({
     children: React.ReactNode;
 }) {
     const pathname = usePathname();
+    const isFitnessHome = pathname === '/fitness' || pathname === '/preview/fitness';
+
+    if (isFitnessHome) {
+        return (
+            <main className="min-h-screen min-w-0 max-w-full bg-black text-white transition-colors">{children}</main>
+        );
+    }
 
     return (
-        <main className="min-h-screen bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
+        <main className="min-h-screen min-w-0 max-w-full bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
             {/* Header + tabs */}
             <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-black transition-colors">
                 <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-                    <Link href="/dashboard" className="flex items-center gap-2 sm:gap-3 hover:opacity-80 transition-opacity">
+                    <Link href="/fitness" className="flex items-center gap-2 sm:gap-3 hover:opacity-80 transition-opacity">
                         <div className="relative h-8 w-8 flex-shrink-0">
                             <Image
                                 src={logo}

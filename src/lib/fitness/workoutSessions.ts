@@ -23,6 +23,9 @@ export type WorkoutSession = {
     name: string | null;
     notes: string | null;
     program_schedule_id?: string | null;
+    /** Optional AI / demo full-session workout video */
+    demo_video_url?: string | null;
+    demo_thumbnail_url?: string | null;
     created_at: string;
     updated_at: string;
 };
@@ -697,6 +700,31 @@ export async function getProgressSummaryForUser(
 ): Promise<ProgressSummary> {
     const { summary } = await getProgressPageDataForUser(userId, supabase, 0);
     return summary;
+}
+
+/**
+ * Sessions for the fitness home video grid (excludes abandoned). Newest first.
+ */
+export async function listSessionsForHomeFeed(
+    userId: string,
+    supabase?: SupabaseClient,
+    limit = 48
+): Promise<WorkoutSession[]> {
+    const client = getClient(supabase);
+    const { data, error } = await client
+        .from('fitness_workout_sessions')
+        .select('*')
+        .eq('user_id', userId)
+        .neq('status', 'abandoned')
+        .order('started_at', { ascending: false })
+        .limit(limit);
+
+    if (error) {
+        console.error('listSessionsForHomeFeed:', error);
+        throw error;
+    }
+
+    return (data ?? []) as WorkoutSession[];
 }
 
 export async function listRecentSessionsForUser(

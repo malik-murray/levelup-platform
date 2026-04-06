@@ -5,8 +5,11 @@ export default function LoginPage() {
   return (
     <Suspense
       fallback={
-        <main className="flex min-h-screen items-center justify-center bg-slate-950 text-white px-4 py-8">
-          <div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+        <main className="flex min-h-dvh items-center justify-center bg-[#010205] px-4 py-8 text-white">
+          <div
+            className="h-9 w-9 animate-spin rounded-full border-2 border-[#ffb020]/40 border-t-[#ffb020]"
+            aria-hidden
+          />
         </main>
       }
     >

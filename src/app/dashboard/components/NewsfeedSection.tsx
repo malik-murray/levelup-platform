@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { neon } from '../neonTheme';
 
 type Article = {
     id: string;
@@ -61,8 +62,8 @@ export default function NewsfeedSection({
 
     if (loading) {
         return (
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-6">
-                <div className="text-center py-8 text-slate-400">Loading...</div>
+            <div className={`${neon.widget} p-6`}>
+                <div className="py-8 text-center text-slate-400">Loading...</div>
             </div>
         );
     }
@@ -70,17 +71,17 @@ export default function NewsfeedSection({
     return (
         <div className="space-y-4">
             <div className="flex items-center justify-between">
-                <Link href="/newsfeed" className="hover:underline">
-                    <h2 className="text-2xl font-bold">Newsfeed</h2>
+                <Link href="/newsfeed" className="transition-colors hover:text-[#ffe066]">
+                    <h2 className="text-xl font-bold text-[#ffe066]">Newsfeed</h2>
                 </Link>
             </div>
 
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 space-y-4">
+            <div className={`${neon.widget} space-y-4 p-4`}>
                 {articles.length === 0 ? (
-                    <p className="text-sm text-slate-400 text-center py-4">No articles for today</p>
+                    <p className="py-4 text-center text-sm text-slate-400">No articles for today</p>
                 ) : (
                     articles.slice(0, 5).map((article) => (
-                        <div key={article.id} className="border-b border-slate-700 pb-4 last:border-b-0 last:pb-0">
+                        <div key={article.id} className="border-b border-[#ff9d00]/20 pb-4 last:border-b-0 last:pb-0">
                             <h3 className="font-semibold text-white mb-2 line-clamp-2">{article.title}</h3>
                             {article.summary && (
                                 <p className="text-sm text-slate-300 mb-2 line-clamp-3">
@@ -101,7 +102,7 @@ export default function NewsfeedSection({
             <div className="text-center">
                 <Link
                     href="/newsfeed"
-                    className="inline-flex items-center gap-2 text-amber-400 hover:text-amber-300 transition-colors"
+                    className="inline-flex items-center gap-2 text-[#ffcc66] transition-colors hover:text-[#ffe066]"
                 >
                     <span>View full Newsfeed</span>
                     <span>→</span>
