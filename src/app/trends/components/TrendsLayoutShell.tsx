@@ -74,7 +74,7 @@ export default function TrendsLayoutShell({
                         <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-3 lg:max-w-6xl">
                             <button
                                 type="button"
-                                onClick={() => setSidebarOpen((o) => !o)}
+                                onClick={() => setSidebarOpen(!sidebarOpen)}
                                 className={headerBtnClass}
                                 aria-label="Open menu"
                             >

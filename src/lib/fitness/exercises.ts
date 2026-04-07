@@ -164,9 +164,15 @@ export async function getPrimaryMuscleSlugsByExerciseSlugs(
     }
     const result: Record<string, string> = {};
     for (const row of data ?? []) {
-        const r = row as { slug: string; primary_muscle_group: { slug: string } | null };
-        if (r.primary_muscle_group?.slug) {
-            result[r.slug] = r.primary_muscle_group.slug;
+        const r = row as {
+            slug: string;
+            primary_muscle_group: { slug: string } | { slug: string }[] | null;
+        };
+        const group = Array.isArray(r.primary_muscle_group)
+            ? r.primary_muscle_group[0] ?? null
+            : r.primary_muscle_group;
+        if (group?.slug) {
+            result[r.slug] = group.slug;
         }
     }
     return result;

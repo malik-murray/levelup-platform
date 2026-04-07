@@ -506,6 +506,12 @@ function getSessionDate(session: WorkoutSession): string {
     return session.ended_at ?? session.started_at;
 }
 
+/** Latest ISO date string (lexicographic compare is valid for YYYY-MM-DD… timestamps). */
+function laterIso(current: string | null, candidate: string): string {
+    if (current == null || candidate > current) return candidate;
+    return current;
+}
+
 function formatDaysAgo(isoDate: string): string {
     const then = new Date(isoDate).getTime();
     const now = Date.now();
@@ -559,14 +565,20 @@ export async function getTrainNextRecommendationForUser(
             .in('session_id', sessionIds);
 
         const allExerciseSlugs = [...new Set((items ?? []).map((r: { exercise_slug: string }) => r.exercise_slug))];
-        const slugToMuscle =
+        const slugToMuscle: Record<string, string> =
             allExerciseSlugs.length > 0
                 ? await getPrimaryMuscleSlugsByExerciseSlugs(allExerciseSlugs, client)
                 : {};
 
         for (const s of withoutPlan) {
             const sessionItems = (items ?? []).filter((r: { session_id: string }) => r.session_id === s.id);
-            const muscles = [...new Set(sessionItems.map((r: { exercise_slug: string }) => slugToMuscle[r.exercise_slug]).filter(Boolean))];
+            const muscles = [
+                ...new Set(
+                    sessionItems
+                        .map((r: { exercise_slug: string }) => slugToMuscle[r.exercise_slug])
+                        .filter((slug): slug is string => Boolean(slug))
+                ),
+            ];
             sessionMuscles[s.id] = muscles;
         }
     }
@@ -580,9 +592,9 @@ export async function getTrainNextRecommendationForUser(
         const date = getSessionDate(s);
         const muscles = sessionMuscles[s.id] ?? [];
         for (const m of muscles) {
-            if (UPPER_MUSCLES.has(m)) lastUpper = lastUpper ? (date > lastUpper ? date : lastUpper) : date;
-            if (LOWER_MUSCLES.has(m)) lastLower = lastLower ? (date > lastLower ? date : lastLower) : date;
-            if (m === CORE_SLUG) lastCore = lastCore ? (date > lastCore ? date : lastCore) : date;
+            if (UPPER_MUSCLES.has(m)) lastUpper = laterIso(lastUpper, date);
+            if (LOWER_MUSCLES.has(m)) lastLower = laterIso(lastLower, date);
+            if (m === CORE_SLUG) lastCore = laterIso(lastCore, date);
         }
     }
 

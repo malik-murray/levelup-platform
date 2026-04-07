@@ -69,7 +69,7 @@ const WEEKDAY_OPTIONS: { value: number; label: string }[] = [
     { value: 0, label: 'Sun' },
 ];
 
-function toggleValue<T extends string>(arr: T[], value: T): T[] {
+function toggleValue<T extends string | number>(arr: T[], value: T): T[] {
     if (arr.includes(value)) return arr.filter((v) => v !== value);
     return [...arr, value];
 }
