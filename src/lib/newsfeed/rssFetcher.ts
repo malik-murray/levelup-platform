@@ -18,7 +18,7 @@ export interface RSSArticle {
     publishTime: Date;
     description?: string;
     imageUrl?: string;
-    rawData?: any;
+    rawData?: unknown;
 }
 
 export interface FetchResult {
@@ -60,9 +60,10 @@ export async function fetchRSSFeed(feedUrl: string): Promise<RSSArticle[]> {
             // Extract image URL from content or enclosure
             let imageUrl: string | undefined;
             if (item.enclosures && item.enclosures.length > 0) {
-                const imageEnclosure = item.enclosures.find(
-                    (enc: any) => enc.type?.startsWith('image/')
-                );
+                const imageEnclosure = item.enclosures.find((enc) => {
+                    const enclosure = enc as { type?: string; url?: string };
+                    return enclosure.type?.startsWith('image/');
+                }) as { url?: string } | undefined;
                 if (imageEnclosure) {
                     imageUrl = imageEnclosure.url;
                 }
@@ -101,8 +102,16 @@ export async function fetchRSSFeed(feedUrl: string): Promise<RSSArticle[]> {
         console.log(`Fetched ${articles.length} articles from ${feedUrl}`);
         return articles;
     } catch (error) {
-        console.error(`Error fetching RSS feed ${feedUrl}:`, error);
-        throw error;
+        const statusCode = (error as { statusCode?: number } | null)?.statusCode;
+        const message = error instanceof Error ? error.message : 'Unknown RSS fetch error';
+        console.error(`Error fetching RSS feed ${feedUrl}:`, message);
+        const enriched = new Error(message) as Error & { statusCode?: number };
+        if (statusCode) {
+            enriched.statusCode = statusCode;
+        } else if (/404/.test(message)) {
+            enriched.statusCode = 404;
+        }
+        throw enriched;
     }
 }
 
@@ -120,7 +129,7 @@ export function normalizeUrl(url: string): string {
         // Remove fragment
         urlObj.hash = '';
         return urlObj.toString();
-    } catch (error) {
+    } catch {
         // If URL parsing fails, return original
         return url;
     }

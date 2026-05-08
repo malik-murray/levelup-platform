@@ -1,10 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
-import logo from '../logo.png';
-import { ThemeToggle } from '@/components/ThemeToggle';
+import { rankArticlesForBriefing } from '@/lib/newsfeed/topStoriesRanking';
 
 type Source = {
     id: string;
@@ -46,6 +44,33 @@ type Article = {
 };
 
 type Filter = 'feed' | 'saved' | 'archived';
+type CategoryKey = 'for-you' | 'top' | 'federal' | 'dmv' | 'tech' | 'business' | 'finance';
+
+const SECTION_DEFINITIONS = [
+    { key: 'federal', title: 'Federal Workforce', topicNames: ['fed_gov', 'federal_workforce'] },
+    { key: 'dmv', title: 'DMV', topicNames: ['dmv'] },
+    { key: 'tech', title: 'Tech', topicNames: ['tech', 'ai', 'software', 'hardware', 'startups', 'security'] },
+    { key: 'business', title: 'Business', topicNames: ['business', 'economy'] },
+    { key: 'finance', title: 'Finance', topicNames: ['finance', 'stocks', 'crypto_markets', 'real_estate'] },
+] as const;
+
+const PERSONAL_PRIORITY_TOPIC_NAMES = ['fed_gov', 'federal_workforce', 'dmv', 'tech', 'business', 'finance'];
+
+const CATEGORY_TABS: Array<{ key: CategoryKey; label: string }> = [
+    { key: 'for-you', label: 'For You' },
+    { key: 'top', label: 'Top Stories' },
+    { key: 'business', label: 'Business' },
+    { key: 'tech', label: 'Tech' },
+    { key: 'finance', label: 'Finance' },
+    { key: 'federal', label: 'Federal' },
+    { key: 'dmv', label: 'DMV' },
+];
+
+const MARKET_INDICES = [
+    { name: 'S&P 500', value: '5,278.20', change: '+1.24%' },
+    { name: 'Nasdaq', value: '16,735.02', change: '+1.68%' },
+    { name: 'Dow Jones', value: '38,872.10', change: '+0.91%' },
+];
 
 export default function NewsfeedPage() {
     const [articles, setArticles] = useState<Article[]>([]);
@@ -58,16 +83,13 @@ export default function NewsfeedPage() {
     const [topics, setTopics] = useState<Topic[]>([]);
     const [selectedSourceFilter, setSelectedSourceFilter] = useState<string | null>(null);
     const [selectedTopicFilter, setSelectedTopicFilter] = useState<string | null>(null);
+    const [activeCategory, setActiveCategory] = useState<CategoryKey>('for-you');
 
     useEffect(() => {
         checkPreferences();
         loadSources();
         loadTopics();
     }, []);
-
-    useEffect(() => {
-        loadArticles();
-    }, [currentDate, filter, selectedSourceFilter, selectedTopicFilter]);
 
     const checkPreferences = async () => {
         try {
@@ -108,7 +130,7 @@ export default function NewsfeedPage() {
         }
     };
 
-    const loadArticles = async () => {
+    const loadArticles = useCallback(async () => {
         try {
             setLoading(true);
             const dateStr = currentDate.toISOString().split('T')[0];
@@ -136,7 +158,11 @@ export default function NewsfeedPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [currentDate, filter, selectedSourceFilter, selectedTopicFilter]);
+
+    useEffect(() => {
+        loadArticles();
+    }, [loadArticles]);
 
     const updateArticleTopics = async () => {
         try {
@@ -214,10 +240,6 @@ export default function NewsfeedPage() {
         updateArticleAction(article.id, { is_archived: !article.user_action.is_archived });
     };
 
-    const handleSummaryLengthChange = (article: Article, length: number) => {
-        updateArticleAction(article.id, { preferred_summary_length: length });
-    };
-
     const getSummaryText = (summary: ArticleSummary | null, length: number): string => {
         if (!summary) return '';
         const key = `paragraphs_${length}` as keyof ArticleSummary;
@@ -239,169 +261,99 @@ export default function NewsfeedPage() {
         return date.toLocaleDateString();
     };
 
-    const getTopicName = (topicId: string): string => {
-        const topic = topics.find(t => t.id === topicId);
-        return topic?.display_name || topic?.name || 'Uncategorized';
-    };
-
-    // Group articles by topic
-    const groupArticlesByTopic = (articles: Article[]) => {
-        const grouped: Record<string, Article[]> = {};
-        const uncategorized: Article[] = [];
-
-        articles.forEach(article => {
-            if (article.topic_ids && article.topic_ids.length > 0) {
-                // Use the first topic for grouping
-                const topicId = article.topic_ids[0];
-                if (!grouped[topicId]) {
-                    grouped[topicId] = [];
-                }
-                grouped[topicId].push(article);
-            } else {
-                uncategorized.push(article);
-            }
-        });
-
-        return { grouped, uncategorized };
-    };
-
     // Note: Filtering is now done server-side via API query params
     // This client-side filter is a backup, but the API should handle it
+    const expandedTopicFilterIds = useMemo(() => {
+        if (!selectedTopicFilter) return null;
+        const selectedTopicName = topics.find((topic) => topic.id === selectedTopicFilter)?.name;
+        if (selectedTopicName === 'federal_workforce' || selectedTopicName === 'fed_gov') {
+            return topics
+                .filter((topic) => topic.name === 'federal_workforce' || topic.name === 'fed_gov')
+                .map((topic) => topic.id);
+        }
+        return [selectedTopicFilter];
+    }, [selectedTopicFilter, topics]);
+
     const filteredArticles = articles.filter(article => {
         // Double-check filters on client side (backup)
         if (selectedSourceFilter && article.source.id !== selectedSourceFilter) {
             return false;
         }
-        if (selectedTopicFilter && (!article.topic_ids || !article.topic_ids.includes(selectedTopicFilter))) {
-            return false;
+        if (selectedTopicFilter) {
+            const allowedTopicIds = expandedTopicFilterIds || [selectedTopicFilter];
+            if (!article.topic_ids || !allowedTopicIds.some((topicId) => article.topic_ids.includes(topicId))) {
+                return false;
+            }
         }
         return true;
     });
 
-    const { grouped, uncategorized } = groupArticlesByTopic(filteredArticles);
-    const topicIds = Object.keys(grouped).sort((a, b) => {
-        const nameA = getTopicName(a);
-        const nameB = getTopicName(b);
-        return nameA.localeCompare(nameB);
-    });
-
-    function renderArticleCard(article: Article) {
-        const summaryLength = article.user_action.preferred_summary_length;
-        const summaryText = getSummaryText(article.summary, summaryLength);
+    function renderArticleCard(article: Article, compact = false) {
+        const preferredLength = article.user_action.preferred_summary_length || 1;
+        const summaryText = getSummaryText(article.summary, preferredLength) || article.description || '';
+        const sourceText = article.source.display_name || 'Source';
+        const saveLabel = article.user_action.is_saved ? 'Unsave article' : 'Save article';
+        const displaySummary = compact ? summaryText : summaryText;
 
         return (
             <article
                 key={article.id}
-                className="rounded-lg border border-slate-800 bg-slate-950 dark:bg-slate-950 p-4 sm:p-6"
+                className={`group rounded-2xl border border-white/10 bg-[#12172A] p-3 ${compact ? '' : 'space-y-3'}`}
             >
-                {/* Header */}
-                <div className="mb-4">
-                    <div className="flex items-start justify-between gap-4 mb-2">
-                        <h2 className="text-lg sm:text-xl font-semibold text-white flex-1">
-                            {article.title}
-                        </h2>
-                    </div>
-                    {/* Source and Topic Tags */}
-                    <div className="flex items-center gap-2 flex-wrap mb-3">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-400/20 text-amber-400 border border-amber-400/30">
-                            {article.source.display_name}
-                        </span>
-                        {article.topic_ids && article.topic_ids.length > 0 && (
-                            <>
-                                {article.topic_ids.map(topicId => {
-                                    const topic = topics.find(t => t.id === topicId);
-                                    return (
-                                        <span
-                                            key={topicId}
-                                            className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-400/20 text-blue-400 border border-blue-400/30"
-                                        >
-                                            {topic?.display_name || topic?.name || 'Unknown'}
-                                        </span>
-                                    );
-                                })}
-                            </>
-                        )}
-                        <span className="text-xs text-slate-400 ml-auto">
-                            {formatTimeAgo(article.publish_time)}
-                        </span>
-                    </div>
-                    {/* Description/Summary from RSS */}
-                    {article.description && (
-                        <p className="text-sm text-slate-300 leading-relaxed mb-3 line-clamp-3">
-                            {article.description}
-                        </p>
-                    )}
-                </div>
-
-                {/* Summary Length Selector */}
-                {article.summary && (
-                    <div className="mb-4">
-                        <div className="flex items-center gap-2 mb-2">
-                            <label className="text-xs text-slate-400">Summary:</label>
-                            <div className="flex gap-1">
-                                {[1, 2, 3, 4, 5].map((length) => (
-                                    <button
-                                        key={length}
-                                        onClick={() => handleSummaryLengthChange(article, length)}
-                                        className={`px-2 py-1 text-xs rounded transition-colors ${
-                                            summaryLength === length
-                                                ? 'bg-amber-400 text-black font-semibold'
-                                                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                                        }`}
-                                    >
-                                        {length}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                        <p className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed">
-                            {summaryText}
-                        </p>
-                    </div>
-                )}
-
-                {/* Why It Matters */}
-                {article.summary?.why_it_matters && (
-                    <div className="mb-4 p-3 rounded-md bg-purple-900/20 border border-purple-500/30">
-                        <h4 className="text-xs font-semibold text-purple-400 mb-1">
-                            Why this matters to me
-                        </h4>
-                        <p className="text-sm text-slate-300">
-                            {article.summary.why_it_matters}
-                        </p>
-                    </div>
-                )}
-
-                {/* Actions */}
-                <div className="flex items-center gap-3 pt-4 border-t border-slate-800">
+                <div className="min-w-0 space-y-2">
                     <a
                         href={article.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex-1 rounded-md bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300 transition-colors text-center"
+                        className="block text-sm font-semibold leading-snug text-slate-100 hover:text-violet-300"
+                        title={article.title}
                     >
-                        Read Full Article
+                        {article.title}
                     </a>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+                        <span className="truncate">{sourceText}</span>
+                        <span>•</span>
+                        <span>{formatTimeAgo(article.publish_time)}</span>
+                    </div>
+                    {displaySummary ? (
+                        <p className="text-xs leading-relaxed text-slate-300">{displaySummary}</p>
+                    ) : null}
+                    {!compact && article.summary?.why_it_matters ? (
+                        <p className="rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-2 text-xs text-violet-200">
+                            Why it matters: {article.summary.why_it_matters}
+                        </p>
+                    ) : null}
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
                     <button
                         onClick={() => handleSaveToggle(article)}
-                        className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                        aria-label={saveLabel}
+                        className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors ${
                             article.user_action.is_saved
-                                ? 'bg-amber-400/20 text-amber-400 border border-amber-400/30'
-                                : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
+                                ? 'border-violet-400/40 bg-violet-500/20 text-violet-200'
+                                : 'border-white/15 bg-white/5 text-slate-300 hover:bg-white/10'
                         }`}
                     >
                         {article.user_action.is_saved ? 'Saved' : 'Save'}
                     </button>
                     <button
                         onClick={() => handleArchiveToggle(article)}
-                        className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                        className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors ${
                             article.user_action.is_archived
-                                ? 'bg-slate-700 text-slate-300 border border-slate-600'
-                                : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
+                                ? 'border-white/25 bg-white/20 text-slate-200'
+                                : 'border-white/15 bg-white/5 text-slate-300 hover:bg-white/10'
                         }`}
                     >
                         Archive
                     </button>
+                    <a
+                        href={article.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-lg border border-white/15 px-2 py-1 text-[11px] font-medium text-slate-200 hover:bg-white/10 hover:text-violet-200"
+                    >
+                        Open
+                    </a>
                 </div>
             </article>
         );
@@ -410,31 +362,9 @@ export default function NewsfeedPage() {
     // Show loading state while checking preferences
     if (preferencesLoading || hasPreferences === null) {
         return (
-            <main className="min-h-screen min-w-0 max-w-full bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
-                <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-black transition-colors">
-                    <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-                        <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-                            <div className="relative h-8 w-8">
-                                <Image src={logo} alt="LevelUpSolutions logo" className="h-full w-full object-contain" fill />
-                            </div>
-                            <div>
-                                <h1 className="text-xl font-semibold text-amber-400">Newsfeed</h1>
-                                <p className="text-xs text-slate-400 mt-0.5">The Daily Edge</p>
-                            </div>
-                        </Link>
-                        <div className="flex items-center gap-2">
-                            <ThemeToggle />
-                            <Link
-                                href="/dashboard"
-                                className="rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 hover:text-amber-300 transition-colors"
-                            >
-                                ← Dashboard
-                            </Link>
-                        </div>
-                    </div>
-                </header>
-                <div className="mx-auto max-w-4xl px-6 py-12 text-center">
-                    <p className="text-slate-600 dark:text-slate-400">Loading...</p>
+            <main className="min-h-screen bg-[#070B17] text-slate-100">
+                <div className="mx-auto flex min-h-screen w-full max-w-md items-center justify-center px-5">
+                    <p className="text-sm text-slate-400">Loading your feed...</p>
                 </div>
             </main>
         );
@@ -443,38 +373,15 @@ export default function NewsfeedPage() {
     // Show setup screen if no preferences are set
     if (hasPreferences === false) {
         return (
-            <main className="min-h-screen min-w-0 max-w-full bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
-                <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-black transition-colors">
-                    <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-                        <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-                            <div className="relative h-8 w-8">
-                                <Image src={logo} alt="LevelUpSolutions logo" className="h-full w-full object-contain" fill />
-                            </div>
-                            <div>
-                                <h1 className="text-xl font-semibold text-amber-400">Newsfeed</h1>
-                                <p className="text-xs text-slate-400 mt-0.5">The Daily Edge</p>
-                            </div>
-                        </Link>
-                        <div className="flex items-center gap-2">
-                            <ThemeToggle />
-                            <Link
-                                href="/dashboard"
-                                className="rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 hover:text-amber-300 transition-colors"
-                            >
-                                ← Dashboard
-                            </Link>
-                        </div>
-                    </div>
-                </header>
-
-                <div className="mx-auto max-w-4xl px-6 py-12 text-center">
-                    <h2 className="text-2xl font-bold mb-4">Get Started</h2>
-                    <p className="text-slate-600 dark:text-slate-400 mb-6">
+            <main className="min-h-screen bg-[#070B17] text-slate-100">
+                <div className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-5 text-center">
+                    <h2 className="mb-4 text-2xl font-bold">Set up your news feed</h2>
+                    <p className="mb-6 text-sm text-slate-400">
                         Select your news sources and topics to personalize your feed
                     </p>
                     <Link
                         href="/newsfeed/settings"
-                        className="inline-block rounded-md bg-amber-400 px-6 py-3 text-sm font-semibold text-black hover:bg-amber-300 transition-colors"
+                        className="inline-block rounded-xl bg-violet-500 px-6 py-3 text-sm font-semibold text-white hover:bg-violet-400"
                     >
                         Set Up Preferences
                     </Link>
@@ -483,214 +390,237 @@ export default function NewsfeedPage() {
         );
     }
 
-    return (
-        <main className="min-h-screen min-w-0 max-w-full bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
-            {/* Header */}
-            <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-black transition-colors sticky top-0 z-10">
-                <div className="mx-auto flex max-w-6xl items-center justify-between px-4 sm:px-6 py-4">
-                    <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-                        <div className="relative h-8 w-8">
-                            <Image src={logo} alt="LevelUpSolutions logo" className="h-full w-full object-contain" fill />
-                        </div>
-                        <div>
-                            <h1 className="text-xl font-semibold text-amber-400">Newsfeed</h1>
-                            <p className="text-xs text-slate-400 mt-0.5">The Daily Edge</p>
-                        </div>
-                    </Link>
-                    <div className="flex items-center gap-2">
-                        <Link
-                            href="/newsfeed/settings"
-                            className="rounded-md border border-slate-700 bg-slate-900 dark:bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 hover:text-amber-300 transition-colors"
-                        >
-                            Settings
-                        </Link>
-                        <ThemeToggle />
-                        <Link
-                            href="/dashboard"
-                            className="rounded-md border border-slate-700 bg-slate-900 dark:bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 hover:text-amber-300 transition-colors hidden sm:inline-block"
-                        >
-                            ← Dashboard
-                        </Link>
-                    </div>
-                </div>
-            </header>
+    const topicIdToName = new Map(topics.map((topic) => [topic.id, topic.name]));
+    const { rankedArticles, topStories } = rankArticlesForBriefing(filteredArticles, topicIdToName, {
+        topStoriesCount: 5,
+        maxPerSource: 2,
+    });
+    const topStoryIds = new Set(topStories.map((article) => article.id));
 
-            {/* Content */}
-            <div className="mx-auto max-w-4xl px-4 sm:px-6 py-6">
-                {/* Source and Topic Filters */}
-                <div className="mb-6 flex flex-wrap gap-3">
-                    <div className="flex-1 min-w-[200px]">
-                        <label className="block text-xs text-slate-400 mb-1">Filter by Source</label>
+    const sectionedArticles = SECTION_DEFINITIONS.map((section) => {
+        const sectionTopicNames = new Set<string>([...section.topicNames]);
+        const items = rankedArticles.filter((article) => {
+            if (topStoryIds.has(article.id)) {
+                return false;
+            }
+
+            return article.topic_ids.some((topicId) => {
+                const n = topicIdToName.get(topicId);
+                return n != null && sectionTopicNames.has(n);
+            });
+        });
+
+        return { ...section, items: items.slice(0, 8) };
+    }).filter((section) => section.items.length > 0);
+
+    sectionedArticles.sort((a, b) => {
+        const aNames = new Set<string>([...a.topicNames]);
+        const bNames = new Set<string>([...b.topicNames]);
+        const aPriority = PERSONAL_PRIORITY_TOPIC_NAMES.findIndex((topicName) => aNames.has(topicName));
+        const bPriority = PERSONAL_PRIORITY_TOPIC_NAMES.findIndex((topicName) => bNames.has(topicName));
+        const normalizedA = aPriority === -1 ? Number.MAX_SAFE_INTEGER : aPriority;
+        const normalizedB = bPriority === -1 ? Number.MAX_SAFE_INTEGER : bPriority;
+        return normalizedA - normalizedB;
+    });
+
+    const selectedSection = sectionedArticles.find((section) => section.key === activeCategory);
+    const feedPool =
+        activeCategory === 'for-you'
+            ? rankedArticles
+            : activeCategory === 'top'
+                ? topStories
+                : selectedSection?.items || [];
+
+    const heroStory = feedPool[0] || topStories[0] || rankedArticles[0] || null;
+    const compactStories = (feedPool.length > 1 ? feedPool.slice(1) : rankedArticles.slice(1)).slice(0, 5);
+    const feedTitle =
+        activeCategory === 'for-you'
+            ? 'Top For You'
+            : activeCategory === 'top'
+                ? 'Top Stories'
+                : `${CATEGORY_TABS.find((tab) => tab.key === activeCategory)?.label || 'Category'} Highlights`;
+
+    return (
+        <main className="min-h-screen bg-[#070B17] text-slate-100">
+            <div className="mx-auto min-h-screen w-full max-w-md bg-gradient-to-b from-[#0A1022] via-[#0A0F1F] to-[#060A15] pb-20">
+                <header className="sticky top-0 z-20 border-b border-white/10 bg-[#070B17]/95 px-4 pb-3 pt-5 backdrop-blur">
+                    <div className="mb-3 flex items-center justify-between">
+                        <button
+                            type="button"
+                            className="rounded-lg border border-white/15 bg-white/5 p-2 text-slate-200 hover:bg-white/10"
+                            aria-label="Open dashboard"
+                            onClick={() => window.location.assign('/dashboard')}
+                        >
+                            ☰
+                        </button>
+                        <h1 className="text-lg font-semibold text-slate-100">News</h1>
+                        <div className="flex items-center gap-2">
+                            <Link
+                                href="/newsfeed/settings"
+                                className="rounded-lg border border-violet-400/30 bg-violet-500/20 px-2 py-1 text-[11px] text-violet-200"
+                            >
+                                Settings
+                            </Link>
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/10 text-xs font-semibold">
+                                LU
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="no-scrollbar flex gap-5 overflow-x-auto pb-1 text-sm">
+                        {CATEGORY_TABS.map((tab) => {
+                            const active = activeCategory === tab.key;
+                            return (
+                                <button
+                                    key={tab.key}
+                                    type="button"
+                                    onClick={() => setActiveCategory(tab.key)}
+                                    className={`whitespace-nowrap border-b-2 pb-2 transition-colors ${
+                                        active ? 'border-violet-500 text-violet-300' : 'border-transparent text-slate-400'
+                                    }`}
+                                >
+                                    {tab.label}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </header>
+
+                <div className="space-y-4 px-3 py-4">
+                    <div className="flex items-center justify-between text-xs">
+                        <button
+                            onClick={() => navigateDate('prev')}
+                            className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-slate-300"
+                        >
+                            ← Previous
+                        </button>
+                        <span className="font-medium text-slate-300">{formatDate(currentDate)}</span>
+                        <button
+                            onClick={() => navigateDate('next')}
+                            disabled={currentDate.toDateString() === new Date().toDateString()}
+                            className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-slate-300 disabled:opacity-40"
+                        >
+                            Next →
+                        </button>
+                    </div>
+
+                    <div className="flex gap-2">
                         <select
                             value={selectedSourceFilter || ''}
                             onChange={(e) => setSelectedSourceFilter(e.target.value || null)}
-                            className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+                            className="w-1/2 rounded-lg border border-white/10 bg-[#10172B] px-2.5 py-2 text-xs text-slate-200"
                         >
-                            <option value="">All Sources</option>
-                            {sources.map(source => (
+                            <option value="">All sources</option>
+                            {sources.map((source) => (
                                 <option key={source.id} value={source.id}>
                                     {source.display_name}
                                 </option>
                             ))}
                         </select>
-                    </div>
-                    <div className="flex-1 min-w-[200px]">
-                        <label className="block text-xs text-slate-400 mb-1">Filter by Topic</label>
                         <select
                             value={selectedTopicFilter || ''}
                             onChange={(e) => setSelectedTopicFilter(e.target.value || null)}
-                            className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+                            className="w-1/2 rounded-lg border border-white/10 bg-[#10172B] px-2.5 py-2 text-xs text-slate-200"
                         >
-                            <option value="">All Topics</option>
-                            {topics.map(topic => (
+                            <option value="">All topics</option>
+                            {topics.map((topic) => (
                                 <option key={topic.id} value={topic.id}>
                                     {topic.display_name}
                                 </option>
                             ))}
                         </select>
                     </div>
-                    {(selectedSourceFilter || selectedTopicFilter) && (
-                        <div className="flex items-end">
+
+                    <div className="flex gap-2 rounded-xl border border-white/10 bg-[#10172B] p-1">
+                        {(['feed', 'saved', 'archived'] as Filter[]).map((mode) => (
                             <button
-                                onClick={() => {
-                                    setSelectedSourceFilter(null);
-                                    setSelectedTopicFilter(null);
-                                }}
-                                className="px-4 py-2 text-sm text-slate-400 hover:text-white border border-slate-700 rounded-md hover:bg-slate-800 transition-colors"
+                                key={mode}
+                                type="button"
+                                onClick={() => setFilter(mode)}
+                                className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-medium capitalize ${
+                                    filter === mode ? 'bg-violet-500/25 text-violet-100' : 'text-slate-400'
+                                }`}
                             >
-                                Clear Filters
+                                {mode}
                             </button>
+                        ))}
+                    </div>
+
+                    {loading ? (
+                        <div className="py-10 text-center text-sm text-slate-400">Loading articles...</div>
+                    ) : filteredArticles.length === 0 ? (
+                        <div className="rounded-2xl border border-white/10 bg-[#12172A] px-4 py-8 text-center text-sm text-slate-400">
+                            <p>No articles found for this view.</p>
+                            <Link href="/newsfeed/settings" className="mt-4 inline-block text-violet-300 hover:text-violet-200">
+                                Update preferences
+                            </Link>
                         </div>
+                    ) : (
+                        <>
+                            {heroStory ? (
+                                <section className="rounded-2xl border border-white/10 bg-[#10172B] p-3">
+                                    <div className="mb-2 flex items-center justify-between">
+                                        <h2 className="text-base font-semibold text-slate-100">{feedTitle}</h2>
+                                        <button
+                                            onClick={updateArticleTopics}
+                                            disabled={loading}
+                                            className="rounded-md border border-white/15 px-2 py-1 text-[11px] text-slate-300"
+                                        >
+                                            Refresh
+                                        </button>
+                                    </div>
+                                    {renderArticleCard(heroStory)}
+                                </section>
+                            ) : null}
+
+                            {compactStories.length > 0 ? (
+                                <section className="rounded-2xl border border-white/10 bg-[#10172B] p-3">
+                                    <div className="mb-2 flex items-center justify-between">
+                                        <h3 className="text-base font-semibold text-slate-100">Top Business News</h3>
+                                        <button
+                                            type="button"
+                                            onClick={() => setActiveCategory('top')}
+                                            className="text-xs text-violet-300 hover:text-violet-200"
+                                        >
+                                            View All
+                                        </button>
+                                    </div>
+                                    <div className="space-y-2.5">
+                                        {compactStories.map((article) => renderArticleCard(article, true))}
+                                    </div>
+                                </section>
+                            ) : null}
+
+                            <section className="rounded-2xl border border-white/10 bg-[#10172B] p-3">
+                                <div className="mb-2 flex items-center justify-between">
+                                    <h3 className="text-base font-semibold text-slate-100">Market Snapshot</h3>
+                                    <span className="text-xs text-violet-300">Live</span>
+                                </div>
+                                <div className="rounded-xl border border-white/10 bg-[#0D1325] p-3">
+                                    {MARKET_INDICES.map((index) => (
+                                        <div key={index.name} className="flex items-center justify-between border-b border-white/5 py-2 last:border-b-0">
+                                            <div>
+                                                <p className="text-sm text-slate-200">{index.name}</p>
+                                            </div>
+                                            <div className="text-right">
+                                                <p className="text-sm text-slate-100">{index.value}</p>
+                                                <p className="text-xs text-emerald-400">{index.change}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </section>
+                        </>
                     )}
                 </div>
 
-                {/* Filter Tabs */}
-                <div className="flex gap-2 mb-6 border-b border-slate-200 dark:border-slate-800">
-                    <button
-                        onClick={() => setFilter('feed')}
-                        className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                            filter === 'feed'
-                                ? 'border-amber-400 text-amber-400'
-                                : 'border-transparent text-slate-500 hover:text-slate-300'
-                        }`}
-                    >
-                        Feed
-                    </button>
-                    <button
-                        onClick={() => setFilter('saved')}
-                        className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                            filter === 'saved'
-                                ? 'border-amber-400 text-amber-400'
-                                : 'border-transparent text-slate-500 hover:text-slate-300'
-                        }`}
-                    >
-                        Saved
-                    </button>
-                    <button
-                        onClick={() => setFilter('archived')}
-                        className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                            filter === 'archived'
-                                ? 'border-amber-400 text-amber-400'
-                                : 'border-transparent text-slate-500 hover:text-slate-300'
-                        }`}
-                    >
-                        Archived
-                    </button>
-                </div>
-
-                {/* Date Navigation */}
-                <div className="flex items-center justify-between mb-6">
-                    <button
-                        onClick={() => navigateDate('prev')}
-                        className="rounded-md border border-slate-700 bg-slate-900 dark:bg-slate-900 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-amber-300 transition-colors"
-                    >
-                        ← {formatDate(new Date(new Date(currentDate).setDate(currentDate.getDate() - 1)))}
-                    </button>
-                    <span className="text-lg font-semibold">{formatDate(currentDate)}</span>
-                    <button
-                        onClick={() => navigateDate('next')}
-                        disabled={currentDate.toDateString() === new Date().toDateString()}
-                        className="rounded-md border border-slate-700 bg-slate-900 dark:bg-slate-900 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-amber-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {formatDate(new Date(new Date(currentDate).setDate(currentDate.getDate() + 1)))} →
-                    </button>
-                </div>
-
-                {/* Articles List */}
-                {loading ? (
-                    <div className="text-center py-12 text-slate-500">Loading articles...</div>
-                ) : filteredArticles.length === 0 ? (
-                    <div className="text-center py-12 text-slate-500">
-                        <p className="mb-4">
-                            {selectedSourceFilter || selectedTopicFilter
-                                ? "No articles match the selected filters."
-                                : `No articles found for ${formatDate(currentDate)}`
-                            }
-                        </p>
-                        {filter === 'feed' && (
-                            <Link
-                                href="/newsfeed/settings"
-                                className="inline-block mt-4 rounded-md bg-amber-400 px-6 py-3 text-sm font-semibold text-black hover:bg-amber-300 transition-colors"
-                            >
-                                Update Preferences
-                            </Link>
-                        )}
-                    </div>
-                ) : (
-                    <div className="space-y-8">
-                        {/* Show update topics button if many articles are uncategorized */}
-                        {uncategorized.length > 0 && uncategorized.length > filteredArticles.length * 0.3 && (
-                            <div className="mb-6 p-4 rounded-lg border border-amber-400/30 bg-amber-400/10">
-                                <p className="text-sm text-amber-300 mb-3">
-                                    {uncategorized.length} articles are uncategorized. Click below to automatically assign topics based on article titles.
-                                </p>
-                                <button
-                                    onClick={updateArticleTopics}
-                                    disabled={loading}
-                                    className="rounded-md bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300 transition-colors disabled:opacity-50"
-                                >
-                                    {loading ? 'Updating...' : 'Update Article Topics'}
-                                </button>
-                            </div>
-                        )}
-                        
-                        {/* Grouped by Topic */}
-                        {/* Grouped by Topic */}
-                        {topicIds.map(topicId => {
-                            const topicArticles = grouped[topicId];
-                            if (!topicArticles || topicArticles.length === 0) return null;
-
-                            return (
-                                <div key={topicId} className="space-y-4">
-                                    <h2 className="text-xl font-bold text-white border-b border-slate-700 pb-2">
-                                        {getTopicName(topicId)}
-                                        <span className="ml-2 text-sm font-normal text-slate-400">
-                                            ({topicArticles.length} {topicArticles.length === 1 ? 'article' : 'articles'})
-                                        </span>
-                                    </h2>
-                                    <div className="space-y-4">
-                                        {topicArticles.map((article) => renderArticleCard(article))}
-                                    </div>
-                                </div>
-                            );
-                        })}
-
-                        {/* Uncategorized Articles */}
-                        {uncategorized.length > 0 && (
-                            <div className="space-y-4">
-                                <h2 className="text-xl font-bold text-white border-b border-slate-700 pb-2">
-                                    Uncategorized
-                                    <span className="ml-2 text-sm font-normal text-slate-400">
-                                        ({uncategorized.length} {uncategorized.length === 1 ? 'article' : 'articles'})
-                                    </span>
-                                </h2>
-                                <div className="space-y-4">
-                                    {uncategorized.map((article) => renderArticleCard(article))}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                )}
+                <nav className="fixed bottom-0 left-1/2 z-20 flex w-full max-w-md -translate-x-1/2 items-center justify-around border-t border-white/10 bg-[#070B17]/95 px-3 py-2 text-[11px] text-slate-400 backdrop-blur">
+                    <Link href="/" className="rounded-md px-2 py-1 hover:text-slate-200">Home</Link>
+                    <Link href="/dashboard" className="rounded-md px-2 py-1 hover:text-slate-200">Dashboard</Link>
+                    <button type="button" className="rounded-md px-2 py-1 text-violet-300">News</button>
+                    <button type="button" onClick={() => setFilter('saved')} className="rounded-md px-2 py-1 hover:text-slate-200">Saved</button>
+                    <button type="button" onClick={() => setSelectedTopicFilter(null)} className="rounded-md px-2 py-1 hover:text-slate-200">Search</button>
+                </nav>
             </div>
         </main>
     );

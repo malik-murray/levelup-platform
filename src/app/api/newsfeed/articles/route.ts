@@ -48,6 +48,7 @@ export async function GET(request: NextRequest) {
         const filter = searchParams.get('filter') || 'feed'; // feed, saved, archived
         const sourceIdFilter = searchParams.get('sourceId');
         const topicIdFilter = searchParams.get('topicId');
+        let expandedTopicFilterIds: string[] | null = null;
 
         // Get user preferences
         const { data: preferences, error: prefError } = await supabase
@@ -62,6 +63,26 @@ export async function GET(request: NextRequest) {
 
         const selectedSourceIds = preferences?.selected_source_ids || [];
         const selectedTopicIds = preferences?.selected_topic_ids || [];
+
+        // Expand topic filter aliases so related federal categories remain discoverable.
+        // Example: "federal_workforce" and "fed_gov" should be treated as a shared filter group.
+        if (topicIdFilter) {
+            const { data: selectedTopic } = await supabase
+                .from('newsfeed_topics')
+                .select('id, name')
+                .eq('id', topicIdFilter)
+                .single();
+
+            if (selectedTopic?.name === 'federal_workforce' || selectedTopic?.name === 'fed_gov') {
+                const { data: federalAliases } = await supabase
+                    .from('newsfeed_topics')
+                    .select('id')
+                    .in('name', ['federal_workforce', 'fed_gov']);
+                expandedTopicFilterIds = (federalAliases || []).map((topic) => topic.id);
+            } else {
+                expandedTopicFilterIds = [topicIdFilter];
+            }
+        }
 
         // Log preferences for debugging
         console.log('User preferences:', {
@@ -163,51 +184,7 @@ export async function GET(request: NextRequest) {
             }).catch(err => console.error('Background topic update failed:', err));
         }
         
-        // Auto-fetch if table is empty or stale
-        if (rawArticleCount === 0) {
-            // Check total articles in table (not filtered by date)
-            const { count: totalCount } = await supabase
-                .from('newsfeed_articles')
-                .select('*', { count: 'exact', head: true });
-            
-            console.log(`⚠️  DIAGNOSTIC: No articles in date range. Total articles in database: ${totalCount || 0}`);
-            
-            // If table is empty or very stale, trigger auto-fetch
-            if (totalCount === 0 || (totalCount || 0) < 10) {
-                console.log('🔄 Auto-fetching articles from RSS feeds...');
-                
-                try {
-                    // Import dynamically to avoid circular dependencies
-                    const { ingestArticlesFromSources } = await import('@/lib/newsfeed/articleIngestion');
-                    
-                    // Fetch from selected sources if available, otherwise all active sources
-                    const fetchSourceIds = selectedSourceIds.length > 0 ? selectedSourceIds : undefined;
-                    const fetchResult = await ingestArticlesFromSources(fetchSourceIds);
-                    
-                    console.log('✅ Auto-fetch complete:', {
-                        sourcesProcessed: fetchResult.sourcesProcessed,
-                        articlesFetched: fetchResult.totalArticlesFetched,
-                        articlesInserted: fetchResult.totalArticlesInserted,
-                    });
-                    
-                    // Re-query articles after fetch
-                    const refreshResult = await executeQuery();
-                    
-                    if (!refreshResult.error && refreshResult.data) {
-                        articlesData = refreshResult.data;
-                        const newCount = refreshResult.data.length || 0;
-                        console.log(`✅ Refreshed: Found ${newCount} articles after auto-fetch`);
-                    } else if (refreshResult.error) {
-                        console.error('Error re-querying after fetch:', refreshResult.error);
-                    }
-                } catch (fetchError) {
-                    console.error('❌ Auto-fetch failed:', fetchError);
-                    // Continue with empty results rather than failing the request
-                }
-            } else {
-                console.log(`⚠️  DIAGNOSTIC: ${totalCount} articles exist but none in date range ${startDate.toISOString()} to ${endDate.toISOString()}`);
-            }
-        }
+        // Ingestion is intentionally decoupled from this read path for fast response times.
 
         // Filter by topics/sources using OR logic
         // Article matches if:
@@ -225,7 +202,8 @@ export async function GET(request: NextRequest) {
                 // PRIORITY 1: Client-side filters (from UI dropdowns) take precedence
                 // If topic filter is set, article MUST match that topic
                 if (topicIdFilter) {
-                    if (!articleTopics.includes(topicIdFilter)) {
+                    const allowedTopicIds = expandedTopicFilterIds || [topicIdFilter];
+                    if (!allowedTopicIds.some((topicId: string) => articleTopics.includes(topicId))) {
                         return false; // Reject if doesn't match topic filter
                     }
                 }
@@ -348,6 +326,43 @@ export async function GET(request: NextRequest) {
                 },
             };
         });
+
+        // Apply intelligence-layer ranking if analysis exists.
+        if (transformedArticles.length > 0) {
+            const transformedIds = transformedArticles.map((article: any) => article.id);
+            const { data: rankingRows, error: rankingError } = await supabase
+                .from('newsfeed_top_story_rankings')
+                .select('article_id, rank_position, final_score')
+                .in('article_id', transformedIds);
+
+            if (rankingError) {
+                console.warn('Ranking table unavailable, using publish_time ordering:', rankingError.message);
+            }
+
+            const rankingMap = new Map(
+                (rankingRows || []).map((row) => [
+                    row.article_id,
+                    {
+                        rank_position: row.rank_position ?? Number.MAX_SAFE_INTEGER,
+                        final_score: row.final_score ?? 0,
+                    },
+                ])
+            );
+
+            transformedArticles.sort((a: any, b: any) => {
+                const rankA = rankingMap.get(a.id);
+                const rankB = rankingMap.get(b.id);
+                if (rankA && rankB) {
+                    if (rankA.rank_position !== rankB.rank_position) {
+                        return rankA.rank_position - rankB.rank_position;
+                    }
+                    return rankB.final_score - rankA.final_score;
+                }
+                if (rankA) return -1;
+                if (rankB) return 1;
+                return new Date(b.publish_time).getTime() - new Date(a.publish_time).getTime();
+            });
+        }
 
         console.log('Returning articles to client:', {
             count: transformedArticles.length,
