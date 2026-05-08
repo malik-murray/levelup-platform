@@ -60,7 +60,7 @@ export async function fetchRSSFeed(feedUrl: string): Promise<RSSArticle[]> {
             // Extract image URL from content or enclosure
             let imageUrl: string | undefined;
             if (item.enclosures && item.enclosures.length > 0) {
-                const imageEnclosure = item.enclosures.find((enc) => {
+                const imageEnclosure = item.enclosures.find((enc: unknown) => {
                     const enclosure = enc as { type?: string; url?: string };
                     return enclosure.type?.startsWith('image/');
                 }) as { url?: string } | undefined;
