@@ -1071,17 +1071,19 @@ export default function ReportsPage() {
                                             fontSize: 11,
                                             color: '#e2e8f0',
                                         }}
-                                        formatter={(value: number, name: string) => {
+                                        formatter={(value, name) => {
+                                            const num = Number(value ?? 0);
+                                            const key = String(name ?? '');
                                             const display =
-                                                name === 'net' && value < 0
-                                                    ? `−${moneyFmt.format(Math.abs(value))}`
-                                                    : moneyFmt.format(value);
+                                                key === 'net' && num < 0
+                                                    ? `−${moneyFmt.format(Math.abs(num))}`
+                                                    : moneyFmt.format(num);
                                             const labelMap: Record<string, string> = {
                                                 income: 'Income',
                                                 expenses: 'Expenses',
                                                 net: 'Net',
                                             };
-                                            return [display, labelMap[name] ?? name];
+                                            return [display, labelMap[key] ?? key];
                                         }}
                                     />
                                     <Legend
@@ -1264,14 +1266,18 @@ export default function ReportsPage() {
                                             fontSize: 11,
                                             color: '#e2e8f0',
                                         }}
-                                        formatter={(value: number, _name: string, props: { payload?: { name?: string; txCount?: number } }) => {
+                                        formatter={(value, _name, item) => {
+                                            const num = Number(value ?? 0);
+                                            const payload = item?.payload as
+                                                | { name?: string; txCount?: number }
+                                                | undefined;
                                             const pct =
                                                 grandTotal > 0
-                                                    ? ` (${((value / grandTotal) * 100).toFixed(1)}%)`
+                                                    ? ` (${((num / grandTotal) * 100).toFixed(1)}%)`
                                                     : '';
                                             return [
-                                                `${moneyFmt.format(value)}${pct}`,
-                                                props.payload?.name ?? '',
+                                                `${moneyFmt.format(num)}${pct}`,
+                                                payload?.name ?? '',
                                             ];
                                         }}
                                     />
@@ -1328,7 +1334,7 @@ export default function ReportsPage() {
                                             fontSize: 11,
                                             color: '#e2e8f0',
                                         }}
-                                        formatter={(value: number) => moneyFmt.format(value)}
+                                        formatter={value => moneyFmt.format(Number(value ?? 0))}
                                     />
                                     <Bar
                                         dataKey="total"
@@ -1403,9 +1409,7 @@ export default function ReportsPage() {
                                         fontSize: 11,
                                         color: '#e2e8f0',
                                     }}
-                                    formatter={(value: number) =>
-                                        moneyFmt.format(value)
-                                    }
+                                    formatter={value => moneyFmt.format(Number(value ?? 0))}
                                 />
                                 {buckets.map(b => (
                                     <Bar

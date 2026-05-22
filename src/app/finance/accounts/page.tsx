@@ -660,12 +660,14 @@ export default function AccountsPage() {
             return;
         }
 
-        void learnMerchantMappingFromUserCategory(supabase, {
-            userId: user.id,
-            categoryId: finalCategoryId,
-            name: null,
-            note: (txNote || '').trim() || null,
-        });
+        if (finalCategoryId) {
+            void learnMerchantMappingFromUserCategory(supabase, {
+                userId: user.id,
+                categoryId: finalCategoryId,
+                name: null,
+                note: (txNote || '').trim() || null,
+            });
+        }
 
         const startOfMonth = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
         const endOfMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
