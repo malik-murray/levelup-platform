@@ -20,6 +20,7 @@ import {
 import { getExerciseNamesBySlugs, formatSlugAsTitle } from '@/lib/fitness/exercises';
 import { getWorkoutPlanName } from '@/lib/fitness/workoutPlans';
 import { getProgramScheduleEntryById } from '@/lib/fitness/programEngine';
+import CoachPanel from '@/components/fitness/CoachPanel';
 
 type SessionDetailClientProps = {
     id: string;
@@ -39,6 +40,7 @@ function formatDateTime(value: string | null | undefined): string {
 }
 
 export default function SessionDetailClient({ id }: SessionDetailClientProps) {
+    const aiTrainerEnabled = process.env.NEXT_PUBLIC_FITNESS_AI_TRAINER_ENABLED !== 'false';
     const [session, setSession] = useState<WorkoutSessionWithItems | null | undefined>(undefined);
     const [error, setError] = useState<string | null>(null);
     const [actionError, setActionError] = useState<string | null>(null);
@@ -70,6 +72,17 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
         suggestions: string[];
     } | null>(null);
     const [scheduledInfo, setScheduledInfo] = useState<{ scheduled_date: string; day_index: number } | null>(null);
+    const [coachCue, setCoachCue] = useState<{
+        howTo: string;
+        focusCue: string;
+        motivationCue: string;
+    } | null>(null);
+    const [loadingCoachCue, setLoadingCoachCue] = useState(false);
+    const [coachCueCache, setCoachCueCache] = useState<Record<string, {
+        howTo: string;
+        focusCue: string;
+        motivationCue: string;
+    }>>({});
 
     const formatCountdown = (seconds: number): string => {
         const mins = Math.floor(seconds / 60);
@@ -147,6 +160,42 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                             : 'Failed to save actual performance',
                 },
             }));
+        }
+    };
+
+    const fetchCoachCue = async (
+        moment: 'session_start' | 'exercise_start' | 'pre_last_set' | 'session_finish',
+        payload?: { exerciseName?: string; targetSets?: number; targetRepRange?: string }
+    ) => {
+        if (!aiTrainerEnabled) return;
+        const cacheKey = `${moment}:${payload?.exerciseName ?? ''}:${payload?.targetSets ?? ''}:${payload?.targetRepRange ?? ''}`;
+        const cached = coachCueCache[cacheKey];
+        if (cached) {
+            setCoachCue(cached);
+            return;
+        }
+        setLoadingCoachCue(true);
+        try {
+            const response = await fetch('/api/fitness/ai-coach', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    moment,
+                    sessionName: session?.name ?? 'Workout session',
+                    exerciseName: payload?.exerciseName,
+                    targetSets: payload?.targetSets,
+                    targetRepRange: payload?.targetRepRange,
+                }),
+            });
+            const json = (await response.json()) as {
+                howTo: string;
+                focusCue: string;
+                motivationCue: string;
+            };
+            setCoachCue(json);
+            setCoachCueCache((prev) => ({ ...prev, [cacheKey]: json }));
+        } finally {
+            setLoadingCoachCue(false);
         }
     };
 
@@ -247,6 +296,15 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                     } catch {
                         if (!cancelled) setAdaptiveInsights(null);
                     }
+                }
+                if (data?.items?.length) {
+                    const first = data.items[0];
+                    const firstName = formatSlugAsTitle(first.exercise_slug);
+                    void fetchCoachCue('session_start', {
+                        exerciseName: firstName,
+                        targetSets: first.target_sets,
+                        targetRepRange: first.target_rep_range,
+                    });
                 }
             } catch (e) {
                 console.error('Error loading workout session detail:', e);
@@ -365,6 +423,10 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
         ? exerciseNames[restTimerSourceItem.exercise_slug] ??
           formatSlugAsTitle(restTimerSourceItem.exercise_slug)
         : null;
+    const leadItem = session.items[0];
+    const leadExerciseName = leadItem
+        ? exerciseNames[leadItem.exercise_slug] ?? formatSlugAsTitle(leadItem.exercise_slug)
+        : 'your next movement';
 
     return (
         <div className="space-y-6 pb-8">
@@ -431,6 +493,7 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                                     const result = await completeWorkoutSession(session.id, supabase);
                                     setSession({ ...session, ...result.session });
                                     setAdaptiveUpdate(result.adaptation);
+                                    void fetchCoachCue('session_finish');
                                 } catch (e) {
                                     console.error('Complete session error:', e);
                                     setActionError(
@@ -519,6 +582,28 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                     {helperLine}
                 </p>
             </section>
+            <CoachPanel
+                title="Coach LevelUp"
+                howTo={coachCue?.howTo ?? `For ${leadExerciseName}, control the lowering phase, keep your breathing steady, and move with full range you can own.`}
+                focusCue={coachCue?.focusCue ?? `Hit your target of ${leadItem?.target_sets ?? 3} sets with clean reps before chasing speed or load.`}
+                motivationCue={coachCue?.motivationCue ?? 'Stack one quality set at a time. Finish strong and trust your consistency.'}
+            />
+            <div className="mt-[-16px]">
+                <button
+                    type="button"
+                    disabled={loadingCoachCue}
+                    onClick={() =>
+                        fetchCoachCue('exercise_start', {
+                            exerciseName: leadExerciseName,
+                            targetSets: leadItem?.target_sets,
+                            targetRepRange: leadItem?.target_rep_range,
+                        })
+                    }
+                    className="rounded-md border border-amber-500/50 px-3 py-1 text-xs font-medium text-amber-300 hover:bg-amber-950/30 disabled:opacity-60"
+                >
+                    {loadingCoachCue ? 'Refreshing coach cue…' : 'Refresh coach cue'}
+                </button>
+            </div>
 
             {adaptiveInsights && (
                 <section className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">

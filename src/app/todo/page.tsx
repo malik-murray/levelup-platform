@@ -19,7 +19,47 @@ type TodoItem = {
   created_at: string | null;
 };
 
+type DoneCategory = 'habit' | 'priority' | 'to-do';
+
+type DoneDateFilter = '' | 'all' | 'today' | 'this-week' | 'this-month';
+type DoneSort = '' | 'newest' | 'oldest';
+
+type DoneItem = {
+  id: string;
+  title: string;
+  category: DoneCategory;
+  date: string;
+  completed_at: string | null;
+};
+
 const normalizeTodoTitle = (title: string) => title.trim().replace(/\s+/g, ' ').toLowerCase();
+
+const startOfDay = (value: Date) => {
+  const next = new Date(value);
+  next.setHours(0, 0, 0, 0);
+  return next;
+};
+
+const getDoneItemDateString = (item: DoneItem) => item.completed_at?.slice(0, 10) ?? item.date;
+
+const getDoneItemTimeMs = (item: DoneItem) => {
+  const timestamp = item.completed_at ?? `${item.date}T00:00:00`;
+  const value = new Date(timestamp).getTime();
+  return Number.isNaN(value) ? 0 : value;
+};
+
+const formatDoneItemTimestamp = (item: DoneItem) => {
+  const value = new Date(item.completed_at ?? `${item.date}T00:00:00`);
+  if (Number.isNaN(value.getTime())) return item.date;
+  return value.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+};
 
 function IconMenu() {
   return (
@@ -33,10 +73,15 @@ export default function TodoPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [doneItems, setDoneItems] = useState<DoneItem[]>([]);
   const [newTodoTitle, setNewTodoTitle] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [assignOpenById, setAssignOpenById] = useState<Record<string, boolean>>({});
   const [assignDateById, setAssignDateById] = useState<Record<string, string>>({});
+  const [activeTab, setActiveTab] = useState<'todo' | 'done'>('todo');
+  const [doneCategoryFilter, setDoneCategoryFilter] = useState<'' | 'all' | DoneCategory>('');
+  const [doneDateFilter, setDoneDateFilter] = useState<DoneDateFilter>('');
+  const [doneSort, setDoneSort] = useState<DoneSort>('');
 
   const todayString = useMemo(() => formatDate(new Date()), []);
 
@@ -63,10 +108,10 @@ export default function TodoPage() {
 
   useEffect(() => {
     if (!userId) return;
-    void loadTodos(userId);
+    void loadData(userId);
   }, [userId]);
 
-  const loadTodos = async (activeUserId: string) => {
+  const loadData = async (activeUserId: string) => {
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -130,8 +175,71 @@ export default function TodoPage() {
         nextAssignDates[todo.id] = todo.date;
       });
       setAssignDateById(nextAssignDates);
+
+      const [{ data: completedTodos, error: completedTodosError }, { data: completedPriorities, error: completedPrioritiesError }, { data: completedHabits, error: completedHabitsError }] =
+        await Promise.all([
+          supabase
+            .from('habit_daily_todos')
+            .select('id, title, date, completed_at')
+            .eq('user_id', activeUserId)
+            .eq('is_done', true)
+            .order('completed_at', { ascending: false, nullsFirst: false })
+            .order('date', { ascending: false }),
+          supabase
+            .from('habit_daily_priorities')
+            .select('id, text, date, completed_at')
+            .eq('user_id', activeUserId)
+            .eq('completed', true)
+            .order('completed_at', { ascending: false, nullsFirst: false })
+            .order('date', { ascending: false }),
+          supabase
+            .from('habit_daily_entries')
+            .select('id, date, checked_at, habit_template:habit_templates(name)')
+            .eq('user_id', activeUserId)
+            .eq('status', 'checked')
+            .order('checked_at', { ascending: false, nullsFirst: false })
+            .order('date', { ascending: false }),
+        ]);
+
+      if (completedTodosError) throw completedTodosError;
+      if (completedPrioritiesError) throw completedPrioritiesError;
+      if (completedHabitsError) throw completedHabitsError;
+
+      const mappedCompletedTodos: DoneItem[] = (completedTodos ?? []).map((item) => ({
+        id: `todo-${item.id}`,
+        title: item.title,
+        category: 'to-do',
+        date: item.date,
+        completed_at: item.completed_at ?? null,
+      }));
+
+      const mappedCompletedPriorities: DoneItem[] = (completedPriorities ?? []).map((item) => ({
+        id: `priority-${item.id}`,
+        title: item.text,
+        category: 'priority',
+        date: item.date,
+        completed_at: item.completed_at ?? null,
+      }));
+
+      const mappedCompletedHabits: DoneItem[] = (completedHabits ?? []).map((item) => {
+        const ht = item.habit_template as { name: string } | { name: string }[] | null | undefined;
+        const templateName =
+          ht == null ? null : Array.isArray(ht) ? (ht[0]?.name ?? null) : ht.name;
+        return {
+          id: `habit-${item.id}`,
+          title: templateName ?? 'Habit',
+          category: 'habit' as const,
+          date: item.date,
+          completed_at: item.checked_at ?? null,
+        };
+      });
+
+      const mergedDoneItems = [...mappedCompletedTodos, ...mappedCompletedPriorities, ...mappedCompletedHabits].sort(
+        (a, b) => getDoneItemTimeMs(b) - getDoneItemTimeMs(a)
+      );
+      setDoneItems(mergedDoneItems);
     } catch (err) {
-      console.error('Error loading backlog to-dos:', err);
+      console.error('Error loading to-do page data:', err);
     } finally {
       setLoading(false);
     }
@@ -157,7 +265,7 @@ export default function TodoPage() {
       });
       if (error) throw error;
       setNewTodoTitle('');
-      await loadTodos(userId);
+      await loadData(userId);
     } catch (err) {
       console.error('Error adding to-do:', err);
     }
@@ -173,7 +281,7 @@ export default function TodoPage() {
         .eq('id', todo.id)
         .eq('user_id', userId);
       if (error) throw error;
-      setTodos((prev) => prev.filter((item) => item.id !== todo.id));
+      await loadData(userId);
     } catch (err) {
       console.error('Error marking to-do complete:', err);
     }
@@ -197,7 +305,7 @@ export default function TodoPage() {
           .eq('id', todoId)
           .eq('user_id', userId);
         if (error) throw error;
-        await loadTodos(userId);
+        await loadData(userId);
       } catch (err) {
         console.error('Error removing duplicate after rename:', err);
       }
@@ -215,6 +323,31 @@ export default function TodoPage() {
       console.error('Error renaming to-do item:', err);
     }
   };
+
+  const filteredDoneItems = useMemo(() => {
+    const todayStart = startOfDay(new Date());
+    const weekStart = new Date(todayStart);
+    weekStart.setDate(todayStart.getDate() - todayStart.getDay());
+    const monthStart = new Date(todayStart.getFullYear(), todayStart.getMonth(), 1);
+
+    return doneItems
+      .filter((item) => {
+        if (doneCategoryFilter !== '' && doneCategoryFilter !== 'all' && item.category !== doneCategoryFilter) return false;
+        if (doneDateFilter === '' || doneDateFilter === 'all') return true;
+
+        const itemDate = new Date(`${getDoneItemDateString(item)}T00:00:00`);
+        if (Number.isNaN(itemDate.getTime())) return false;
+
+        if (doneDateFilter === 'today') return itemDate.getTime() === todayStart.getTime();
+        if (doneDateFilter === 'this-week') return itemDate >= weekStart && itemDate <= todayStart;
+        if (doneDateFilter === 'this-month') return itemDate >= monthStart && itemDate <= todayStart;
+        return true;
+      })
+      .sort((a, b) => {
+        const diff = getDoneItemTimeMs(a) - getDoneItemTimeMs(b);
+        return doneSort === 'oldest' ? diff : -diff;
+      });
+  }, [doneItems, doneCategoryFilter, doneDateFilter, doneSort]);
 
   const handleAssignDate = async (todoId: string) => {
     if (!userId) return;
@@ -236,7 +369,7 @@ export default function TodoPage() {
 
   if (loading) {
     return (
-      <main className={`${outfit.className} flex min-h-dvh items-center justify-center bg-[#010205] text-white`}>
+      <main className={`${outfit.className} flex min-h-dvh items-center justify-center bg-white text-slate-900 transition-colors dark:bg-[#010205] dark:text-white`}>
         <div className="text-center">
           <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-[#ff9d00] border-t-transparent" />
           <p className="text-sm text-slate-400">Loading to-dos...</p>
@@ -250,7 +383,11 @@ export default function TodoPage() {
       <AppSidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       <div className="relative flex min-w-0 flex-1 flex-col overflow-x-hidden">
-        <div className="pointer-events-none absolute inset-0" aria-hidden>
+        <div
+          className="pointer-events-none absolute inset-0 bg-gradient-to-b from-slate-800/95 via-slate-900 to-slate-950/95 dark:hidden"
+          aria-hidden
+        />
+        <div className="pointer-events-none absolute inset-0 hidden dark:block" aria-hidden>
           <div
             className="absolute inset-0"
             style={{
@@ -291,98 +428,209 @@ export default function TodoPage() {
 
             <div className="mx-auto mt-5 w-full max-w-2xl lg:max-w-4xl">
               <h1
-                className="text-center text-2xl font-extrabold tracking-tight text-[#a7f3d0] sm:text-3xl"
-                style={{ textShadow: '0 0 16px rgba(110,231,183,0.25)' }}
+                className="text-center text-2xl font-extrabold tracking-tight text-[#ffe066] sm:text-3xl"
+                style={{ textShadow: '0 0 16px rgba(255,157,0,0.35)' }}
               >
                 To-Do Backlog
               </h1>
               <p className="mt-2 text-center text-sm text-slate-300">
                 Keep every unfinished task in one place, then assign each item to a specific day when you are ready.
               </p>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('todo')}
+                  className={`rounded-md border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${
+                    activeTab === 'todo'
+                      ? 'border-[#ff9d00]/70 bg-[#ff9d00]/20 text-[#ffe066]'
+                      : 'border-[#ff9d00]/35 bg-black/20 text-slate-300 hover:bg-[#ff9d00]/10'
+                  }`}
+                >
+                  To Do
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('done')}
+                  className={`rounded-md border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${
+                    activeTab === 'done'
+                      ? 'border-[#ff9d00]/70 bg-[#ff9d00]/20 text-[#ffe066]'
+                      : 'border-[#ff9d00]/35 bg-black/20 text-slate-300 hover:bg-[#ff9d00]/10'
+                  }`}
+                >
+                  Done
+                </button>
+              </div>
             </div>
           </header>
 
           <main className="min-w-0 flex-1 overflow-auto pb-20">
             <div className="mx-auto w-full max-w-2xl px-3 py-4 sm:px-4 lg:max-w-4xl">
-              <section className={`${neon.panel} p-3`}>
-                <div className="mb-3 flex items-start gap-2">
-                  <textarea
-                    value={newTodoTitle}
-                    onChange={(e) => setNewTodoTitle(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        void handleAddTodo();
-                      }
-                    }}
-                    placeholder="Add something to your backlog..."
-                    rows={1}
-                    className="min-h-[2.1rem] flex-1 resize-none break-words overflow-y-auto rounded-md border border-[#ff9d00]/25 bg-[#03060f]/90 px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void handleAddTodo()}
-                    className="shrink-0 rounded-md border border-[#ff9d00]/55 bg-[#ff9d00]/10 px-2.5 py-1.5 text-xs font-semibold text-[#ffe066] transition hover:bg-[#ff9d00]/20"
-                  >
-                    Add
-                  </button>
-                </div>
+              <section className={`${neon.panel} p-2.5`}>
+                {activeTab === 'todo' ? (
+                  <>
+                    <div className="mb-2 flex items-start gap-1.5">
+                      <textarea
+                        value={newTodoTitle}
+                        onChange={(e) => setNewTodoTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            void handleAddTodo();
+                          }
+                        }}
+                        placeholder="Add something to your backlog..."
+                        rows={1}
+                        className="min-h-[1.8rem] flex-1 resize-none break-words overflow-y-auto rounded-md border border-[#ff9d00]/25 bg-[#03060f]/90 px-2 py-1 text-[11px] text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void handleAddTodo()}
+                        className="shrink-0 rounded-md border border-[#ff9d00]/55 bg-[#ff9d00]/10 px-2 py-1 text-[11px] font-semibold text-[#ffe066] transition hover:bg-[#ff9d00]/20"
+                      >
+                        Add
+                      </button>
+                    </div>
 
-                {todos.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-[#ff9d00]/35 bg-black/20 px-4 py-6 text-center text-sm text-slate-300">
-                    Nothing pending right now. Add new items above to keep your task brain clear.
-                  </p>
+                    {todos.length === 0 ? (
+                      <p className="rounded-lg border border-dashed border-[#ff9d00]/35 bg-black/20 px-4 py-6 text-center text-sm text-slate-300">
+                        Nothing pending right now. Add new items above to keep your task brain clear.
+                      </p>
+                    ) : (
+                      <ol className="space-y-1 min-w-0">
+                        {todos.map((todo, index) => (
+                          <li key={todo.id} className="space-y-1 rounded-md border border-[#ff9d00]/20 bg-[#03060f]/70 p-1.5">
+                            <div className="flex min-w-0 items-center gap-1">
+                              <span className="shrink-0 text-[11px] font-semibold text-slate-300">{index + 1}.</span>
+                              <input
+                                type="checkbox"
+                                checked={todo.is_done}
+                                onChange={() => void handleToggleTodo(todo)}
+                                className="h-3.5 w-3.5 shrink-0 rounded border-[#ff9d00]/50 text-[#ff9d00] focus:ring-[#ff9d00]/40"
+                              />
+                              <textarea
+                                value={todo.title}
+                                onChange={(e) => {
+                                  const nextTitle = e.target.value;
+                                  setTodos((prev) => prev.map((item) => (item.id === todo.id ? { ...item, title: nextTitle } : item)));
+                                }}
+                                onBlur={(e) => void handleTitleBlur(todo.id, e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
+                                rows={1}
+                                className="min-h-[1.8rem] flex-1 resize-none break-words overflow-y-auto rounded-md border border-[#ff9d00]/25 bg-[#03060f]/90 px-2 py-1 text-[11px] text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setAssignOpenById((prev) => ({ ...prev, [todo.id]: !prev[todo.id] }))}
+                                className="rounded-md border border-[#ff9d00]/45 bg-black/30 px-1.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-[#ffe066] transition hover:bg-[#ff9d00]/15"
+                              >
+                                Assign
+                              </button>
+                            </div>
+
+                            {assignOpenById[todo.id] ? (
+                              <div className="flex flex-wrap items-center gap-1 pl-4.5 pt-0.5">
+                                <input
+                                  type="date"
+                                  value={assignDateById[todo.id] ?? todo.date}
+                                  onChange={(e) => setAssignDateById((prev) => ({ ...prev, [todo.id]: e.target.value }))}
+                                  className="rounded-md border border-[#ff9d00]/35 bg-[#03060f]/90 px-1.5 py-0.5 text-[11px] text-white focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => void handleAssignDate(todo.id)}
+                                  className="rounded-md border border-emerald-400/45 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200 transition hover:bg-emerald-500/20"
+                                >
+                                  Save day
+                                </button>
+                              </div>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </>
                 ) : (
-                  <ol className="list-decimal list-inside space-y-1.5 min-w-0">
-                    {todos.map((todo) => (
-                      <li key={todo.id} className="space-y-1.5 rounded-md border border-[#ff9d00]/20 bg-[#03060f]/70 p-2">
-                        <div className="flex min-w-0 items-start gap-1.5">
-                          <input
-                            type="checkbox"
-                            checked={todo.is_done}
-                            onChange={() => void handleToggleTodo(todo)}
-                            className="mt-1.5 h-4 w-4 shrink-0 rounded border-[#ff9d00]/50 text-[#ff9d00] focus:ring-[#ff9d00]/40"
-                          />
-                          <textarea
-                            value={todo.title}
-                            onChange={(e) => {
-                              const nextTitle = e.target.value;
-                              setTodos((prev) => prev.map((item) => (item.id === todo.id ? { ...item, title: nextTitle } : item)));
-                            }}
-                            onBlur={(e) => void handleTitleBlur(todo.id, e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
-                            rows={1}
-                            className="min-h-[2.1rem] flex-1 resize-none break-words overflow-y-auto rounded-md border border-[#ff9d00]/25 bg-[#03060f]/90 px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setAssignOpenById((prev) => ({ ...prev, [todo.id]: !prev[todo.id] }))}
-                            className="rounded-md border border-[#ff9d00]/45 bg-black/30 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#ffe066] transition hover:bg-[#ff9d00]/15"
-                          >
-                            Assign
-                          </button>
-                        </div>
+                  <>
+                    <div className="mb-2 flex w-full items-center gap-1.5">
+                      <div className="relative min-w-0 flex-1">
+                        <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-white">
+                          Categories
+                        </span>
+                        <select
+                          value={doneCategoryFilter}
+                          onChange={(e) => setDoneCategoryFilter(e.target.value as '' | 'all' | DoneCategory)}
+                          aria-label="Categories filter"
+                          className="w-full rounded-md border border-[#ff9d00]/35 bg-[#03060f]/90 px-1.5 py-1 pr-5 text-xs text-transparent focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
+                        >
+                          <option value="" disabled>
+                            Categories
+                          </option>
+                          <option value="all">All</option>
+                          <option value="habit">Habit</option>
+                          <option value="priority">Priority</option>
+                          <option value="to-do">To-Do</option>
+                        </select>
+                      </div>
+                      <div className="relative min-w-0 flex-1">
+                        <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-white">
+                          Date
+                        </span>
+                        <select
+                          value={doneDateFilter}
+                          onChange={(e) => setDoneDateFilter(e.target.value as DoneDateFilter)}
+                          aria-label="Date filter"
+                          className="w-full rounded-md border border-[#ff9d00]/35 bg-[#03060f]/90 px-1.5 py-1 pr-5 text-xs text-transparent focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
+                        >
+                          <option value="" disabled>
+                            Date
+                          </option>
+                          <option value="all">All</option>
+                          <option value="today">Today</option>
+                          <option value="this-week">This week</option>
+                          <option value="this-month">This month</option>
+                        </select>
+                      </div>
+                      <div className="relative min-w-0 flex-1">
+                        <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-white">
+                          Sort
+                        </span>
+                        <select
+                          value={doneSort}
+                          onChange={(e) => setDoneSort(e.target.value as DoneSort)}
+                          aria-label="Sort order"
+                          className="w-full rounded-md border border-[#ff9d00]/35 bg-[#03060f]/90 px-1.5 py-1 pr-5 text-xs text-transparent focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
+                        >
+                          <option value="" disabled>
+                            Sort
+                          </option>
+                          <option value="newest">Newest first</option>
+                          <option value="oldest">Oldest first</option>
+                        </select>
+                      </div>
+                    </div>
 
-                        {assignOpenById[todo.id] ? (
-                          <div className="flex flex-wrap items-center gap-1.5 pl-5 pt-0.5">
-                            <input
-                              type="date"
-                              value={assignDateById[todo.id] ?? todo.date}
-                              onChange={(e) => setAssignDateById((prev) => ({ ...prev, [todo.id]: e.target.value }))}
-                              className="rounded-md border border-[#ff9d00]/35 bg-[#03060f]/90 px-2 py-1 text-xs text-white focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => void handleAssignDate(todo.id)}
-                              className="rounded-md border border-emerald-400/45 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-200 transition hover:bg-emerald-500/20"
-                            >
-                              Save day
-                            </button>
-                          </div>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ol>
+                    {filteredDoneItems.length === 0 ? (
+                      <p className="rounded-lg border border-dashed border-[#ff9d00]/35 bg-black/20 px-4 py-6 text-center text-sm text-slate-300">
+                        No completed items match this filter yet.
+                      </p>
+                    ) : (
+                      <ol className="list-decimal list-inside space-y-1 min-w-0">
+                        {filteredDoneItems.map((item) => (
+                          <li key={item.id} className="rounded-md border border-emerald-400/20 bg-[#03060f]/70 p-1.5">
+                            <div className="flex min-w-0 items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="break-words text-[12px] text-white">{item.title}</p>
+                                <p className="mt-0.5 text-[10px] text-slate-400">{formatDoneItemTimestamp(item)}</p>
+                              </div>
+                              <span className="shrink-0 rounded border border-emerald-400/30 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200">
+                                {item.category}
+                              </span>
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </>
                 )}
               </section>
             </div>

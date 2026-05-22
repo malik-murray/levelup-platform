@@ -1,6 +1,6 @@
 /** Shared “space / neon orange” dashboard tokens (mobile mock) */
 export const neon = {
-  pageBg: 'min-h-screen bg-[#010205] text-white antialiased',
+  pageBg: 'min-h-screen bg-white text-slate-900 antialiased transition-colors dark:bg-[#010205] dark:text-white',
   /** Full-width shell card */
   panel:
     'rounded-2xl border-2 border-[#ff9d00]/55 bg-black/40 backdrop-blur-md shadow-[0_0_32px_rgba(255,157,0,0.18),inset_0_0_40px_rgba(255,157,0,0.06)]',

@@ -16,6 +16,14 @@ import { generatePersonalizedStarterPlanForUser } from '@/lib/fitness/personaliz
 import { getCurrentProgramAssignmentForUser } from '@/lib/fitness/programEngine';
 import { getOrCreateScheduledSessionForAssignment } from '@/lib/fitness/programEngine';
 
+type AIStarterItem = {
+    exercise_slug: string;
+    sets: number;
+    rep_range: string;
+    rest_seconds: number;
+    note?: string | null;
+};
+
 /** Sample grid cards for /preview/fitness */
 const PREVIEW_SESSION_FEED: WorkoutSession[] = [
     {
@@ -57,6 +65,25 @@ const PREVIEW_SESSION_FEED: WorkoutSession[] = [
 ];
 
 export default function FitnessPage() {
+    const aiTrainerEnabled = process.env.NEXT_PUBLIC_FITNESS_AI_TRAINER_ENABLED !== 'false';
+    const fetchAIStarterItems = async (): Promise<AIStarterItem[]> => {
+        if (!aiTrainerEnabled) return [];
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return [];
+        const profile = await getFitnessUserProfileForUser(session.user.id, supabase);
+        if (!profile) return [];
+        const response = await fetch('/api/fitness/ai-plan', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ profile }),
+        });
+        if (!response.ok) return [];
+        const json = (await response.json()) as { items?: AIStarterItem[] };
+        return json.items ?? [];
+    };
     const pathname = usePathname();
     const preview = usePreview();
     const isPreview = preview.isPreview || pathname?.startsWith('/preview') === true;
@@ -238,7 +265,13 @@ export default function FitnessPage() {
                                 return;
                             }
                             setFitnessProfile(profile);
-                            const created = await generatePersonalizedStarterPlanForUser(user.id, profile, supabase);
+                            const aiItems = await fetchAIStarterItems();
+                            const created = await generatePersonalizedStarterPlanForUser(
+                                user.id,
+                                profile,
+                                { aiItems },
+                                supabase
+                            );
                             setStarterPlanStatus('success');
                             setStarterPlanId(created.id);
                             setHasWorkoutPlans(true);
@@ -324,9 +357,11 @@ export default function FitnessPage() {
                                         window.location.href = '/login';
                                         return;
                                     }
+                                    const aiItems = await fetchAIStarterItems();
                                     const created = await generatePersonalizedStarterPlanForUser(
                                         user.id,
                                         fitnessProfile,
+                                        { aiItems },
                                         supabase
                                     );
                                     setStarterPlanStatus('success');
@@ -373,9 +408,11 @@ export default function FitnessPage() {
                                         window.location.href = '/login';
                                         return;
                                     }
+                                    const aiItems = await fetchAIStarterItems();
                                     const created = await generatePersonalizedStarterPlanForUser(
                                         user.id,
                                         fitnessProfile,
+                                        { aiItems },
                                         supabase
                                     );
                                     setStarterPlanStatus('success');

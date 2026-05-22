@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { usePathname } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
 import { usePreview } from '@/lib/previewStore';
+import { learnMerchantMappingFromUserCategory } from '@/lib/financial-concierge/categoryEngine';
+import { FinanceDashboardShell } from '@/app/finance/components/FinanceDashboardShell';
 
 console.log('FINANCE PAGE LOADED, URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
 
@@ -64,6 +66,12 @@ type TxRow = {
         | null;
 };
 
+type ChartTxRow = {
+    date: string;
+    amount: number;
+    category: string | null;
+};
+
 export default function FinancePage() {
     const pathname = usePathname();
     const preview = usePreview();
@@ -74,6 +82,7 @@ export default function FinancePage() {
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [budgets, setBudgets] = useState<CategoryBudget[]>([]);
     const [loading, setLoading] = useState(true);
+    const [extendedTx, setExtendedTx] = useState<ChartTxRow[]>([]);
 
     // form state
     const [date, setDate] = useState<string>(() =>
@@ -197,6 +206,7 @@ export default function FinancePage() {
         categories ( id, name )
     `)
             .eq('user_id', user.id)
+            .is('removed_at', null)
             .gte('date', startStr)
             .lt('date', endStr)
             .order('date', { ascending: false });
@@ -266,6 +276,7 @@ export default function FinancePage() {
                 .from('categories')
                 .select('id, name, kind, parent_id, type')
                 .eq('user_id', user.id)
+                .eq('is_archived', false)
                 .order('name');
 
             console.log('FINANCE DEBUG CATEGORIES:', {
@@ -302,6 +313,21 @@ export default function FinancePage() {
                     categoryId: tx.category_id,
                 }));
                 setTransactions(txWithNames);
+
+                const chartStart = new Date(monthDate.getFullYear(), monthDate.getMonth() - 5, 1);
+                const chartEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0);
+                const cs = chartStart.toISOString().slice(0, 10);
+                const ce = chartEnd.toISOString().slice(0, 10);
+                setExtendedTx(
+                    f.transactions
+                        .filter(tx => tx.date >= cs && tx.date <= ce)
+                        .map(tx => ({
+                            date: tx.date,
+                            amount: tx.amount,
+                            category: f.categories.find(c => c.id === tx.category_id)?.name ?? null,
+                        }))
+                );
+
                 setLoading(false);
                 return;
             }
@@ -346,6 +372,7 @@ export default function FinancePage() {
                 .from('categories')
                 .select('id, name, kind, parent_id, type')
                 .eq('user_id', user.id)
+                .eq('is_archived', false)
                 .order('name');
 
             console.log('CATEGORIES RESULT:', { categoriesData, categoriesError });
@@ -365,6 +392,58 @@ export default function FinancePage() {
 
             // 4) TRANSACTIONS scoped to selected month
             await reloadTransactionsForMonth();
+
+            const chartStart = new Date(monthDate.getFullYear(), monthDate.getMonth() - 5, 1);
+            const chartEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0);
+            const chartStartStr = chartStart.toISOString().slice(0, 10);
+            const chartEndStr = chartEnd.toISOString().slice(0, 10);
+
+            const { data: extData, error: extError } = await supabase
+                .from('transactions')
+                .select(
+                    `
+        date,
+        amount,
+        categories ( name )
+      `
+                )
+                .eq('user_id', user.id)
+                .gte('date', chartStartStr)
+                .lte('date', chartEndStr)
+                .order('date', { ascending: true });
+
+            if (extError) {
+                console.error(extError);
+                setExtendedTx([]);
+            } else {
+                const relName = (
+                    rel:
+                        | { name: string | null }
+                        | { name: string | null }[]
+                        | null
+                ) => {
+                    if (!rel) return null;
+                    if (Array.isArray(rel)) {
+                        return rel.length > 0 ? rel[0].name ?? null : null;
+                    }
+                    return rel.name ?? null;
+                };
+                const extRows = (extData ?? []) as Array<{
+                    date: string;
+                    amount: number | string;
+                    categories:
+                        | { name: string | null }
+                        | { name: string | null }[]
+                        | null;
+                }>;
+                setExtendedTx(
+                    extRows.map(r => ({
+                        date: r.date,
+                        amount: Number(r.amount),
+                        category: relName(r.categories),
+                    }))
+                );
+            }
 
             setLoading(false);
         };
@@ -395,6 +474,24 @@ export default function FinancePage() {
 
     // Load all transactions for net worth calculation
     useEffect(() => {
+        if (isPreview) {
+            const f = preview.finance;
+            setAllTransactions(
+                f.transactions.map(tx => ({
+                    id: tx.id,
+                    date: tx.date,
+                    amount: tx.amount,
+                    person: '',
+                    note: null,
+                    account: null,
+                    category: null,
+                    accountId: tx.account_id,
+                    categoryId: tx.category_id,
+                }))
+            );
+            return;
+        }
+
         const loadAllTransactions = async () => {
             // Get authenticated user
             const { data: { user } } = await supabase.auth.getUser();
@@ -404,7 +501,7 @@ export default function FinancePage() {
 
             const { data: txData, error: txError } = await supabase
                 .from('transactions')
-                .select('id, amount, account_id')
+                .select('id, date, amount, account_id')
                 .eq('user_id', user.id)
                 .order('date', { ascending: false });
 
@@ -415,14 +512,14 @@ export default function FinancePage() {
 
             const rows = (txData ?? []) as Array<{
                 id: string;
+                date: string;
                 amount: number;
                 account_id: string | null;
             }>;
 
-            // Map to Transaction format (we only need account_id and amount)
             const mapped: Transaction[] = rows.map(tx => ({
                 id: tx.id,
-                date: '',
+                date: tx.date,
                 amount: Number(tx.amount),
                 person: '',
                 note: null,
@@ -436,7 +533,7 @@ export default function FinancePage() {
         };
 
         loadAllTransactions();
-    }, []);
+    }, [isPreview, isPreview ? preview.finance : null]);
 
     // Calculate net change per account (from all transactions)
     const netChangeByAccountId = useMemo(() => {
@@ -494,6 +591,222 @@ export default function FinancePage() {
         return map;
     }, [budgets]);
 
+    const SLICE_COLORS = [
+        '#6366f1',
+        '#22c55e',
+        '#f59e0b',
+        '#ec4899',
+        '#3b82f6',
+        '#a855f7',
+        '#14b8a6',
+        '#eab308',
+    ];
+
+    const prevMonthStr = useMemo(() => {
+        const p = new Date(monthDate.getFullYear(), monthDate.getMonth() - 1, 1);
+        return `${p.getFullYear()}-${String(p.getMonth() + 1).padStart(2, '0')}`;
+    }, [monthDate]);
+
+    const monthRangeLabel = useMemo(() => {
+        const start = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
+        const end = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0);
+        const fmt = (d: Date) =>
+            d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        return `${fmt(start)} – ${fmt(end)}`;
+    }, [monthDate]);
+
+    const expenseRatioPct = useMemo(
+        () => (totalIncome > 0 ? (totalExpenses / totalIncome) * 100 : 0),
+        [totalIncome, totalExpenses]
+    );
+
+    const prevFromExtended = useMemo(() => {
+        const txs = extendedTx.filter(t => t.date.startsWith(prevMonthStr));
+        let inc = 0;
+        let exp = 0;
+        txs.forEach(t => {
+            if (t.amount > 0) inc += t.amount;
+            else exp += Math.abs(t.amount);
+        });
+        const prevNet = inc - exp;
+        const prevRatio = inc > 0 ? (exp / inc) * 100 : 0;
+        return { inc, exp, prevNet, prevRatio };
+    }, [extendedTx, prevMonthStr]);
+
+    const startOfMonthStr = useMemo(() => `${monthStr}-01`, [monthStr]);
+
+    const prevNetWorthStart = useMemo(() => {
+        const byAccount = new Map<string, number>();
+        allTransactions.forEach(tx => {
+            if (!tx.accountId || !tx.date || tx.date >= startOfMonthStr) return;
+            byAccount.set(tx.accountId, (byAccount.get(tx.accountId) ?? 0) + tx.amount);
+        });
+        return accounts.reduce((sum, acc) => {
+            const netChange = byAccount.get(acc.id) ?? 0;
+            const raw = Number(acc.starting_balance ?? 0) + netChange;
+            const signed = acc.type === 'credit' ? -raw : raw;
+            return sum + signed;
+        }, 0);
+    }, [accounts, allTransactions, startOfMonthStr]);
+
+    const monthsWindow = useMemo(() => {
+        const labels: { key: string; label: string }[] = [];
+        for (let i = 5; i >= 0; i -= 1) {
+            const d = new Date(monthDate.getFullYear(), monthDate.getMonth() - i, 1);
+            const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            labels.push({ key, label: d.toLocaleString('default', { month: 'short' }) });
+        }
+        return labels;
+    }, [monthDate]);
+
+    const cashMonths = useMemo(() => {
+        return monthsWindow.map(({ key, label }) => {
+            const txs = extendedTx.filter(t => t.date.startsWith(key));
+            let income = 0;
+            let expenses = 0;
+            txs.forEach(t => {
+                if (t.amount > 0) income += t.amount;
+                else expenses += Math.abs(t.amount);
+            });
+            return { label, income, expenses, net: income - expenses };
+        });
+    }, [extendedTx, monthsWindow]);
+
+    const incomeSpark = useMemo(() => cashMonths.map(m => m.income), [cashMonths]);
+    const expenseSpark = useMemo(() => cashMonths.map(m => m.expenses), [cashMonths]);
+    const ratioSpark = useMemo(
+        () => cashMonths.map(m => (m.income > 0 ? (m.expenses / m.income) * 100 : 0)),
+        [cashMonths]
+    );
+
+    const netWorthSpark = useMemo(() => {
+        return monthsWindow.map(({ key }) => {
+            const [ys, ms] = key.split('-');
+            const y = Number(ys);
+            const mi = Number(ms) - 1;
+            const endDate = new Date(y, mi + 1, 0);
+            const endStr = endDate.toISOString().slice(0, 10);
+            const byAccount = new Map<string, number>();
+            allTransactions.forEach(tx => {
+                if (!tx.accountId || !tx.date || tx.date > endStr) return;
+                byAccount.set(tx.accountId, (byAccount.get(tx.accountId) ?? 0) + tx.amount);
+            });
+            return accounts.reduce((sum, acc) => {
+                const netChange = byAccount.get(acc.id) ?? 0;
+                const raw = Number(acc.starting_balance ?? 0) + netChange;
+                const signed = acc.type === 'credit' ? -raw : raw;
+                return sum + signed;
+            }, 0);
+        });
+    }, [monthsWindow, allTransactions, accounts]);
+
+    const spendingSlices = useMemo(() => {
+        const entries = [...spendingByCategoryName.entries()].sort((a, b) => b[1] - a[1]);
+        const top = entries.slice(0, 7);
+        const rest = entries.slice(7).reduce((s, [, v]) => s + v, 0);
+        const rows = top.map(([name, value], i) => ({
+            name,
+            value,
+            color: SLICE_COLORS[i % SLICE_COLORS.length],
+        }));
+        if (rest > 0) {
+            rows.push({ name: 'Other', value: rest, color: '#64748b' });
+        }
+        return rows;
+    }, [spendingByCategoryName]);
+
+    const budgetRows = useMemo(() => {
+        return budgets
+            .map((b, i) => {
+                const cat = categories.find(c => c.id === b.category_id);
+                const name = cat?.name ?? 'Category';
+                const spent = cat ? spendingByCategoryName.get(name) ?? 0 : 0;
+                return {
+                    name,
+                    spent,
+                    budget: b.amount,
+                    color: SLICE_COLORS[i % SLICE_COLORS.length],
+                };
+            })
+            .filter(r => r.budget > 0)
+            .slice(0, 12);
+    }, [budgets, categories, spendingByCategoryName]);
+
+    const accountRows = useMemo(() => {
+        return accounts.map(acc => ({
+            name: acc.name,
+            type: acc.type ?? 'other',
+            balance: getAccountBalance(acc).signedBalance,
+            changePct: null as number | null,
+        }));
+    }, [accounts, netChangeByAccountId]);
+
+    const incomeStreams = useMemo(() => {
+        const lastTxs = extendedTx.filter(t => t.date.startsWith(prevMonthStr));
+        const byName = new Map<string, { thisM: number; lastM: number }>();
+        thisMonthTx
+            .filter(tx => tx.amount > 0 && tx.category)
+            .forEach(tx => {
+                const name = tx.category ?? 'Income';
+                const cur = byName.get(name) ?? { thisM: 0, lastM: 0 };
+                cur.thisM += tx.amount;
+                byName.set(name, cur);
+            });
+        lastTxs.forEach(t => {
+            if (t.amount <= 0 || !t.category) return;
+            const cur = byName.get(t.category) ?? { thisM: 0, lastM: 0 };
+            cur.lastM += t.amount;
+            byName.set(t.category, cur);
+        });
+        return [...byName.entries()]
+            .filter(([, v]) => v.thisM > 0 || v.lastM > 0)
+            .map(([name, v]) => ({
+                name,
+                thisMonth: v.thisM,
+                lastMonth: v.lastM,
+                goalPct: v.lastM > 0 ? Math.min(100, (v.thisM / v.lastM) * 100) : v.thisM > 0 ? 100 : 0,
+            }))
+            .sort((a, b) => b.thisMonth - a.thisMonth)
+            .slice(0, 6);
+    }, [thisMonthTx, extendedTx, prevMonthStr]);
+
+    const recentTxDashboard = useMemo(
+        () =>
+            [...transactions]
+                .sort((a, b) => (a.date < b.date ? 1 : -1))
+                .slice(0, 8)
+                .map(tx => ({
+                    id: tx.id,
+                    merchant: (tx.note || tx.category || 'Transaction').trim() || 'Transaction',
+                    date: tx.date,
+                    amount: tx.amount,
+                    category: tx.category ?? undefined,
+                })),
+        [transactions]
+    );
+
+    const savingsTotal = useMemo(() => {
+        return accounts
+            .filter(a => a.type === 'savings' || a.type === 'cash')
+            .reduce((s, a) => s + getAccountBalance(a).signedBalance, 0);
+    }, [accounts, netChangeByAccountId]);
+
+    const investRatePct = useMemo(() => {
+        if (totalIncome <= 0) return 0;
+        const invest = thisMonthTx
+            .filter(
+                tx =>
+                    tx.amount < 0 &&
+                    /invest|brokerage|401|retirement|sec/i.test(
+                        `${tx.category ?? ''} ${tx.note ?? ''}`
+                    )
+            )
+            .reduce((s, tx) => s + Math.abs(tx.amount), 0);
+        return (invest / totalIncome) * 100;
+    }, [thisMonthTx, totalIncome]);
+
+    const EMERGENCY_FUND_GOAL = 10_000;
+
     const resetFormToDefault = () => {
         setDate(new Date().toISOString().slice(0, 10));
         setAccountId('');
@@ -520,43 +833,21 @@ export default function FinancePage() {
             return existingCategory.id;
         }
         
-        // Category doesn't exist, create it
-        try {
-            // Get authenticated user
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
-                setNotification('You must be logged in to create categories.');
-                return null;
-            }
-
-            const { data, error } = await supabase
-                .from('categories')
-                .insert({
-                    name: trimmedName,
-                    type: type,
-                    kind: 'category',
-                    parent_id: null, // Will be a standalone category
-                    user_id: user.id,
-                })
-                .select()
-                .single();
-            
-            if (error) {
-                console.error('Error creating category:', error);
-                setNotification(`Error creating category: ${error.message}`);
-                return null;
-            }
-            
-            // Add to local state
-            setCategories(prev => [...prev, data as Category]);
-            setNotification(`Created new category: "${trimmedName}"`);
-            
-            return data.id;
-        } catch (error) {
-            console.error('Error creating category:', error);
-            setNotification('Error creating category. Check console/logs.');
-            return null;
+        // Enforce bounded taxonomy: unknown categories route to Needs Review.
+        const needsReview = categories.find(
+            c =>
+                c.kind === 'category' &&
+                c.type === 'expense' &&
+                c.name.toLowerCase() === 'needs review'
+        );
+        if (needsReview) {
+            setNotification(
+                `Category "${trimmedName}" is outside the 20-category master list. Routing to Needs Review.`
+            );
+            return needsReview.id;
         }
+        setNotification('Category not found in the 20-category master list.');
+        return null;
     };
 
     const handleAddOrUpdateTransaction = async (e: FormEvent, addAnother: boolean = false) => {
@@ -652,6 +943,16 @@ export default function FinancePage() {
                 setNotification('Error updating transaction. Check console/logs.');
                 return;
             }
+
+            const priorTx = transactions.find(t => t.id === editingId);
+            if (finalCategoryId && priorTx) {
+                void learnMerchantMappingFromUserCategory(supabase, {
+                    userId: user.id,
+                    categoryId: finalCategoryId,
+                    name: (note || '').trim() || priorTx.note || null,
+                    note: null,
+                });
+            }
         } else {
             // INSERT new transaction
             const { error } = await supabase.from('transactions').insert({
@@ -669,6 +970,13 @@ export default function FinancePage() {
                 setNotification('Error saving transaction. Check console/logs.');
                 return;
             }
+
+            void learnMerchantMappingFromUserCategory(supabase, {
+                userId: user.id,
+                categoryId: finalCategoryId,
+                name: (note || '').trim() || null,
+                note: null,
+            });
         }
 
         // Reload list after insert/update, scoped to the currently selected month
@@ -1071,136 +1379,108 @@ export default function FinancePage() {
     };
 
     return (
-        <section className="space-y-4 px-4 py-4 sm:px-6">
+        <section className="min-w-0 space-y-5 px-2 py-4 sm:px-4" style={{ backgroundColor: '#0a0e14' }}>
             {notification && (
                 <div className="rounded-md border border-amber-500 bg-amber-950 px-4 py-2 text-xs text-amber-100">
                     {notification}
                 </div>
             )}
-            {/* 🔹 Dashboard Summary - Net Worth, Income, Expenses, Cashflow */}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                {/* Net Worth */}
-                <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
-                    <p className="text-xs uppercase text-slate-400">Net Worth</p>
-                    <p
-                        className={`text-xl sm:text-2xl font-semibold ${
-                            netWorth >= 0 ? 'text-emerald-400' : 'text-red-400'
-                        }`}
-                    >
-                        {new Intl.NumberFormat('en-US', {
-                            style: 'currency',
-                            currency: 'USD',
-                            minimumFractionDigits: 2,
-                        }).format(netWorth)}
-                    </p>
-                </div>
+            {loading ? (
+                <p className="py-16 text-center text-sm text-slate-400">Loading your finances…</p>
+            ) : (
+                <FinanceDashboardShell
+                    dateRangeLabel={monthRangeLabel}
+                    totalIncome={totalIncome}
+                    totalExpenses={totalExpenses}
+                    netIncome={net}
+                    expenseRatioPct={expenseRatioPct}
+                    netWorth={netWorth}
+                    prevIncome={prevFromExtended.inc}
+                    prevExpenses={prevFromExtended.exp}
+                    prevNet={prevFromExtended.prevNet}
+                    prevExpenseRatioPct={prevFromExtended.prevRatio}
+                    prevNetWorth={prevNetWorthStart}
+                    incomeSpark={incomeSpark}
+                    expenseSpark={expenseSpark}
+                    ratioSpark={ratioSpark}
+                    netWorthSpark={netWorthSpark}
+                    spendingSlices={spendingSlices}
+                    budgetRows={budgetRows}
+                    cashMonths={cashMonths}
+                    accountRows={accountRows}
+                    incomeStreams={incomeStreams}
+                    recentTx={recentTxDashboard}
+                    savingsTotal={savingsTotal}
+                    emergencyGoal={EMERGENCY_FUND_GOAL}
+                    investRatePct={investRatePct}
+                />
+            )}
 
-                {/* Income */}
-                <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
-                    <p className="text-xs uppercase text-slate-400">Income</p>
-                    <p className="text-2xl font-semibold text-emerald-400">
-                        {new Intl.NumberFormat('en-US', {
-                            style: 'currency',
-                            currency: 'USD',
-                            minimumFractionDigits: 2,
-                        }).format(totalIncome)}
-                    </p>
-                </div>
-
-                {/* Expenses */}
-                <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
-                    <p className="text-xs uppercase text-slate-400">Expenses</p>
-                    <p className="text-2xl font-semibold text-red-400">
-                        {new Intl.NumberFormat('en-US', {
-                            style: 'currency',
-                            currency: 'USD',
-                            minimumFractionDigits: 2,
-                        }).format(totalExpenses)}
-                    </p>
-                </div>
-
-                {/* Cashflow */}
-                <div className="rounded-lg bg-slate-900 p-4 border border-slate-800">
-                    <p className="text-xs uppercase text-slate-400">Cashflow</p>
-                    <p
-                        className={`text-2xl font-semibold ${
-                            net >= 0 ? 'text-emerald-400' : 'text-red-400'
-                        }`}
-                    >
-                        {new Intl.NumberFormat('en-US', {
-                            style: 'currency',
-                            currency: 'USD',
-                            minimumFractionDigits: 2,
-                        }).format(net)}
-                    </p>
-                </div>
-            </div>
-
-            {/* 🔹 Monthly Switcher with Money in, Money out, Net */}
-            <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
-                <div className="mb-2 flex items-center justify-between">
-                    <button
-                        type="button"
-                        onClick={goToPrevMonth}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-4 py-2 text-sm hover:bg-slate-800 active:bg-slate-900 transition-colors"
-                        aria-label="Previous month"
-                    >
-                        ◀
-                    </button>
-                    <div className="text-center">
-                        <h2 className="text-sm sm:text-base font-semibold">{monthLabel}</h2>
-                        <p className="text-[10px] sm:text-xs text-slate-400">{monthStr}</p>
-                    </div>
-                    <button
-                        type="button"
-                        onClick={goToNextMonth}
-                        className="rounded-md border border-slate-700 bg-slate-950 px-4 py-2 text-sm hover:bg-slate-800 active:bg-slate-900 transition-colors"
-                        aria-label="Next month"
-                    >
-                        ▶
-                    </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
-                    <div>
-                        <div className="text-xs sm:text-sm text-slate-400">Money in</div>
-                        <div className="mt-1 text-xs sm:text-sm font-semibold text-emerald-400">
-                            {new Intl.NumberFormat('en-US', {
-                                style: 'currency',
-                                currency: 'USD',
-                                minimumFractionDigits: 2,
-                            }).format(totalIn)}
-                        </div>
-                    </div>
-                    <div>
-                        <div className="text-xs sm:text-sm text-slate-400">Money out</div>
-                        <div className="mt-1 text-xs sm:text-sm font-semibold text-red-400">
-                            {new Intl.NumberFormat('en-US', {
-                                style: 'currency',
-                                currency: 'USD',
-                                minimumFractionDigits: 2,
-                            }).format(Math.abs(totalOut))}
-                        </div>
-                    </div>
-                    <div>
-                        <div className="text-xs sm:text-sm text-slate-400">Net</div>
-                        <div
-                            className={`mt-1 text-xs sm:text-sm font-semibold ${
-                                net >= 0 ? 'text-emerald-400' : 'text-red-400'
-                            }`}
+            {!loading && (
+                <div className="rounded-xl border border-[#1e293b] bg-[#0f1419] p-4 text-xs text-slate-200">
+                    <div className="flex items-center justify-between gap-3">
+                        <button
+                            type="button"
+                            onClick={goToPrevMonth}
+                            className="rounded-lg border border-slate-600 bg-[#0a0e14] px-4 py-2 text-sm text-slate-200 hover:bg-slate-800"
+                            aria-label="Previous month"
                         >
-                            {new Intl.NumberFormat('en-US', {
-                                style: 'currency',
-                                currency: 'USD',
-                                minimumFractionDigits: 2,
-                            }).format(net)}
+                            ◀
+                        </button>
+                        <div className="text-center">
+                            <h2 className="text-sm font-semibold text-white sm:text-base">{monthLabel}</h2>
+                            <p className="text-[10px] text-slate-500 sm:text-xs">{monthStr}</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={goToNextMonth}
+                            className="rounded-lg border border-slate-600 bg-[#0a0e14] px-4 py-2 text-sm text-slate-200 hover:bg-slate-800"
+                            aria-label="Next month"
+                        >
+                            ▶
+                        </button>
+                    </div>
+                    <div className="mt-3 grid grid-cols-1 gap-2 border-t border-slate-800 pt-3 sm:grid-cols-3">
+                        <div>
+                            <div className="text-slate-400">Money in</div>
+                            <div className="mt-0.5 font-semibold text-emerald-400">
+                                {new Intl.NumberFormat('en-US', {
+                                    style: 'currency',
+                                    currency: 'USD',
+                                    minimumFractionDigits: 2,
+                                }).format(totalIn)}
+                            </div>
+                        </div>
+                        <div>
+                            <div className="text-slate-400">Money out</div>
+                            <div className="mt-0.5 font-semibold text-red-400">
+                                {new Intl.NumberFormat('en-US', {
+                                    style: 'currency',
+                                    currency: 'USD',
+                                    minimumFractionDigits: 2,
+                                }).format(Math.abs(totalOut))}
+                            </div>
+                        </div>
+                        <div>
+                            <div className="text-slate-400">Net</div>
+                            <div
+                                className={`mt-0.5 font-semibold ${
+                                    net >= 0 ? 'text-emerald-400' : 'text-red-400'
+                                }`}
+                            >
+                                {new Intl.NumberFormat('en-US', {
+                                    style: 'currency',
+                                    currency: 'USD',
+                                    minimumFractionDigits: 2,
+                                }).format(net)}
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            )}
 
             {/* 🔹 Add Transaction - Collapsible */}
-            <div className="rounded-lg border border-slate-800 bg-slate-900">
+            <div className="rounded-xl border border-[#1e293b] bg-[#0f1419]">
                 <div className="flex items-center justify-between p-4">
                     <button
                         type="button"
@@ -1305,9 +1585,12 @@ export default function FinancePage() {
                                             
                                             // Try to find matching category
                                             const matchingCategory = categories.find(
-                                                c => c.name.toLowerCase() === inputValue.toLowerCase() && 
-                                                ((transactionType === 'income' && c.type === 'income') || 
-                                                 (transactionType === 'expense' && c.type === 'expense'))
+                                                c =>
+                                                    c.name.toLowerCase() === inputValue.toLowerCase() &&
+                                                    ((transactionType === 'income' &&
+                                                        (c.type === 'income' || c.type === 'transfer')) ||
+                                                        (transactionType === 'expense' &&
+                                                            (c.type === 'expense' || c.type === 'transfer')))
                                             );
                                             
                                             if (matchingCategory) {
@@ -1321,15 +1604,32 @@ export default function FinancePage() {
                                     <datalist id={`category-list-${transactionType}`}>
                                         {(() => {
                                             // Organize categories into hierarchy
-                                            const groups = categories.filter(c => c.kind === 'group' && 
-                                                ((transactionType === 'income' && c.type === 'income') || 
-                                                 (transactionType === 'expense' && c.type === 'expense')));
-                                            const subcategories = categories.filter(c => c.kind === 'category' && c.parent_id &&
-                                                ((transactionType === 'income' && c.type === 'income') || 
-                                                 (transactionType === 'expense' && c.type === 'expense')));
-                                            const standalone = categories.filter(c => c.kind === 'category' && !c.parent_id &&
-                                                ((transactionType === 'income' && c.type === 'income') || 
-                                                 (transactionType === 'expense' && c.type === 'expense')));
+                                            const groups = categories.filter(
+                                                c =>
+                                                    c.kind === 'group' &&
+                                                    ((transactionType === 'income' &&
+                                                        (c.type === 'income' || c.type === 'transfer')) ||
+                                                        (transactionType === 'expense' &&
+                                                            (c.type === 'expense' || c.type === 'transfer')))
+                                            );
+                                            const subcategories = categories.filter(
+                                                c =>
+                                                    c.kind === 'category' &&
+                                                    c.parent_id &&
+                                                    ((transactionType === 'income' &&
+                                                        (c.type === 'income' || c.type === 'transfer')) ||
+                                                        (transactionType === 'expense' &&
+                                                            (c.type === 'expense' || c.type === 'transfer')))
+                                            );
+                                            const standalone = categories.filter(
+                                                c =>
+                                                    c.kind === 'category' &&
+                                                    !c.parent_id &&
+                                                    ((transactionType === 'income' &&
+                                                        (c.type === 'income' || c.type === 'transfer')) ||
+                                                        (transactionType === 'expense' &&
+                                                            (c.type === 'expense' || c.type === 'transfer')))
+                                            );
                                             
                                             const options: React.ReactElement[] = [];
                                             
@@ -1351,7 +1651,12 @@ export default function FinancePage() {
                                             standalone.forEach(cat => {
                                                 options.push(
                                                     <option key={cat.id} value={cat.name}>
-                                                        {cat.type === 'income' ? '⬆️' : '⬇️'} {cat.name}
+                                                        {cat.type === 'income'
+                                                            ? '⬆️'
+                                                            : cat.type === 'transfer'
+                                                                ? '💱'
+                                                                : '⬇️'}{' '}
+                                                        {cat.name}
                                                     </option>
                                                 );
                                             });
@@ -1527,7 +1832,9 @@ export default function FinancePage() {
                                                     
                                                     // Try to find matching category
                                                     const matchingCategory = categories.find(
-                                                        c => c.name.toLowerCase() === inputValue.toLowerCase() && c.type === tx.type
+                                                        c =>
+                                                            c.name.toLowerCase() === inputValue.toLowerCase() &&
+                                                            (c.type === tx.type || c.type === 'transfer')
                                                     );
                                                     
                                                     if (matchingCategory) {
@@ -1543,9 +1850,23 @@ export default function FinancePage() {
                                             <datalist id={`bulk-category-list-${index}-${tx.type}`}>
                                                 {(() => {
                                                     // Organize categories into hierarchy
-                                                    const groups = categories.filter(c => c.kind === 'group' && c.type === tx.type);
-                                                    const subcategories = categories.filter(c => c.kind === 'category' && c.parent_id && c.type === tx.type);
-                                                    const standalone = categories.filter(c => c.kind === 'category' && !c.parent_id && c.type === tx.type);
+                                                    const groups = categories.filter(
+                                                        c =>
+                                                            c.kind === 'group' &&
+                                                            (c.type === tx.type || c.type === 'transfer')
+                                                    );
+                                                    const subcategories = categories.filter(
+                                                        c =>
+                                                            c.kind === 'category' &&
+                                                            c.parent_id &&
+                                                            (c.type === tx.type || c.type === 'transfer')
+                                                    );
+                                                    const standalone = categories.filter(
+                                                        c =>
+                                                            c.kind === 'category' &&
+                                                            !c.parent_id &&
+                                                            (c.type === tx.type || c.type === 'transfer')
+                                                    );
                                                     
                                                     const options: React.ReactElement[] = [];
                                                     
@@ -1670,9 +1991,9 @@ export default function FinancePage() {
             </div>
 
             {/* 🔹 Recent Transactions */}
-            <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
-                <h2 className="mb-2 text-sm font-semibold">
-                    Recent transactions
+            <div className="rounded-xl border border-[#1e293b] bg-[#0f1419] p-4 text-xs text-slate-200">
+                <h2 className="mb-2 text-sm font-semibold text-white">
+                    Manage transactions
                 </h2>
                 {loading ? (
                     <p className="text-slate-400">Loading...</p>
@@ -1685,7 +2006,7 @@ export default function FinancePage() {
                         {transactions.slice(0, 5).map(tx => (
                             <div
                                 key={tx.id}
-                                className="flex items-center justify-between rounded-md border border-slate-800 bg-slate-950 px-3 py-2"
+                                className="flex items-center justify-between rounded-lg border border-[#1e293b] bg-[#0a0e14] px-3 py-2"
                             >
                                 <div>
                                     <div className="font-medium">

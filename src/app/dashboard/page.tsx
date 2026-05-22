@@ -6,6 +6,8 @@ import { Outfit } from 'next/font/google';
 import { supabase } from '@auth/supabaseClient';
 import HabitDailyEntrySection from './components/HabitDailyEntrySection';
 import DashboardNotesSection from './components/DashboardNotesSection';
+import NewsfeedSection from './components/NewsfeedSection';
+import FinanceWidget from './components/FinanceWidget';
 import AppSidebar from './components/AppSidebar';
 import DashboardScoreBars, { type DashboardScores } from './components/DashboardScoreBars';
 import DashboardCalendarOverview from './components/DashboardCalendarOverview';
@@ -221,7 +223,7 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <main
-        className={`${outfit.className} flex min-h-dvh items-center justify-center bg-[#010205] text-white`}
+        className={`${outfit.className} flex min-h-dvh items-center justify-center bg-white text-slate-900 transition-colors dark:bg-[#010205] dark:text-white`}
       >
         <div className="text-center">
           <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-[#ff9d00] border-t-transparent" />
@@ -236,7 +238,11 @@ export default function DashboardPage() {
       <AppSidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       <div className="relative flex min-w-0 flex-1 flex-col overflow-x-hidden">
-        <div className="pointer-events-none absolute inset-0" aria-hidden>
+        <div
+          className="pointer-events-none absolute inset-0 bg-gradient-to-b from-slate-800/95 via-slate-900 to-slate-950/95 dark:hidden"
+          aria-hidden
+        />
+        <div className="pointer-events-none absolute inset-0 hidden dark:block" aria-hidden>
           <div
             className="absolute inset-0"
             style={{
@@ -291,34 +297,31 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setShowCalendarOverview(true)}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[#ff9d00]/60 bg-black/50 text-[#ffe066] shadow-[0_0_18px_rgba(255,157,0,0.25)] transition hover:border-[#ff9d00] hover:bg-black/70"
-                aria-label="Calendar overview"
-              >
-                <IconCalendar />
-              </button>
+              <div className="h-11 w-11 shrink-0" aria-hidden />
             </div>
 
-            <p
-              className="mx-auto mt-3 flex flex-wrap items-center justify-center gap-x-1.5 text-center text-lg font-bold tracking-tight sm:text-xl"
-              style={{ color: '#ffe066', textShadow: '0 0 18px rgba(255,200,80,0.35)' }}
-            >
-              <span>Welcome Back</span>
-              {userDisplayName ? (
-                <>
-                  <span>,</span>
-                  <span className="max-w-[min(100%,16rem)] truncate" title={userDisplayName}>
-                    {userDisplayName}
-                  </span>
+            <div className="mx-auto mt-3 grid w-full max-w-2xl grid-cols-[2.75rem_1fr_2.75rem] items-center lg:max-w-6xl">
+              <div className="h-11 w-11" aria-hidden />
+              <p
+                className="flex flex-wrap items-center justify-center gap-x-1.5 text-center text-lg font-bold tracking-tight sm:text-xl"
+                style={{ color: '#ffe066', textShadow: '0 0 18px rgba(255,200,80,0.35)' }}
+              >
+                <span>Welcome Back</span>
+                {userDisplayName ? (
+                  <>
+                    <span>,</span>
+                    <span className="max-w-[min(100%,16rem)] truncate" title={userDisplayName}>
+                      {userDisplayName}
+                    </span>
+                    <span>!</span>
+                  </>
+                ) : (
                   <span>!</span>
-                </>
-              ) : (
-                <span>!</span>
-              )}
-            </p>
-            <p className="mx-auto mt-1 text-center text-xs uppercase tracking-[0.18em] text-[#ff9d00]/80">
+                )}
+              </p>
+              <div className="h-11 w-11" aria-hidden />
+            </div>
+            <p className="mx-auto -mt-1 text-center text-xs uppercase tracking-[0.18em] text-[#ff9d00]/80">
               {morningFocusOn
                 ? 'Morning focus active'
                 : eveningFocusOn
@@ -361,7 +364,15 @@ export default function DashboardPage() {
 
             {timeframe === 'daily' && (
               <div className="mx-auto mt-4 w-full max-w-2xl space-y-3 lg:max-w-6xl">
-                <div className={neon.panel + ' px-4 py-3 sm:px-5 sm:py-3.5'}>
+                <div className={neon.panel + ' relative px-4 py-3 sm:px-5 sm:py-3.5'}>
+                  <button
+                    type="button"
+                    onClick={() => setShowCalendarOverview(true)}
+                    className="absolute right-3 top-3 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[#ff9d00]/60 bg-black/50 text-[#ffe066] shadow-[0_0_18px_rgba(255,157,0,0.25)] transition hover:border-[#ff9d00] hover:bg-black/70 sm:right-4 sm:top-4"
+                    aria-label="Calendar overview"
+                  >
+                    <IconCalendar />
+                  </button>
                   <div className="flex flex-col items-center">
                     <DailyScoreGauge percent={overall} grade={headerScores?.grade} />
                   </div>
@@ -431,14 +442,18 @@ export default function DashboardPage() {
 
                 <div className="min-w-0 lg:col-span-5 xl:col-span-4">
                   {timeframe === 'daily' && (
-                    <div
-                      className={`rounded-2xl transition-all duration-500 ${
-                        eveningFocusOn
-                          ? 'border border-[#818cf8]/45 bg-[#6366f1]/[0.08] shadow-[0_0_30px_rgba(129,140,248,0.18)]'
-                          : ''
-                      }`}
-                    >
-                      <DashboardNotesSection selectedDate={selectedDate} userId={userId} />
+                    <div className="space-y-6">
+                      <div
+                        className={`rounded-2xl transition-all duration-500 ${
+                          eveningFocusOn
+                            ? 'border border-[#818cf8]/45 bg-[#6366f1]/[0.08] shadow-[0_0_30px_rgba(129,140,248,0.18)]'
+                            : ''
+                        }`}
+                      >
+                        <DashboardNotesSection selectedDate={selectedDate} userId={userId} />
+                      </div>
+                      <NewsfeedSection selectedDate={selectedDate} timeframe={timeframe} userId={userId} />
+                      <FinanceWidget selectedDate={selectedDate} userId={userId} />
                     </div>
                   )}
                 </div>

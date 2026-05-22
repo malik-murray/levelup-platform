@@ -20,6 +20,7 @@ export default function IntegrationsPage() {
     const [loading, setLoading] = useState(true);
     const [notification, setNotification] = useState<string | null>(null);
     const [syncing, setSyncing] = useState<string | null>(null);
+    const [backfillLoading, setBackfillLoading] = useState(false);
 
     // Load connected Plaid items
     useEffect(() => {
@@ -140,6 +141,65 @@ export default function IntegrationsPage() {
         reloadItems();
     };
 
+    const handleBackfillCategorize = async (plaidOnly: boolean) => {
+        const abortController = new AbortController();
+        const timeoutMs = 110_000;
+        const timeoutId = window.setTimeout(() => abortController.abort(), timeoutMs);
+
+        try {
+            setBackfillLoading(true);
+            setNotification(null);
+
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) {
+                setNotification('Please log in');
+                return;
+            }
+
+            const response = await fetch('/api/finance/categorize-uncategorized', {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${session.access_token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    limit: 500,
+                    plaid_only: plaidOnly,
+                    fallback_to_needs_review: !plaidOnly,
+                }),
+                signal: abortController.signal,
+            });
+
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.error || 'Request failed');
+            }
+
+            setNotification(
+                `Categorized ${data.categorized} of ${data.scanned} checked transactions` +
+                    (data.still_uncategorized
+                        ? ` (${data.still_uncategorized} still need rules or manual categories)`
+                        : '') +
+                    (data.fallback_categorized
+                        ? ` [${data.fallback_categorized} routed to Needs Review]`
+                        : '') +
+                    (data.hint ? ` ${data.hint}` : '')
+            );
+        } catch (err) {
+            console.error(err);
+            if (err instanceof Error && err.name === 'AbortError') {
+                setNotification(
+                    'Request timed out. Try again — each run processes up to 500 rows. Very large histories may need several runs.'
+                );
+            } else {
+                setNotification(err instanceof Error ? err.message : 'Backfill failed');
+            }
+        } finally {
+            window.clearTimeout(timeoutId);
+            setBackfillLoading(false);
+        }
+    };
+
     return (
         <section className="space-y-4 px-4 py-4 sm:px-6">
             <div>
@@ -219,6 +279,35 @@ export default function IntegrationsPage() {
                         ))}
                     </div>
                 )}
+            </div>
+
+            <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+                <h3 className="mb-2 text-sm font-semibold">Categorize existing imports</h3>
+                <p className="mb-3 text-xs text-slate-400">
+                    Applies your merchant mappings, recurring-item categories, and category rules to transactions that
+                    still have no category. For Plaid rows, we also map Plaid personal finance categories to your
+                    budget categories when that metadata is present (run <strong>Sync</strong> on a connection once so
+                    labels are stored on existing transactions). Run again after you add mappings or rules. Large
+                    histories are processed in batches (up to 500 per run; run again to process more).
+                </p>
+                <div className="flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        onClick={() => handleBackfillCategorize(true)}
+                        disabled={backfillLoading}
+                        className="rounded-md border border-sky-700 bg-sky-950 px-3 py-1.5 text-[11px] font-medium text-sky-100 hover:bg-sky-900 disabled:opacity-50"
+                    >
+                        {backfillLoading ? 'Working…' : 'Plaid imports only'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => handleBackfillCategorize(false)}
+                        disabled={backfillLoading}
+                        className="rounded-md border border-slate-600 bg-slate-800 px-3 py-1.5 text-[11px] text-slate-200 hover:bg-slate-700 disabled:opacity-50"
+                    >
+                        {backfillLoading ? 'Working…' : 'All uncategorized'}
+                    </button>
+                </div>
             </div>
         </section>
     );

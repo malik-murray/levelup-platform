@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useMemo, useState, type ComponentType } from 'react';
 import type { WorkoutSession } from '@/lib/fitness/workoutSessions';
 import logo from '../../logo.png';
+import AITrainerAvatar from '@/components/fitness/AITrainerAvatar';
 
 function IconClipboard({ className }: { className?: string }) {
     return (
@@ -192,6 +193,17 @@ export default function FitnessShortsHome({ sessions, sessionsLoading, alertSlot
 
             <div className="mx-auto w-full max-w-lg flex-1 px-3 pt-3">
                 {alertSlot}
+                <section className="mb-4 rounded-lg border border-amber-500/40 bg-slate-950/80 p-3">
+                    <div className="flex items-center gap-3">
+                        <AITrainerAvatar size="md" />
+                        <div>
+                            <p className="text-sm font-semibold text-amber-300">Your AI personal trainer is ready</p>
+                            <p className="text-xs text-slate-300">
+                                Get movement coaching, focus cues, and motivation during each session.
+                            </p>
+                        </div>
+                    </div>
+                </section>
 
                 <div className="mb-3 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">

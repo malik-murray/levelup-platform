@@ -40,6 +40,7 @@ export default function ProgressClient() {
     const [summaries, setSummaries] = useState<Record<string, SessionSummary>>({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [weeklyAIRecap, setWeeklyAIRecap] = useState<string | null>(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -58,6 +59,7 @@ export default function ProgressClient() {
                 if (cancelled) return;
                 setSummary(pageData.summary);
                 setRecent(pageData.recentCompletedSessions);
+                setWeeklyAIRecap(pageData.weeklyAIRecap);
 
                 if (pageData.recentCompletedSessions.length > 0) {
                     const map = await getSessionSummaries(
@@ -74,6 +76,7 @@ export default function ProgressClient() {
                     setError(e instanceof Error ? e.message : 'Failed to load progress');
                     setSummary(null);
                     setRecent([]);
+                    setWeeklyAIRecap(null);
                 }
             } finally {
                 if (!cancelled) setLoading(false);
@@ -150,6 +153,12 @@ export default function ProgressClient() {
 
             {hasProgress && summary && (
                 <>
+                    {weeklyAIRecap && (
+                        <section className="rounded-lg border border-amber-500/40 bg-amber-950/20 p-4">
+                            <h2 className="text-xs font-semibold text-amber-300 mb-1">AI weekly recap</h2>
+                            <p className="text-sm text-slate-200">{weeklyAIRecap}</p>
+                        </section>
+                    )}
                     <section className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
                         <h2 className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-3">
                             Progress summary

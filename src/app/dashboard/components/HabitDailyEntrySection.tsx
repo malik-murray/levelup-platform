@@ -526,7 +526,6 @@ export default function HabitDailyEntrySection({
         const completedAt = !completed ? new Date().toISOString() : null;
         const selectedPriority = priorities.find((p) => p.id === id);
         const priorityText = selectedPriority?.text ?? '';
-        const hasBacklogLink = !!selectedPriority?.backlog_task_id;
 
         try {
             await supabase
@@ -539,40 +538,36 @@ export default function HabitDailyEntrySection({
                 await syncBacklogCompletion(selectedPriority.backlog_task_id, !completed);
             }
 
-            // Legacy behavior: sync priority completion into To-Do list by title match.
-            // Disabled for backlog-linked priorities to prevent duplicate/incorrect placements.
-            if (!hasBacklogLink) {
-                const dateStr = formatDate(selectedDate);
-                if (!completed && priorityText) {
-                    const { data: existing } = await supabase
-                        .from('habit_daily_todos')
-                        .select('id')
-                        .eq('user_id', userId)
-                        .eq('date', dateStr)
-                        .eq('title', priorityText)
-                        .maybeSingle();
-                    if (existing) {
-                        await supabase
-                            .from('habit_daily_todos')
-                            .update({ is_done: true, completed_at: completedAt })
-                            .eq('id', existing.id);
-                    } else {
-                        await supabase.from('habit_daily_todos').insert({
-                            user_id: userId,
-                            date: dateStr,
-                            title: priorityText,
-                            is_done: true,
-                            completed_at: completedAt,
-                        });
-                    }
-                } else if (completed && priorityText) {
+            const dateStr = formatDate(selectedDate);
+            if (!completed && priorityText) {
+                const { data: existing } = await supabase
+                    .from('habit_daily_todos')
+                    .select('id')
+                    .eq('user_id', userId)
+                    .eq('date', dateStr)
+                    .eq('title', priorityText)
+                    .maybeSingle();
+                if (existing) {
                     await supabase
                         .from('habit_daily_todos')
-                        .update({ is_done: false, completed_at: null })
-                        .eq('user_id', userId)
-                        .eq('date', dateStr)
-                        .eq('title', priorityText);
+                        .update({ is_done: true, completed_at: completedAt })
+                        .eq('id', existing.id);
+                } else {
+                    await supabase.from('habit_daily_todos').insert({
+                        user_id: userId,
+                        date: dateStr,
+                        title: priorityText,
+                        is_done: true,
+                        completed_at: completedAt,
+                    });
                 }
+            } else if (completed && priorityText) {
+                await supabase
+                    .from('habit_daily_todos')
+                    .update({ is_done: false, completed_at: null })
+                    .eq('user_id', userId)
+                    .eq('date', dateStr)
+                    .eq('title', priorityText);
             }
             loadData(true);
         } catch (error) {

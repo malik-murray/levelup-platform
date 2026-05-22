@@ -17,6 +17,19 @@ const configuration = new Configuration({
 
 const plaidClient = new PlaidApi(configuration);
 
+const ALLOWED_PLAID_PRODUCTS = new Set<string>(Object.values(Products));
+
+function linkProductsFromEnv(): Products[] {
+    const raw = process.env.PLAID_PRODUCTS?.trim();
+    if (!raw) return [Products.Transactions];
+    const out: Products[] = [];
+    for (const token of raw.split(',')) {
+        const t = token.trim().toLowerCase();
+        if (ALLOWED_PLAID_PRODUCTS.has(t)) out.push(t as Products);
+    }
+    return out.length > 0 ? out : [Products.Transactions];
+}
+
 /**
  * Create a Link token for Plaid Link
  * This token is used to initialize the Plaid Link component on the frontend
@@ -102,10 +115,14 @@ export async function POST(request: NextRequest) {
                     client_user_id: user.id,
                 },
                 client_name: 'LevelUp Financial',
-                products: [Products.Transactions, Products.Auth],
+                products: linkProductsFromEnv(),
                 country_codes: [CountryCode.Us],
                 language: 'en',
-                webhook: process.env.PLAID_WEBHOOK_URL || undefined,
+                webhook:
+                    process.env.PLAID_WEBHOOK_URL ||
+                    (process.env.NEXT_PUBLIC_APP_URL
+                        ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '')}/api/plaid/webhook`
+                        : undefined),
             });
 
             return NextResponse.json({

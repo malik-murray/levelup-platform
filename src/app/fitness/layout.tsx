@@ -32,7 +32,7 @@ export default function FitnessLayout({
 
     if (isFitnessHome) {
         return (
-            <main className="min-h-screen min-w-0 max-w-full bg-black text-white transition-colors">{children}</main>
+            <main className="min-h-screen min-w-0 max-w-full bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">{children}</main>
         );
     }
 

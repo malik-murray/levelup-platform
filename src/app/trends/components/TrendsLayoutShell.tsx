@@ -2,7 +2,6 @@
 
 import type { ReactNode } from 'react';
 import Image from 'next/image';
-import Link from 'next/link';
 import AppSidebar from '@/app/dashboard/components/AppSidebar';
 import { neon } from '@/app/dashboard/neonTheme';
 import TrendsSubNav from '@/app/trends/components/TrendsSubNav';
@@ -40,7 +39,11 @@ export default function TrendsLayoutShell({
             <AppSidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
             <div className="relative flex min-w-0 flex-1 flex-col overflow-x-hidden">
-                <div className="pointer-events-none absolute inset-0" aria-hidden>
+                <div
+                    className="pointer-events-none absolute inset-0 bg-gradient-to-b from-slate-800/95 via-slate-900 to-slate-950/95 dark:hidden"
+                    aria-hidden
+                />
+                <div className="pointer-events-none absolute inset-0 hidden dark:block" aria-hidden>
                     <div
                         className="absolute inset-0"
                         style={{
@@ -95,12 +98,7 @@ export default function TrendsLayoutShell({
                                 </div>
                             </div>
 
-                            <Link
-                                href="/dashboard"
-                                className="flex h-11 shrink-0 items-center justify-center rounded-xl border-2 border-[#ff9d00]/60 bg-black/50 px-3 text-xs font-semibold text-[#ffe066] shadow-[0_0_18px_rgba(255,157,0,0.25)] transition hover:border-[#ff9d00] hover:bg-black/70 sm:px-4 sm:text-sm"
-                            >
-                                Dashboard
-                            </Link>
+                            <div className="h-11 w-11 shrink-0" aria-hidden />
                         </div>
 
                         <p

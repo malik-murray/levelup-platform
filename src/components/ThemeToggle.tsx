@@ -2,18 +2,18 @@
 
 import { useTheme } from './ThemeProvider';
 
-export function ThemeToggle() {
+export function ThemeToggle({ className = '' }: { className?: string }) {
     const { theme, toggleTheme } = useTheme();
 
     return (
         <button
             onClick={toggleTheme}
-            className="flex items-center justify-center rounded-full border border-slate-300 bg-white/50 p-2 text-slate-700 backdrop-blur-sm transition-all hover:border-amber-500/50 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-amber-300"
+            className={`flex items-center justify-center rounded-full border border-slate-300 bg-white/50 p-2 text-slate-700 backdrop-blur-sm transition-all hover:border-amber-500/50 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-amber-300 ${className}`}
             aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
         >
             {theme === 'dark' ? (
                 <svg
-                    className="h-4 w-4"
+                    className="h-5 w-5"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -28,7 +28,7 @@ export function ThemeToggle() {
                 </svg>
             ) : (
                 <svg
-                    className="h-4 w-4"
+                    className="h-5 w-5"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"

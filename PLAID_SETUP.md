@@ -1,120 +1,97 @@
 # Plaid Integration Setup
 
-This guide explains how to set up Plaid integration for the LevelUp Financial app.
-
-## Prerequisites
-
-1. A Plaid account (sign up at https://plaid.com)
-2. Plaid API credentials (Client ID and Secret)
-3. Environment variables configured
+Automatic transaction sync uses **Plaid webhooks** + **`/transactions/sync`** (cursor per item). Pending transactions are imported for faster spend alerts; posted transactions merge into the same row without duplicate notifications.
 
 ## Environment Variables
 
-Add the following environment variables to your `.env.local` file:
-
 ```env
-# Plaid Configuration
+# Plaid
 PLAID_CLIENT_ID=your_plaid_client_id
 PLAID_SECRET=your_plaid_secret
-PLAID_ENV=sandbox  # Use 'sandbox' for development, 'production' for production
-PLAID_WEBHOOK_URL=https://your-domain.com/api/plaid/webhook  # Optional, for webhook events
+PLAID_ENV=sandbox  # sandbox | production
+PLAID_WEBHOOK_URL=https://your-domain.com/api/plaid/webhook  # optional if NEXT_PUBLIC_APP_URL is set
+
+# App URL (used for Link webhook registration fallback)
+NEXT_PUBLIC_APP_URL=https://your-domain.com
+
+# Server (webhooks + cron backup sync)
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+CRON_SECRET=long_random_secret
+
+# Push (optional)
+EXPO_ACCESS_TOKEN=           # Expo push for mobile tokens in user_push_subscriptions
+PUSH_WEBHOOK_URL=            # Custom HTTP hook for push delivery
+PLAID_SKIP_WEBHOOK_VERIFY=1  # local dev only — skip JWT verification
 ```
 
-### Getting Plaid Credentials
+Never expose `PLAID_SECRET` or `SUPABASE_SERVICE_ROLE_KEY` to the client.
 
-1. Log in to your Plaid Dashboard (https://dashboard.plaid.com)
-2. Navigate to **Team Settings** > **Keys**
-3. Copy your **Client ID** and **Secret**
-4. For development, use the **Sandbox** environment credentials
-5. For production, use the **Production** environment credentials
+## Database
 
-## Database Migration
-
-Run the Plaid integration migration:
+Apply migrations (includes `066_plaid_transactions_sync_and_notifications.sql`):
 
 ```bash
-# If using Supabase CLI
 supabase migration up
-
-# Or apply the migration manually
-psql -f supabase/migrations/013_plaid_integration.sql
 ```
 
-## Features
+Key fields:
 
-### 1. Connect Bank Accounts
-- Users can connect their bank accounts via Plaid Link
-- Supports multiple bank accounts per user
-- Secure token exchange and storage
+- `plaid_items.transactions_cursor` — Plaid sync cursor (per item)
+- `plaid_items.last_successful_update` — last successful sync timestamp
+- `transactions.pending`, `pending_transaction_id`, `original_pending_transaction_id`, `notified_at`, `removed_at`
 
-### 2. Automatic Transaction Sync
-- Automatically syncs accounts and transactions when connecting
-- Manual sync available from the Settings page
-- Syncs last 30 days of transactions by default
-- Prevents duplicate transactions using Plaid transaction IDs
+## How sync runs
 
-### 3. Account Mapping
-- Plaid accounts are automatically mapped to your account types:
-  - `depository` (checking/savings) → `checking` or `savings`
-  - `credit` → `credit`
-  - `investment`/`brokerage` → `investment`
-  - Others → `other`
+| Trigger | Route | Behavior |
+|---------|-------|----------|
+| Plaid webhook | `POST /api/plaid/webhook` | Responds `200` immediately; runs sync in background on `SYNC_UPDATES_AVAILABLE` |
+| Manual | `POST /api/plaid/sync` | Same `syncPlaidTransactionsForItem` |
+| Cron backup | `GET /api/cron/plaid-sync` | Every 6 hours (Vercel); `Authorization: Bearer {CRON_SECRET}` |
 
-### 4. Transaction Import
-- Transactions are imported with:
-  - Date, amount, name, and merchant information
-  - Linked to the correct account
-  - Marked as synced from Plaid
-  - Amounts follow your convention (positive = income, negative = expenses)
+## Pending → posted deduping
 
-## Usage
+1. Posted transaction with `pending_transaction_id` → update the row whose `plaid_transaction_id` equals that pending id.
+2. Otherwise fuzzy-match pending rows (account, amount, merchant, date within 5 days).
+3. Preserve `notified_at` so a second push is not sent for the same real-world spend.
+4. Idempotency key: `transaction_spend_alert:{user_id}:{original_pending_transaction_id || plaid_transaction_id}`
 
-1. Navigate to **Finance** > **Settings** > **Integrations**
-2. Click **Connect Bank Account**
-3. Follow the Plaid Link flow to connect your bank
-4. Accounts and transactions will be automatically synced
-5. Use the **Sync** button to manually refresh data
+## Push notifications
 
-## Security Notes
-
-⚠️ **Important**: In production, you should encrypt the `access_token` stored in the `plaid_items` table. The current implementation stores tokens in plain text for simplicity.
-
-Consider:
-- Using Supabase Vault or similar encryption
-- Implementing token rotation
-- Using environment-specific secrets management
-
-## Testing
-
-For testing in Sandbox mode, use Plaid's test credentials:
-- Username: `user_good`
-- Password: `pass_good`
-- Institution: Any institution in the Sandbox
-
-See [Plaid's Sandbox documentation](https://plaid.com/docs/sandbox/) for more test scenarios.
-
-## Troubleshooting
-
-### "Failed to create Link token"
-- Check that `PLAID_CLIENT_ID` and `PLAID_SECRET` are set correctly
-- Verify the Plaid environment matches your credentials
-
-### "Failed to exchange public token"
-- Ensure the public token hasn't expired (they expire after 30 minutes)
-- Check that the Plaid item hasn't been deleted
-
-### Transactions not syncing
-- Check the Plaid item's `error_code` and `error_message` fields
-- Verify the access token is still valid
-- Check Plaid Dashboard for any item errors
+- Spending = negative `amount` in app convention.
+- `maybeNotifyUserOfNewTransaction` sets `notified_at` and writes `notification_events`.
+- Register device tokens in `user_push_subscriptions` (Expo/mobile) or set `PUSH_WEBHOOK_URL`.
 
 ## API Routes
 
-- `POST /api/plaid/create-link-token` - Creates a Link token for Plaid Link
-- `POST /api/plaid/exchange-public-token` - Exchanges public token for access token
-- `POST /api/plaid/sync` - Syncs accounts and transactions from Plaid
+- `POST /api/plaid/create-link-token` — Link token (includes webhook URL)
+- `POST /api/plaid/exchange-public-token` — Store item + access token
+- `POST /api/plaid/sync` — Manual sync (authenticated user)
+- `POST /api/plaid/webhook` — Plaid callbacks (verified JWT)
+- `GET /api/cron/plaid-sync` — Backup sync (cron secret)
 
-All routes require authentication via Bearer token in the Authorization header.
+## Testing
 
+### Webhook sync (sandbox)
 
+1. Deploy with `PLAID_WEBHOOK_URL` and register URL in [Plaid Dashboard](https://dashboard.plaid.com/developers/webhooks).
+2. Use Plaid's webhook tester or `/sandbox/item/fire_webhook` for `SYNC_UPDATES_AVAILABLE`.
+3. Confirm logs: `[plaid-webhook] received` → `[plaid-sync] completed`.
 
+### Pending notifications
+
+1. Connect sandbox institution; trigger a pending transaction in sandbox.
+2. Run sync (webhook or manual).
+3. Check `transactions.pending = true`, `notified_at` set, row in `notification_events`.
+
+### Pending → posted (no duplicate)
+
+1. After pending exists, fire sync again when Plaid posts the transaction.
+2. Confirm one row: `pending = false`, `plaid_transaction_id` updated, single `notified_at`, no second notification event.
+
+### Manual sync
+
+Finance → Settings → Integrations → **Sync** (uses the same service as webhook/cron).
+
+## Limitations
+
+Alerts fire when **Plaid receives updated transaction data** from the institution — not guaranteed at card-swipe time. Pending data improves speed but still depends on the bank and Plaid.

@@ -170,6 +170,7 @@ export async function POST(request: NextRequest) {
             .from('categories')
             .select('id, name')
             .eq('user_id', user.id)
+            .eq('is_archived', false)
             .in('id', categoryIds);
 
         const categoryNameMap = new Map<string, string>();

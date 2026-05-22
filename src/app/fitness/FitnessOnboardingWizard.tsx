@@ -4,8 +4,10 @@ import { useMemo, useState } from 'react';
 import { supabase } from '@auth/supabaseClient';
 import {
     upsertFitnessUserProfileForUser,
+    type FitnessCoachingTone,
     type FitnessEquipmentAccess,
     type FitnessGoal,
+    type FitnessMotivationStyle,
     type FitnessSexIdentity,
     type FitnessTrainingLevel,
     type FitnessTrainingStyle,
@@ -69,6 +71,17 @@ const WEEKDAY_OPTIONS: { value: number; label: string }[] = [
     { value: 0, label: 'Sun' },
 ];
 
+const COACHING_TONE_OPTIONS: { value: FitnessCoachingTone; label: string }[] = [
+    { value: 'encouraging', label: 'Encouraging' },
+    { value: 'tough_love', label: 'Tough love' },
+    { value: 'neutral', label: 'Neutral' },
+];
+
+const MOTIVATION_STYLE_OPTIONS: { value: FitnessMotivationStyle; label: string }[] = [
+    { value: 'short_cues', label: 'Short cues' },
+    { value: 'detailed_rationale', label: 'Detailed rationale' },
+];
+
 function toggleValue<T extends string | number>(arr: T[], value: T): T[] {
     if (arr.includes(value)) return arr.filter((v) => v !== value);
     return [...arr, value];
@@ -85,6 +98,12 @@ export default function FitnessOnboardingWizard({ onCompleted }: Props) {
     const [equipment, setEquipment] = useState<FitnessEquipmentAccess[]>(['bodyweight']);
     const [injuriesLimitations, setInjuriesLimitations] = useState('');
     const [trainingStyle, setTrainingStyle] = useState<FitnessTrainingStyle | ''>('');
+    const [coachingTone, setCoachingTone] = useState<FitnessCoachingTone>('encouraging');
+    const [motivationStyle, setMotivationStyle] = useState<FitnessMotivationStyle>('short_cues');
+    const [timePressureMode, setTimePressureMode] = useState<'normal' | 'compressed'>('normal');
+    const [kneeConfidence, setKneeConfidence] = useState('3');
+    const [backConfidence, setBackConfidence] = useState('3');
+    const [shoulderConfidence, setShoulderConfidence] = useState('3');
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -134,6 +153,16 @@ export default function FitnessOnboardingWizard({ onCompleted }: Props) {
                     equipment_access: equipment,
                     injuries_limitations: injuriesLimitations || null,
                     preferred_training_style: trainingStyle || null,
+                    coaching_tone: coachingTone,
+                    motivation_style: motivationStyle,
+                    session_constraints: {
+                        time_pressure_mode: timePressureMode,
+                    },
+                    injury_confidence_map: {
+                        knee: Number(kneeConfidence),
+                        back: Number(backConfidence),
+                        shoulder: Number(shoulderConfidence),
+                    },
                 },
                 supabase
             );
@@ -265,6 +294,41 @@ export default function FitnessOnboardingWizard({ onCompleted }: Props) {
                             ))}
                         </select>
                     </label>
+                    <label className="text-sm">
+                        <span className="text-slate-300">Coaching tone</span>
+                        <select
+                            value={coachingTone}
+                            onChange={(e) => setCoachingTone(e.target.value as FitnessCoachingTone)}
+                            className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-white"
+                        >
+                            {COACHING_TONE_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                        </select>
+                    </label>
+                    <label className="text-sm">
+                        <span className="text-slate-300">Motivation style</span>
+                        <select
+                            value={motivationStyle}
+                            onChange={(e) => setMotivationStyle(e.target.value as FitnessMotivationStyle)}
+                            className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-white"
+                        >
+                            {MOTIVATION_STYLE_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                        </select>
+                    </label>
+                    <label className="text-sm">
+                        <span className="text-slate-300">Session pacing</span>
+                        <select
+                            value={timePressureMode}
+                            onChange={(e) => setTimePressureMode(e.target.value as 'normal' | 'compressed')}
+                            className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-white"
+                        >
+                            <option value="normal">Normal pace</option>
+                            <option value="compressed">Compressed (time-efficient)</option>
+                        </select>
+                    </label>
                 </div>
 
                 <fieldset>
@@ -309,6 +373,23 @@ export default function FitnessOnboardingWizard({ onCompleted }: Props) {
                         className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-white"
                     />
                 </label>
+                <fieldset className="rounded-md border border-slate-800 p-3">
+                    <legend className="px-1 text-xs font-medium text-slate-400">Movement confidence (1-5)</legend>
+                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <label className="text-xs text-slate-300">
+                            Knee
+                            <input type="number" min={1} max={5} value={kneeConfidence} onChange={(e) => setKneeConfidence(e.target.value)} className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-white" />
+                        </label>
+                        <label className="text-xs text-slate-300">
+                            Back
+                            <input type="number" min={1} max={5} value={backConfidence} onChange={(e) => setBackConfidence(e.target.value)} className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-white" />
+                        </label>
+                        <label className="text-xs text-slate-300">
+                            Shoulder
+                            <input type="number" min={1} max={5} value={shoulderConfidence} onChange={(e) => setShoulderConfidence(e.target.value)} className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-white" />
+                        </label>
+                    </div>
+                </fieldset>
 
                 {error && (
                     <p className="text-sm text-red-400">{error}</p>

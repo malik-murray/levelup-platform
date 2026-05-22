@@ -330,7 +330,7 @@ export default function LandingPage() {
 
   return (
     <main
-      className={`${outfit.className} relative min-h-dvh overflow-hidden bg-[#010205] text-white antialiased`}
+      className={`${outfit.className} relative min-h-dvh overflow-hidden bg-white text-slate-900 antialiased transition-colors dark:bg-[#010205] dark:text-white`}
     >
       <LandingBackground px={parallax.x} py={parallax.y} reducedMotion={reducedMotion} />
 

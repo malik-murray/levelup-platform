@@ -2,14 +2,9 @@
  * Tests for CategoryEngine
  */
 
-import { categorizeTransaction, TransactionToCategorize, CategorizationOptions } from '../categoryEngine';
+import { normalizeMerchantName, merchantKeyFromNameNote, TransactionToCategorize } from '../categoryEngine';
 
 describe('CategoryEngine', () => {
-    const mockOptions: CategorizationOptions = {
-        userId: 'test-user-id',
-        enableML: false,
-    };
-
     describe('categorizeTransaction', () => {
         it('should return null for transaction without matches', async () => {
             const transaction: TransactionToCategorize = {
@@ -25,6 +20,12 @@ describe('CategoryEngine', () => {
             expect(transaction).toBeDefined();
         });
 
+        it('should build the same merchant key from name-only vs split name/note', () => {
+            expect(merchantKeyFromNameNote('Coffee Shop #1', null)).toBe(
+                merchantKeyFromNameNote('Coffee', 'Shop #1')
+            );
+        });
+
         it('should handle merchant name normalization', () => {
             const merchantNames = [
                 'AMAZON.COM',
@@ -35,7 +36,7 @@ describe('CategoryEngine', () => {
 
             // All should normalize to similar patterns
             merchantNames.forEach(name => {
-                expect(name.toLowerCase().replace(/[^a-z0-9]/g, '')).toContain('amazon');
+                expect(normalizeMerchantName(name)).toContain('amazon');
             });
         });
 

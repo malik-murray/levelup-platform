@@ -1,8 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { FitnessUserProfile } from './profile';
-import { generateWorkoutPlanFromCatalog, type WorkoutDifficulty } from './workoutGenerator';
+import { generateWorkoutPlanFromCatalog, type GeneratedWorkoutItem, type WorkoutDifficulty } from './workoutGenerator';
 import { createWorkoutPlanFromGeneratedPlan, listWorkoutPlansForUser, type WorkoutPlanWithItems } from './workoutPlans';
 import { activateProgramForUser } from './programEngine';
+import { getPublishedExercises } from './exercises';
 
 function mapTrainingLevelToDifficulty(level: FitnessUserProfile['training_level']): WorkoutDifficulty {
     if (level === 'advanced') return 'advanced';
@@ -71,6 +72,7 @@ function buildPlanDescription(profile: FitnessUserProfile): string {
 export async function generatePersonalizedStarterPlanForUser(
     userId: string,
     profile: FitnessUserProfile,
+    options?: { aiItems?: Array<{ exercise_slug: string; sets: number; rep_range: string; rest_seconds: number; note?: string | null }> },
     supabase?: SupabaseClient
 ): Promise<WorkoutPlanWithItems> {
     const existingPlans = await listWorkoutPlansForUser(userId, supabase);
@@ -93,17 +95,41 @@ export async function generatePersonalizedStarterPlanForUser(
     const difficulty = mapTrainingLevelToDifficulty(profile.training_level);
     const muscleSlugs = pickMusclesFromProfile(profile);
     const count = pickExerciseCount(profile);
-    const generatedItems = await generateWorkoutPlanFromCatalog(
-        {
-            muscleSlugs,
+    let generatedItems: GeneratedWorkoutItem[] = [];
+    const aiItems = options?.aiItems ?? [];
+    if (aiItems.length > 0) {
+        const exercises = await getPublishedExercises(supabase);
+        const bySlug = new Map(exercises.map((ex) => [ex.slug, ex]));
+        generatedItems = aiItems
+            .map((item): GeneratedWorkoutItem | null => {
+                const exercise = bySlug.get(item.exercise_slug);
+                if (!exercise) return null;
+                const row: GeneratedWorkoutItem = {
+                    exercise,
+                    sets: Math.min(6, Math.max(2, item.sets)),
+                    repRange: item.rep_range,
+                    restSeconds: Math.min(180, Math.max(30, item.rest_seconds)),
+                };
+                if (item.note != null && item.note !== '') {
+                    row.note = item.note;
+                }
+                return row;
+            })
+            .filter((item): item is GeneratedWorkoutItem => item !== null);
+    }
+    if (generatedItems.length === 0) {
+        generatedItems = await generateWorkoutPlanFromCatalog(
+            {
+                muscleSlugs,
+                difficulty,
+                count,
+                publishedOnly: true,
+            },
+            supabase,
             difficulty,
-            count,
-            publishedOnly: true,
-        },
-        supabase,
-        difficulty,
-        true
-    );
+            true
+        );
+    }
 
     if (generatedItems.length === 0) {
         throw new Error('Could not generate a plan from your profile yet. Try updating equipment or goals.');

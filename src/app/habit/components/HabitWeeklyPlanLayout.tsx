@@ -31,7 +31,11 @@ export default function HabitWeeklyPlanLayout() {
       <AppSidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       <div className="relative flex min-w-0 flex-1 flex-col overflow-x-hidden">
-        <div className="pointer-events-none absolute inset-0" aria-hidden>
+        <div
+          className="pointer-events-none absolute inset-0 bg-gradient-to-b from-slate-800/95 via-slate-900 to-slate-950/95 dark:hidden"
+          aria-hidden
+        />
+        <div className="pointer-events-none absolute inset-0 hidden dark:block" aria-hidden>
           <div
             className="absolute inset-0"
             style={{

@@ -660,6 +660,7 @@ export async function getTrainNextRecommendationForUser(
 export type ProgressPageData = {
     summary: ProgressSummary;
     recentCompletedSessions: WorkoutSession[];
+    weeklyAIRecap: string | null;
 };
 
 /**
@@ -680,6 +681,7 @@ export async function getProgressPageDataForUser(
                 latestCompletedSession: null,
             },
             recentCompletedSessions: [],
+            weeklyAIRecap: null,
         };
     }
     const summaries = await getSessionSummaries(sessions.map((s) => s.id), supabase);
@@ -699,7 +701,21 @@ export async function getProgressPageDataForUser(
             },
         },
         recentCompletedSessions: sessions.slice(0, recentLimit),
+        weeklyAIRecap: buildWeeklyAIRecap(sessions.length, totalLoggedSets),
     };
+}
+
+function buildWeeklyAIRecap(completedSessionsCount: number, totalLoggedSets: number): string {
+    if (completedSessionsCount === 0) {
+        return 'No sessions completed yet. Start with a short guided workout and build a baseline this week.';
+    }
+    if (completedSessionsCount < 3) {
+        return `You completed ${completedSessionsCount} session(s). Keep momentum by scheduling one more focused workout this week.`;
+    }
+    if (totalLoggedSets < 40) {
+        return `Consistency is improving. Next step: increase intent per set and log notes on effort to drive smarter progression.`;
+    }
+    return `Great consistency and workload this cycle. Next week, keep form quality high and progress either reps or load on your primary lifts.`;
 }
 
 /**
@@ -979,6 +995,17 @@ export async function completeWorkoutSession(
         });
     } catch (e) {
         console.error('completeWorkoutSession (program schedule completion):', e);
+    }
+    try {
+        await client.from('fitness_ai_coaching_events').insert({
+            user_id: session.user_id,
+            session_id: session.id,
+            prompt_type: 'session_finish',
+            response_id: `session-${session.id}`,
+            response_text: adaptation?.reason ?? 'Session completed and logged.',
+        });
+    } catch (e) {
+        console.error('completeWorkoutSession (coaching event log):', e);
     }
 
     return { session, adaptation };

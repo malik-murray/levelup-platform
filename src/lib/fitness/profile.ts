@@ -50,6 +50,9 @@ export type FitnessTrainingStyle =
     | 'circuit'
     | 'minimalist';
 
+export type FitnessCoachingTone = 'encouraging' | 'tough_love' | 'neutral';
+export type FitnessMotivationStyle = 'short_cues' | 'detailed_rationale';
+
 export type FitnessUserProfile = {
     id: string;
     user_id: string;
@@ -64,6 +67,10 @@ export type FitnessUserProfile = {
     equipment_access: FitnessEquipmentAccess[];
     injuries_limitations: string | null;
     preferred_training_style: FitnessTrainingStyle | null;
+    coaching_tone: FitnessCoachingTone;
+    motivation_style: FitnessMotivationStyle;
+    session_constraints: Record<string, unknown>;
+    injury_confidence_map: Record<string, number>;
     is_onboarding_complete: boolean;
     completed_at: string | null;
     created_at: string;
@@ -81,6 +88,10 @@ export type UpsertFitnessUserProfileInput = {
     equipment_access: FitnessEquipmentAccess[];
     injuries_limitations?: string | null;
     preferred_training_style?: FitnessTrainingStyle | null;
+    coaching_tone?: FitnessCoachingTone;
+    motivation_style?: FitnessMotivationStyle;
+    session_constraints?: Record<string, unknown>;
+    injury_confidence_map?: Record<string, number>;
 };
 
 export async function getFitnessUserProfileForUser(
@@ -125,6 +136,10 @@ export async function upsertFitnessUserProfileForUser(
         equipment_access: input.equipment_access,
         injuries_limitations: input.injuries_limitations?.trim() || null,
         preferred_training_style: input.preferred_training_style ?? null,
+        coaching_tone: input.coaching_tone ?? 'encouraging',
+        motivation_style: input.motivation_style ?? 'short_cues',
+        session_constraints: input.session_constraints ?? {},
+        injury_confidence_map: input.injury_confidence_map ?? {},
         is_onboarding_complete: true,
         completed_at: new Date().toISOString(),
     };

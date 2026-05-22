@@ -35,6 +35,7 @@ export async function getBudgetGroupsForMonth(
         .from('categories')
         .select('id, name, kind, parent_id, type, sort_order')
         .eq('user_id', user.id)
+        .eq('is_archived', false)
         .order('name', { ascending: true });
     
     categoriesData = result.data;
@@ -53,6 +54,7 @@ export async function getBudgetGroupsForMonth(
             .from('categories')
             .select('id, name, kind, parent_id, type')
             .eq('user_id', user.id)
+            .eq('is_archived', false)
             .order('name', { ascending: true });
         
         categoriesData = retryResult.data;

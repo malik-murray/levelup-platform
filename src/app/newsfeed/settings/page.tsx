@@ -26,6 +26,27 @@ type Preferences = {
     selected_topic_ids: string[];
 };
 
+const PRESETS = [
+    {
+        id: 'daily-briefing',
+        label: 'Daily Briefing',
+        topicNames: ['fed_gov', 'federal_workforce', 'dmv', 'tech', 'business', 'finance'],
+        sourceNames: ['reuters', 'ap_news', 'npr', 'bloomberg', 'marketwatch'],
+    },
+    {
+        id: 'federal-dmv',
+        label: 'Federal + DMV',
+        topicNames: ['fed_gov', 'federal_workforce', 'dmv', 'politics', 'economy'],
+        sourceNames: ['reuters', 'ap_news', 'npr', 'wtop', 'dcist'],
+    },
+    {
+        id: 'tech-finance',
+        label: 'Tech + Finance',
+        topicNames: ['tech', 'ai', 'software', 'business', 'finance', 'stocks'],
+        sourceNames: ['hacker_news', 'techcrunch', 'the_verge', 'bloomberg', 'marketwatch'],
+    },
+] as const;
+
 export default function NewsfeedSettingsPage() {
     const router = useRouter();
     const [sources, setSources] = useState<Source[]>([]);
@@ -377,6 +398,23 @@ export default function NewsfeedSettingsPage() {
         });
     };
 
+    const applyPreset = (preset: (typeof PRESETS)[number]) => {
+        const topicNameSet = new Set<string>([...preset.topicNames]);
+        const sourceNameSet = new Set<string>([...preset.sourceNames]);
+        const topicIds = topics
+            .filter((topic) => topicNameSet.has(topic.name))
+            .map((topic) => topic.id);
+        const sourceIds = sources
+            .filter((source) => sourceNameSet.has(source.name))
+            .map((source) => source.id);
+
+        setPreferences((prev) => ({
+            ...prev,
+            selected_source_ids: Array.from(new Set([...prev.selected_source_ids, ...sourceIds])),
+            selected_topic_ids: Array.from(new Set([...prev.selected_topic_ids, ...topicIds])),
+        }));
+    };
+
 
     if (loading) {
         return (
@@ -425,6 +463,25 @@ export default function NewsfeedSettingsPage() {
                         {error}
                     </div>
                 )}
+
+                {/* Presets */}
+                <div className="rounded-lg border border-slate-800 bg-slate-950 dark:bg-slate-950 p-4 sm:p-6">
+                    <h2 className="text-lg font-semibold mb-2">Quick Presets</h2>
+                    <p className="text-sm text-slate-400 mb-4">
+                        Apply a recommended setup, then fine-tune sources and topics below.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                        {PRESETS.map((preset) => (
+                            <button
+                                key={preset.id}
+                                onClick={() => applyPreset(preset)}
+                                className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 hover:text-amber-300 transition-colors"
+                            >
+                                {preset.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
 
                 {/* News Sources */}
                 <div className="rounded-lg border border-slate-800 bg-slate-950 dark:bg-slate-950 p-4 sm:p-6">

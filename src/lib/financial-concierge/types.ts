@@ -148,7 +148,14 @@ export interface StatementPeriod {
 // CATEGORIZATION
 // ============================================================
 
-export type CategorizationMethod = 'rule' | 'merchant_mapping' | 'ml_model' | 'user_override' | 'manual';
+export type CategorizationMethod =
+    | 'rule'
+    | 'merchant_mapping'
+    | 'ml_model'
+    | 'user_override'
+    | 'manual'
+    | 'recurring_item'
+    | 'plaid_personal_finance';
 
 export interface MerchantMapping {
     id: string;

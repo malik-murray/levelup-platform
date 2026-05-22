@@ -2,6 +2,12 @@
 
 import { useEffect, useMemo, useState, ChangeEvent, FormEvent } from 'react';
 import { supabase } from '@auth/supabaseClient';
+import {
+    learnMerchantMappingFromUserCategory,
+    merchantKeyFromNameNote,
+} from '@/lib/financial-concierge/categoryEngine';
+
+type AccountType = 'checking' | 'savings' | 'credit' | 'cash' | 'investment' | 'other';
 
 type Account = {
     id: string;
@@ -53,6 +59,11 @@ type TxRow = {
 };
 
 export default function TransactionsPage() {
+    const categoryAllowedForTxType = (
+        categoryType: Category['type'],
+        txType: 'expense' | 'income'
+    ) => categoryType === txType || categoryType === 'transfer';
+
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [categories, setCategories] = useState<Category[]>([]);
@@ -70,6 +81,7 @@ export default function TransactionsPage() {
         amount: number;
         categoryId?: string | null;
         categoryName?: string; // For typed category names
+        isAddingCategory?: boolean;
         selected: boolean;
         isTransfer?: boolean;
         transferToAccountId?: string | null;
@@ -97,6 +109,12 @@ export default function TransactionsPage() {
     // Transfer-specific state (used when transactionType === 'transfer')
     const [transferFromAccount, setTransferFromAccount] = useState<string>('');
     const [transferToAccount, setTransferToAccount] = useState<string>('');
+    const [isAddingTransferFromAccount, setIsAddingTransferFromAccount] = useState(false);
+    const [isAddingTransferToAccount, setIsAddingTransferToAccount] = useState(false);
+    const [newTransferFromAccountName, setNewTransferFromAccountName] = useState('');
+    const [newTransferToAccountName, setNewTransferToAccountName] = useState('');
+    const [newTransferFromAccountType, setNewTransferFromAccountType] = useState<AccountType>('checking');
+    const [newTransferToAccountType, setNewTransferToAccountType] = useState<AccountType>('checking');
     const [creatingTransfer, setCreatingTransfer] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [originalTransactionType, setOriginalTransactionType] = useState<'transaction' | 'transfer' | null>(null);
@@ -106,9 +124,12 @@ export default function TransactionsPage() {
     const [accountId, setAccountId] = useState<string>('');
     const [categoryId, setCategoryId] = useState<string>('');
     const [categoryName, setCategoryName] = useState<string>('');
+    const [isAddingFormCategory, setIsAddingFormCategory] = useState(false);
     const [amount, setAmount] = useState<string>('');
-    const [person, setPerson] = useState<string>('Malik');
     const [note, setNote] = useState<string>('');
+    /** When saving a transaction, also set category on every row with the same normalized description. */
+    const [applyCategoryToMatchingDescriptions, setApplyCategoryToMatchingDescriptions] =
+        useState(false);
     
     // Bulk transaction state
     const [bulkTransactions, setBulkTransactions] = useState<Array<{
@@ -118,7 +139,6 @@ export default function TransactionsPage() {
         categoryName: string;
         type: 'expense' | 'income';
         amount: string;
-        person: string;
         note: string;
     }>>([{
         date: new Date().toISOString().slice(0, 10),
@@ -127,7 +147,6 @@ export default function TransactionsPage() {
         categoryName: '',
         type: 'expense',
         amount: '',
-        person: 'Malik',
         note: '',
     }]);
 
@@ -136,6 +155,7 @@ export default function TransactionsPage() {
         const now = new Date();
         return new Date(now.getFullYear(), now.getMonth(), 1);
     });
+    const [transactionWindow, setTransactionWindow] = useState<'month' | 'all'>('month');
 
     // Bulk edit state
     const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
@@ -143,7 +163,13 @@ export default function TransactionsPage() {
     const [bulkEditCategory, setBulkEditCategory] = useState<string>('');
     const [bulkEditAccount, setBulkEditAccount] = useState<string>('');
     const [bulkEditDate, setBulkEditDate] = useState<string>('');
+    const [bulkTransferFromAccount, setBulkTransferFromAccount] = useState<string>('');
+    const [bulkTransferToAccount, setBulkTransferToAccount] = useState<string>('');
     const [bulkUpdating, setBulkUpdating] = useState(false);
+    const [categoryFilterId, setCategoryFilterId] = useState<string>('');
+    const [sortMode, setSortMode] = useState<
+        'date_desc' | 'merchant_frequency' | 'amount_desc' | 'amount_asc'
+    >('date_desc');
 
     const monthStr = useMemo(
         () =>
@@ -161,6 +187,99 @@ export default function TransactionsPage() {
                 year: 'numeric',
             }),
         [monthDate]
+    );
+
+    const visibleTransactions = useMemo(() => {
+        if (!categoryFilterId) return transactions;
+        if (categoryFilterId === '__uncategorized__') {
+            return transactions.filter(tx => !tx.categoryId);
+        }
+        return transactions.filter(tx => tx.categoryId === categoryFilterId);
+    }, [transactions, categoryFilterId]);
+
+    const merchantFrequencyRows = useMemo(() => {
+        const byMerchant = new Map<
+            string,
+            { key: string; label: string; count: number; totalAmount: number; latestDate: string }
+        >();
+
+        for (const tx of visibleTransactions) {
+            const raw = (tx.name || tx.note || '').trim();
+            const normalized = raw.toLowerCase().replace(/\s+/g, ' ');
+            const key = normalized || '(no description)';
+            const label = raw || '(No description)';
+            const existing = byMerchant.get(key);
+            if (existing) {
+                existing.count += 1;
+                existing.totalAmount += Math.abs(tx.amount);
+                if (tx.date > existing.latestDate) existing.latestDate = tx.date;
+            } else {
+                byMerchant.set(key, {
+                    key,
+                    label,
+                    count: 1,
+                    totalAmount: Math.abs(tx.amount),
+                    latestDate: tx.date,
+                });
+            }
+        }
+
+        return Array.from(byMerchant.values()).sort((a, b) => {
+            if (b.count !== a.count) return b.count - a.count;
+            return b.totalAmount - a.totalAmount;
+        });
+    }, [visibleTransactions]);
+
+    const displayedTransactions = useMemo(() => {
+        if (sortMode === 'merchant_frequency') {
+            const rankByMerchant = new Map<string, number>();
+            merchantFrequencyRows.forEach((row, idx) => rankByMerchant.set(row.key, idx));
+            return [...visibleTransactions].sort((a, b) => {
+                const aKey = ((a.name || a.note || '').trim().toLowerCase().replace(/\s+/g, ' ')) || '(no description)';
+                const bKey = ((b.name || b.note || '').trim().toLowerCase().replace(/\s+/g, ' ')) || '(no description)';
+                const rankA = rankByMerchant.get(aKey) ?? Number.MAX_SAFE_INTEGER;
+                const rankB = rankByMerchant.get(bKey) ?? Number.MAX_SAFE_INTEGER;
+                if (rankA !== rankB) return rankA - rankB;
+                return new Date(b.date).getTime() - new Date(a.date).getTime();
+            });
+        }
+        if (sortMode === 'amount_desc') {
+            return [...visibleTransactions].sort((a, b) => {
+                const diff = Math.abs(b.amount) - Math.abs(a.amount);
+                if (diff !== 0) return diff;
+                return new Date(b.date).getTime() - new Date(a.date).getTime();
+            });
+        }
+        if (sortMode === 'amount_asc') {
+            return [...visibleTransactions].sort((a, b) => {
+                const diff = Math.abs(a.amount) - Math.abs(b.amount);
+                if (diff !== 0) return diff;
+                return new Date(b.date).getTime() - new Date(a.date).getTime();
+            });
+        }
+        return [...visibleTransactions].sort(
+            (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+        );
+    }, [visibleTransactions, merchantFrequencyRows, sortMode]);
+
+    const selectedBulkCategory = useMemo(
+        () => categories.find(c => c.id === bulkEditCategory) || null,
+        [categories, bulkEditCategory]
+    );
+    const transferCategoryId = useMemo(
+        () =>
+            categories.find(
+                c =>
+                    c.kind === 'category' &&
+                    (c.type === 'transfer' || c.name.toLowerCase() === 'transfer')
+            )?.id ?? null,
+        [categories]
+    );
+
+    const bulkCategoryIsTransfer = Boolean(
+        selectedBulkCategory &&
+            (selectedBulkCategory.type === 'transfer' ||
+                selectedBulkCategory.name.toLowerCase() === 'transfer')
     );
 
     const goToPrevMonth = () => {
@@ -298,7 +417,12 @@ export default function TransactionsPage() {
                 { data: categoriesData, error: categoriesError },
             ] = await Promise.all([
                 supabase.from('accounts').select('id, name').eq('user_id', user.id).order('name'),
-                supabase.from('categories').select('id, name, kind, parent_id, type').eq('user_id', user.id).order('name'),
+                supabase
+                    .from('categories')
+                    .select('id, name, kind, parent_id, type')
+                    .eq('user_id', user.id)
+                    .eq('is_archived', false)
+                    .order('name'),
             ]);
 
             if (accountsError) {
@@ -317,7 +441,13 @@ export default function TransactionsPage() {
         loadData();
     }, []);
 
-    // load transactions for selected month
+    useEffect(() => {
+        if (!merchantKeyFromNameNote((note || '').trim() || null, null)) {
+            setApplyCategoryToMatchingDescriptions(false);
+        }
+    }, [note]);
+
+    // load transactions for selected window (month or all)
     useEffect(() => {
         const load = async () => {
             setLoading(true);
@@ -347,10 +477,7 @@ export default function TransactionsPage() {
                 return;
             }
 
-            // Try to fetch with name field first (if migration has been run)
-            let { data: txData, error: txError } = await supabase
-                .from('transactions')
-                .select(`
+            const baseSelect = `
           id,
           date,
           amount,
@@ -363,16 +490,25 @@ export default function TransactionsPage() {
           transfer_group_id,
           accounts ( id, name ),
           categories ( id, name )
-        `)
+        `;
+
+            let query = supabase
+                .from('transactions')
+                .select(baseSelect)
                 .eq('user_id', user.id)
-                .gte('date', startStr)
-                .lt('date', endStr)
-                .order('date', { ascending: false });
+                .is('removed_at', null);
+
+            if (transactionWindow === 'month') {
+                query = query.gte('date', startStr).lt('date', endStr);
+            }
+
+            // Try to fetch with name field first (if migration has been run)
+            let { data: txData, error: txError } = await query.order('date', { ascending: false });
 
             // If error and it might be due to missing 'name' column, retry without it
             if (txError && (txError.message?.includes('column') || txError.code === 'PGRST116')) {
                 console.log('Retrying query without name column (migration may not be run yet)');
-                const retryResult = await supabase
+                let retryQuery = supabase
                     .from('transactions')
                     .select(`
           id,
@@ -387,10 +523,13 @@ export default function TransactionsPage() {
           accounts ( id, name ),
           categories ( id, name )
         `)
-                    .eq('user_id', user.id)
-                    .gte('date', startStr)
-                    .lt('date', endStr)
-                    .order('date', { ascending: false });
+                    .eq('user_id', user.id);
+
+                if (transactionWindow === 'month') {
+                    retryQuery = retryQuery.gte('date', startStr).lt('date', endStr);
+                }
+
+                const retryResult = await retryQuery.order('date', { ascending: false });
                 
                 // Add name: null to each row if it doesn't exist (migration not run yet)
                 if (retryResult.data) {
@@ -439,7 +578,7 @@ export default function TransactionsPage() {
             setNotification('Error loading transactions. Check console/logs.');
             setLoading(false);
         });
-    }, [monthDate]);
+    }, [monthDate, transactionWindow]);
 
     // ✅ Filter out transfers from income/expense totals
     const totalIn = useMemo(
@@ -469,8 +608,8 @@ export default function TransactionsPage() {
         setAccountId('');
         setCategoryId('');
         setCategoryName('');
+        setIsAddingFormCategory(false);
         setAmount('');
-        setPerson('Malik');
         setNote('');
         setEditingId(null);
         setOriginalTransactionType(null);
@@ -479,6 +618,26 @@ export default function TransactionsPage() {
         setExpenseIncomeType('expense');
         setTransferFromAccount('');
         setTransferToAccount('');
+        setIsAddingTransferFromAccount(false);
+        setIsAddingTransferToAccount(false);
+        setNewTransferFromAccountName('');
+        setNewTransferToAccountName('');
+        setNewTransferFromAccountType('checking');
+        setNewTransferToAccountType('checking');
+        setApplyCategoryToMatchingDescriptions(false);
+    };
+
+    const inferPersonFromUser = (user: { email?: string | null; user_metadata?: Record<string, unknown> | null }) => {
+        const md = user.user_metadata || {};
+        const fullName =
+            (typeof md.full_name === 'string' && md.full_name.trim()) ||
+            (typeof md.name === 'string' && md.name.trim()) ||
+            (typeof md.display_name === 'string' && md.display_name.trim()) ||
+            '';
+        if (fullName) return fullName;
+        const email = user.email || '';
+        if (email.includes('@')) return email.split('@')[0];
+        return 'User';
     };
     
     const findOrCreateCategory = async (categoryNameInput: string, type: 'expense' | 'income'): Promise<string | null> => {
@@ -494,36 +653,56 @@ export default function TransactionsPage() {
         if (existingCategory) {
             return existingCategory.id;
         }
-        
-        // Category doesn't exist, create it
-        try {
+
+        // Allow creating custom categories directly from the transaction form.
+        if (type === 'income' || type === 'expense') {
+            const { data: { user }, error: authError } = await supabase.auth.getUser();
+            if (authError || !user) {
+                setNotification(`You must be logged in to create a new ${type} category.`);
+                return null;
+            }
+
             const { data, error } = await supabase
                 .from('categories')
                 .insert({
                     name: trimmedName,
-                    type: type,
+                    type,
                     kind: 'category',
-                    parent_id: null, // Will be a standalone category
+                    parent_id: null,
+                    user_id: user.id,
+                    is_archived: false,
                 })
-                .select()
+                .select('id, name, kind, parent_id, type')
                 .single();
-            
-            if (error) {
-                console.error('Error creating category:', error);
-                setNotification(`Error creating category: ${error.message}`);
+
+            if (error || !data?.id) {
+                console.error(`Error creating ${type} category:`, error);
+                setNotification(
+                    error?.message
+                        ? `Could not create category "${trimmedName}": ${error.message}`
+                        : `Could not create category "${trimmedName}".`
+                );
                 return null;
             }
-            
-            // Add to local state
+
             setCategories(prev => [...prev, data as Category]);
-            setNotification(`Created new category: "${trimmedName}"`);
-            
             return data.id;
-        } catch (error) {
-            console.error('Error creating category:', error);
-            setNotification('Error creating category. Check console/logs.');
-            return null;
         }
+        
+        const needsReview = categories.find(
+            c =>
+                c.kind === 'category' &&
+                c.type === 'expense' &&
+                c.name.toLowerCase() === 'needs review'
+        );
+        if (needsReview) {
+            setNotification(
+                `Category "${trimmedName}" is outside the 20-category master list. Routing to Needs Review.`
+            );
+            return needsReview.id;
+        }
+        setNotification('Category not found in the 20-category master list.');
+        return null;
     };
 
     const handleEditTransaction = (tx: Transaction) => {
@@ -547,7 +726,7 @@ export default function TransactionsPage() {
                 // Pre-fill regular transaction fields in case user switches to transaction type
                 setAccountId(fromTx.accountId ?? '');
                 setCategoryId(fromTx.categoryId ?? '');
-                setPerson(fromTx.person ?? 'Malik');
+                setIsAddingFormCategory(false);
                 setShowTransactionForm(true);
             } else {
                 setNotification('Could not find both sides of transfer. Please delete and recreate.');
@@ -560,12 +739,12 @@ export default function TransactionsPage() {
             setExpenseIncomeType(tx.amount >= 0 ? 'income' : 'expense');
             setDate(tx.date.slice(0, 10));
             setAmount(Math.abs(tx.amount).toString());
-            setPerson(tx.person);
             setNote(tx.name || tx.note || '');
             setAccountId(tx.accountId ?? '');
             setCategoryId(tx.categoryId ?? '');
             const cat = categories.find(c => c.id === tx.categoryId);
             setCategoryName(cat?.name || tx.category || '');
+            setIsAddingFormCategory(false);
             // Pre-fill transfer fields in case user switches to transfer type
             setTransferFromAccount(tx.accountId ?? '');
             setTransferToAccount('');
@@ -575,6 +754,42 @@ export default function TransactionsPage() {
 
     const handleCancelEdit = () => {
         resetFormToDefault();
+    };
+
+    const findOrCreateAccountByName = async (
+        accountNameInput: string,
+        accountType: AccountType,
+        userId: string
+    ): Promise<string | null> => {
+        const trimmed = accountNameInput.trim();
+        if (!trimmed) return null;
+
+        const existing = accounts.find(a => a.name.toLowerCase() === trimmed.toLowerCase());
+        if (existing) return existing.id;
+
+        const { data, error } = await supabase
+            .from('accounts')
+            .insert({
+                name: trimmed,
+                type: accountType,
+                starting_balance: 0,
+                user_id: userId,
+            })
+            .select('id, name')
+            .single();
+
+        if (error || !data?.id) {
+            console.error('Error creating account in transfer form:', error);
+            setNotification(
+                error?.message
+                    ? `Could not create account "${trimmed}": ${error.message}`
+                    : `Could not create account "${trimmed}".`
+            );
+            return null;
+        }
+
+        setAccounts(prev => [...prev, { id: data.id, name: data.name }]);
+        return data.id;
     };
 
     const handleSaveTransaction = async (e: FormEvent, addAnother: boolean = false) => {
@@ -615,6 +830,51 @@ export default function TransactionsPage() {
         }
 
         setNotification(null);
+
+        const sameDescriptionBulkSuffix = async (categoryIdForBulk: string): Promise<string> => {
+            if (transactionType !== 'transaction' || !applyCategoryToMatchingDescriptions) {
+                return '';
+            }
+            const anchorName = (note || '').trim() || null;
+            const anchorNote: string | null = null;
+            if (!merchantKeyFromNameNote(anchorName, anchorNote)) {
+                return ' Same-description bulk apply skipped (add a transaction name).';
+            }
+            const { data: sessionData } = await supabase.auth.getSession();
+            const token = sessionData.session?.access_token;
+            if (!token) {
+                return ' Same-description bulk apply skipped (not signed in).';
+            }
+            try {
+                const res = await fetch('/api/finance/apply-category-to-matching', {
+                    method: 'POST',
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        category_id: categoryIdForBulk,
+                        name: anchorName,
+                        note: anchorNote,
+                    }),
+                });
+                const payload = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    return ` Same-description bulk apply failed: ${payload.error || res.statusText}.`;
+                }
+                const updated = Number(payload.updated) || 0;
+                const matched = Number(payload.matched) || 0;
+                if (updated > 0) {
+                    return ` Also updated ${updated} other transaction${updated === 1 ? '' : 's'} with the same description (${matched} matched in total).`;
+                }
+                if (matched > 1) {
+                    return ` ${matched} transactions share this description; others were already in this category.`;
+                }
+                return '';
+            } catch {
+                return ' Same-description bulk apply failed (network).';
+            }
+        };
 
         if (editingId) {
             // Check if transaction type has changed
@@ -657,13 +917,14 @@ export default function TransactionsPage() {
                 }
 
                 // Create new regular transaction
+                const inferredPerson = inferPersonFromUser(user);
                 const { error: insertError } = await supabase.from('transactions').insert({
                     date,
                     account_id: accountId,
                     category_id: finalCategoryId,
                     amount: finalAmount,
                     name: note || null, // Use note as name for manual transactions
-                    person,
+                    person: inferredPerson,
                     note: null, // Clear note since we're using name
                     is_transfer: false,
                     transfer_group_id: null,
@@ -677,13 +938,31 @@ export default function TransactionsPage() {
                     return;
                 }
 
-                setNotification('Transfer converted to transaction.');
+                if (finalCategoryId) {
+                    void learnMerchantMappingFromUserCategory(supabase, {
+                        userId: user.id,
+                        categoryId: finalCategoryId,
+                        name: (note || '').trim() || editingTx.name || null,
+                        note: editingTx.note || null,
+                    });
+                }
+
+                const extra = finalCategoryId
+                    ? await sameDescriptionBulkSuffix(finalCategoryId)
+                    : '';
+                setNotification('Transfer converted to transaction.' + extra);
             } else {
                 // UPDATE existing transaction (same type)
                 if (!finalCategoryId) {
                     setNotification('Please select or create a category.');
                     return;
                 }
+                const { data: { user: updateUser }, error: updateUserError } = await supabase.auth.getUser();
+                if (updateUserError || !updateUser) {
+                    setNotification('Authentication error. Please log in again.');
+                    return;
+                }
+                const inferredPerson = inferPersonFromUser(updateUser);
                 const { error } = await supabase
                     .from('transactions')
                     .update({
@@ -692,7 +971,7 @@ export default function TransactionsPage() {
                         category_id: finalCategoryId,
                         amount: finalAmount,
                         name: note || null, // Use note as name for manual transactions
-                        person,
+                        person: inferredPerson,
                         note: null, // Clear note since we're using name
                     })
                     .eq('id', editingId);
@@ -703,7 +982,24 @@ export default function TransactionsPage() {
                     setNotification(`Error updating transaction: ${message}`);
                     return;
                 }
-                setNotification('Transaction updated.');
+
+                const priorTx = transactions.find(t => t.id === editingId);
+                if (transactionType === 'transaction' && finalCategoryId && priorTx) {
+                    const { data: { user: u2 } } = await supabase.auth.getUser();
+                    if (u2) {
+                        void learnMerchantMappingFromUserCategory(supabase, {
+                            userId: u2.id,
+                            categoryId: finalCategoryId,
+                            name: (note || '').trim() || priorTx.name || null,
+                            note: priorTx.note || null,
+                        });
+                    }
+                }
+
+                const extra = finalCategoryId
+                    ? await sameDescriptionBulkSuffix(finalCategoryId)
+                    : '';
+                setNotification('Transaction updated.' + extra);
             }
         } else {
             // INSERT new transaction
@@ -719,13 +1015,14 @@ export default function TransactionsPage() {
                 return;
             }
 
+            const inferredPerson = inferPersonFromUser(user);
             const { error } = await supabase.from('transactions').insert({
                 date,
                 account_id: accountId,
                 category_id: finalCategoryId,
                 amount: finalAmount,
                 name: note || null, // Use note as name for manual transactions
-                person,
+                person: inferredPerson,
                 note: null, // Clear note since we're using name
                 is_transfer: false,
                 transfer_group_id: null,
@@ -738,7 +1035,16 @@ export default function TransactionsPage() {
                 setNotification(`Error saving transaction: ${message}`);
                 return;
             }
-            setNotification('Transaction saved.');
+
+            void learnMerchantMappingFromUserCategory(supabase, {
+                userId: user.id,
+                categoryId: finalCategoryId,
+                name: (note || '').trim() || null,
+                note: null,
+            });
+
+            const extra = await sameDescriptionBulkSuffix(finalCategoryId);
+            setNotification('Transaction saved.' + extra);
         }
 
         if (!editingId && addAnother) {
@@ -777,6 +1083,7 @@ export default function TransactionsPage() {
         }
         
         // Process each transaction, creating categories as needed
+        const inferredPerson = inferPersonFromUser(user);
         const transactionsToInsert = [];
         for (const tx of validTransactions) {
             // Find or create category
@@ -809,7 +1116,7 @@ export default function TransactionsPage() {
                 account_id: tx.accountId,
                 category_id: finalCategoryId,
                 amount: finalAmount,
-                person: tx.person,
+                person: inferredPerson,
                 name: tx.note || null,
                 note: null,
                 is_transfer: false,
@@ -841,7 +1148,6 @@ export default function TransactionsPage() {
             categoryName: '',
             type: 'expense',
             amount: '',
-            person: 'Malik',
             note: '',
         }]);
         setShowBulkTransaction(false);
@@ -936,12 +1242,19 @@ export default function TransactionsPage() {
     };
 
     const handleToggleSelectAll = () => {
-        // Include all transactions (regular and transfers)
-        if (selectedTransactionIds.size === transactions.length) {
-            setSelectedTransactionIds(new Set());
-        } else {
-            setSelectedTransactionIds(new Set(transactions.map(tx => tx.id)));
-        }
+        const visibleIds = visibleTransactions.map(tx => tx.id);
+        const allVisibleSelected =
+            visibleIds.length > 0 && visibleIds.every(id => selectedTransactionIds.has(id));
+
+        setSelectedTransactionIds(prev => {
+            const next = new Set(prev);
+            if (allVisibleSelected) {
+                visibleIds.forEach(id => next.delete(id));
+            } else {
+                visibleIds.forEach(id => next.add(id));
+            }
+            return next;
+        });
     };
 
     const handleBulkUpdate = async () => {
@@ -954,6 +1267,120 @@ export default function TransactionsPage() {
         setNotification(null);
 
         try {
+            const { data: { user: bulkUser } } = await supabase.auth.getUser();
+            if (!bulkUser) {
+                setNotification('You must be logged in to bulk edit transactions.');
+                setBulkUpdating(false);
+                return;
+            }
+            const inferredPerson = inferPersonFromUser(bulkUser);
+
+            const ids = Array.from(selectedTransactionIds);
+
+            if (bulkCategoryIsTransfer) {
+                if (!bulkTransferFromAccount || !bulkTransferToAccount) {
+                    setNotification('For transfer bulk edit, select both From and To accounts.');
+                    setBulkUpdating(false);
+                    return;
+                }
+                if (bulkTransferFromAccount === bulkTransferToAccount) {
+                    setNotification('From and To accounts must be different for transfers.');
+                    setBulkUpdating(false);
+                    return;
+                }
+
+                const selectedTxs = transactions.filter(tx => selectedTransactionIds.has(tx.id));
+                const inserts: Array<{
+                    date: string;
+                    account_id: string;
+                    category_id: string;
+                    amount: number;
+                    person: string;
+                    note: string | null;
+                    name: string | null;
+                    user_id: string;
+                    is_transfer: boolean;
+                    transfer_group_id: string;
+                }> = [];
+
+                for (const tx of selectedTxs) {
+                    const transferGroupId = crypto.randomUUID();
+                    const transferAmount = Math.abs(Number(tx.amount || 0));
+                    const transferDate = bulkEditDate || tx.date;
+                    const transferLabel = tx.name || tx.note || 'Transfer';
+
+                    const { error: fromError } = await supabase
+                        .from('transactions')
+                        .update({
+                            date: transferDate,
+                            account_id: bulkTransferFromAccount,
+                            category_id: bulkEditCategory,
+                            amount: -transferAmount,
+                            is_transfer: true,
+                            transfer_group_id: transferGroupId,
+                            name: transferLabel,
+                            note: tx.note || transferLabel,
+                        })
+                        .eq('id', tx.id);
+
+                    if (fromError) {
+                        console.error('Bulk transfer update (from side) error:', fromError);
+                        setNotification(`Error converting transaction to transfer: ${fromError.message}`);
+                        setBulkUpdating(false);
+                        return;
+                    }
+
+                    inserts.push({
+                        date: transferDate,
+                        account_id: bulkTransferToAccount,
+                        category_id: bulkEditCategory,
+                        amount: transferAmount,
+                        person: inferredPerson,
+                        note: tx.note || transferLabel,
+                        name: transferLabel,
+                        user_id: bulkUser.id,
+                        is_transfer: true,
+                        transfer_group_id: transferGroupId,
+                    });
+                }
+
+                if (inserts.length > 0) {
+                    const { error: insertError } = await supabase
+                        .from('transactions')
+                        .insert(inserts);
+                    if (insertError) {
+                        console.error('Bulk transfer insert (to side) error:', insertError);
+                        setNotification(`Error creating transfer counterparts: ${insertError.message}`);
+                        setBulkUpdating(false);
+                        return;
+                    }
+                }
+
+                if (transferCategoryId) {
+                    for (const tx of selectedTxs) {
+                        void learnMerchantMappingFromUserCategory(supabase, {
+                            userId: bulkUser.id,
+                            categoryId: transferCategoryId,
+                            name: tx.name || tx.note || null,
+                            note: tx.note || null,
+                        });
+                    }
+                }
+
+                setNotification(
+                    `Successfully converted ${ids.length} transaction${ids.length !== 1 ? 's' : ''} into transfer${ids.length !== 1 ? 's' : ''}.`
+                );
+                setSelectedTransactionIds(new Set());
+                setShowBulkEdit(false);
+                setBulkEditCategory('');
+                setBulkEditAccount('');
+                setBulkEditDate('');
+                setBulkTransferFromAccount('');
+                setBulkTransferToAccount('');
+                setMonthDate(prev => new Date(prev));
+                return;
+            }
+
             const updates: any = {};
             let hasUpdates = false;
 
@@ -976,7 +1403,6 @@ export default function TransactionsPage() {
                 return;
             }
 
-            const ids = Array.from(selectedTransactionIds);
             const { error } = await supabase
                 .from('transactions')
                 .update(updates)
@@ -989,12 +1415,29 @@ export default function TransactionsPage() {
                 return;
             }
 
+            if (bulkEditCategory) {
+                if (bulkUser) {
+                    for (const id of ids) {
+                        const tx = transactions.find(t => t.id === id);
+                        if (!tx) continue;
+                        void learnMerchantMappingFromUserCategory(supabase, {
+                            userId: bulkUser.id,
+                            categoryId: bulkEditCategory,
+                            name: tx.name,
+                            note: tx.note,
+                        });
+                    }
+                }
+            }
+
             setNotification(`Successfully updated ${ids.length} transaction${ids.length !== 1 ? 's' : ''}.`);
             setSelectedTransactionIds(new Set());
             setShowBulkEdit(false);
             setBulkEditCategory('');
             setBulkEditAccount('');
             setBulkEditDate('');
+            setBulkTransferFromAccount('');
+            setBulkTransferToAccount('');
             setMonthDate(prev => new Date(prev));
         } catch (err) {
             console.error('Bulk update failed:', err);
@@ -1084,11 +1527,6 @@ export default function TransactionsPage() {
             return;
         }
 
-        if (transferFromAccount === transferToAccount) {
-            setNotification('From and To accounts must be different.');
-            return;
-        }
-
         const numAmount = parseFloat(amount);
         if (Number.isNaN(numAmount) || numAmount <= 0) {
             setNotification('Amount must be a positive number.');
@@ -1106,10 +1544,55 @@ export default function TransactionsPage() {
                 return;
             }
 
-            // Get account names for the person field
-            const fromAccount = accounts.find(a => a.id === transferFromAccount);
-            const toAccount = accounts.find(a => a.id === transferToAccount);
-            const transferLabel = `Transfer: ${fromAccount?.name ?? 'Unknown'} → ${toAccount?.name ?? 'Unknown'}`;
+            let resolvedFromAccountId = transferFromAccount;
+            let resolvedToAccountId = transferToAccount;
+
+            if (transferFromAccount === '__add_new__') {
+                resolvedFromAccountId = (await findOrCreateAccountByName(
+                    newTransferFromAccountName,
+                    newTransferFromAccountType,
+                    user.id
+                )) || '';
+                if (!resolvedFromAccountId) {
+                    if (!newTransferFromAccountName.trim()) {
+                        setNotification('Please enter a valid new "From Account" name.');
+                    }
+                    return;
+                }
+            }
+            if (transferToAccount === '__add_new__') {
+                resolvedToAccountId = (await findOrCreateAccountByName(
+                    newTransferToAccountName,
+                    newTransferToAccountType,
+                    user.id
+                )) || '';
+                if (!resolvedToAccountId) {
+                    if (!newTransferToAccountName.trim()) {
+                        setNotification('Please enter a valid new "To Account" name.');
+                    }
+                    return;
+                }
+            }
+
+            if (!resolvedFromAccountId || !resolvedToAccountId) {
+                setNotification('Please fill in both transfer accounts.');
+                return;
+            }
+            if (resolvedFromAccountId === resolvedToAccountId) {
+                setNotification('From and To accounts must be different.');
+                return;
+            }
+
+            // Resolve account names (including freshly created inline accounts).
+            const fromAccountName =
+                transferFromAccount === '__add_new__'
+                    ? newTransferFromAccountName.trim()
+                    : accounts.find(a => a.id === resolvedFromAccountId)?.name || 'Unknown';
+            const toAccountName =
+                transferToAccount === '__add_new__'
+                    ? newTransferToAccountName.trim()
+                    : accounts.find(a => a.id === resolvedToAccountId)?.name || 'Unknown';
+            const transferLabel = `Transfer: ${fromAccountName || 'Unknown'} → ${toAccountName || 'Unknown'}`;
 
             if (editingId) {
                 const editingTx = transactions.find(t => t.id === editingId);
@@ -1142,8 +1625,8 @@ export default function TransactionsPage() {
                             amount: -numAmount, // Negative: money leaving source account
                             person: transferLabel,
                             note: note || null,
-                            account_id: transferFromAccount,
-                            category_id: null,
+                            account_id: resolvedFromAccountId,
+                            category_id: transferCategoryId,
                             is_transfer: true,
                             transfer_group_id: transferGroupId,
                             user_id: user.id,
@@ -1153,8 +1636,8 @@ export default function TransactionsPage() {
                             amount: numAmount, // Positive: money entering destination account
                             person: transferLabel,
                             note: note || null,
-                            account_id: transferToAccount,
-                            category_id: null,
+                            account_id: resolvedToAccountId,
+                            category_id: transferCategoryId,
                             is_transfer: true,
                             transfer_group_id: transferGroupId,
                             user_id: user.id,
@@ -1167,8 +1650,18 @@ export default function TransactionsPage() {
                         return;
                     }
 
+                // Learn from user conversion so similar descriptions map to Transfer next time.
+                if (transferCategoryId) {
+                    void learnMerchantMappingFromUserCategory(supabase, {
+                        userId: user.id,
+                        categoryId: transferCategoryId,
+                        name: editingTx.name || note || null,
+                        note: editingTx.note || note || null,
+                    });
+                }
+
                     setNotification(
-                        `Transaction converted to transfer: ${fromAccount?.name} → ${toAccount?.name} (${new Intl.NumberFormat('en-US', {
+                        `Transaction converted to transfer: ${fromAccountName} → ${toAccountName} (${new Intl.NumberFormat('en-US', {
                             style: 'currency',
                             currency: 'USD',
                             minimumFractionDigits: 2,
@@ -1210,8 +1703,8 @@ export default function TransactionsPage() {
                             amount: -numAmount, // Negative: money leaving source account
                             person: transferLabel,
                             note: note || null,
-                            account_id: transferFromAccount,
-                            category_id: null,
+                            account_id: resolvedFromAccountId,
+                            category_id: transferCategoryId,
                             is_transfer: true,
                             transfer_group_id: editingTx.transfer_group_id, // Keep same group ID
                             user_id: user.id,
@@ -1221,8 +1714,8 @@ export default function TransactionsPage() {
                             amount: numAmount, // Positive: money entering destination account
                             person: transferLabel,
                             note: note || null,
-                            account_id: transferToAccount,
-                            category_id: null,
+                            account_id: resolvedToAccountId,
+                            category_id: transferCategoryId,
                             is_transfer: true,
                             transfer_group_id: editingTx.transfer_group_id, // Keep same group ID
                             user_id: user.id,
@@ -1235,8 +1728,17 @@ export default function TransactionsPage() {
                         return;
                     }
 
+                    if (transferCategoryId) {
+                        void learnMerchantMappingFromUserCategory(supabase, {
+                            userId: user.id,
+                            categoryId: transferCategoryId,
+                            name: editingTx.name || note || null,
+                            note: editingTx.note || note || null,
+                        });
+                    }
+
                     setNotification(
-                        `Transfer updated: ${fromAccount?.name} → ${toAccount?.name} (${new Intl.NumberFormat('en-US', {
+                        `Transfer updated: ${fromAccountName} → ${toAccountName} (${new Intl.NumberFormat('en-US', {
                             style: 'currency',
                             currency: 'USD',
                             minimumFractionDigits: 2,
@@ -1255,8 +1757,8 @@ export default function TransactionsPage() {
                         amount: -numAmount, // Negative: money leaving source account
                         person: transferLabel,
                         note: note || null,
-                        account_id: transferFromAccount,
-                        category_id: null,
+                        account_id: resolvedFromAccountId,
+                        category_id: transferCategoryId,
                         is_transfer: true,
                         transfer_group_id: transferGroupId,
                         user_id: user.id,
@@ -1266,8 +1768,8 @@ export default function TransactionsPage() {
                         amount: numAmount, // Positive: money entering destination account
                         person: transferLabel,
                         note: note || null,
-                        account_id: transferToAccount,
-                        category_id: null,
+                        account_id: resolvedToAccountId,
+                        category_id: transferCategoryId,
                         is_transfer: true,
                         transfer_group_id: transferGroupId,
                         user_id: user.id,
@@ -1280,8 +1782,17 @@ export default function TransactionsPage() {
                     return;
                 }
 
+                if (transferCategoryId) {
+                    void learnMerchantMappingFromUserCategory(supabase, {
+                        userId: user.id,
+                        categoryId: transferCategoryId,
+                        name: note || null,
+                        note: note || null,
+                    });
+                }
+
                 setNotification(
-                    `Transfer created: ${fromAccount?.name} → ${toAccount?.name} (${new Intl.NumberFormat('en-US', {
+                `Transfer created: ${fromAccountName} → ${toAccountName} (${new Intl.NumberFormat('en-US', {
                         style: 'currency',
                         currency: 'USD',
                         minimumFractionDigits: 2,
@@ -1393,7 +1904,7 @@ export default function TransactionsPage() {
                                 person: `Transfer: ${fromAccountName} → ${toAccountName}`,
                                 note: transfer.description || null,
                                 account_id: importAccountId,
-                                category_id: null,
+                                category_id: transferCategoryId,
                                 is_transfer: true,
                                 transfer_group_id: transferGroupId,
                             },
@@ -1403,7 +1914,7 @@ export default function TransactionsPage() {
                                 person: `Transfer: ${fromAccountName} → ${toAccountName}`,
                                 note: transfer.description || null,
                                 account_id: transfer.transferToAccountId,
-                                category_id: null,
+                                category_id: transferCategoryId,
                                 is_transfer: true,
                                 transfer_group_id: transferGroupId,
                             },
@@ -1425,6 +1936,23 @@ export default function TransactionsPage() {
             // Clear preview
             setPendingImportTransactions([]);
             setImportAccountId('');
+
+            const { data: sessionWrap } = await supabase.auth.getSession();
+            const accessToken = sessionWrap?.session?.access_token;
+            if (accessToken) {
+                try {
+                    await fetch('/api/finance/link-internal-transfers', {
+                        method: 'POST',
+                        headers: {
+                            Authorization: `Bearer ${accessToken}`,
+                            'Content-Type': 'application/json',
+                        },
+                        body: '{}',
+                    });
+                } catch {
+                    /* linker is best-effort */
+                }
+            }
 
             // Reload transactions
             setMonthDate(prev => new Date(prev));
@@ -2014,23 +2542,53 @@ export default function TransactionsPage() {
                 <div>
                     <h2 className="text-base sm:text-lg font-semibold">Transactions</h2>
                     <p className="text-xs text-slate-400">
-                        View all activity for the selected month.
+                        {transactionWindow === 'month'
+                            ? 'View all activity for the selected month.'
+                            : 'View all activity across all time.'}
                     </p>
                 </div>
 
                 <div className="flex items-center gap-3 text-xs sm:text-sm text-slate-300">
+                    <div className="flex items-center gap-1 rounded-md border border-slate-700 bg-slate-950 p-1">
+                        <button
+                            type="button"
+                            onClick={() => setTransactionWindow('month')}
+                            className={`rounded px-2 py-1 text-[11px] ${
+                                transactionWindow === 'month'
+                                    ? 'bg-amber-400 font-semibold text-black'
+                                    : 'text-slate-300 hover:bg-slate-800'
+                            }`}
+                        >
+                            This month
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setTransactionWindow('all')}
+                            className={`rounded px-2 py-1 text-[11px] ${
+                                transactionWindow === 'all'
+                                    ? 'bg-amber-400 font-semibold text-black'
+                                    : 'text-slate-300 hover:bg-slate-800'
+                            }`}
+                        >
+                            All time
+                        </button>
+                    </div>
                     <button
                         type="button"
                         onClick={goToPrevMonth}
+                        disabled={transactionWindow === 'all'}
                         className="rounded-md border border-slate-700 bg-slate-950 px-4 py-2 hover:bg-slate-800 active:bg-slate-900 transition-colors"
                         aria-label="Previous month"
                     >
                         ◀
                     </button>
-                    <span className="min-w-[120px] text-center font-medium">{monthLabel}</span>
+                    <span className="min-w-[120px] text-center font-medium">
+                        {transactionWindow === 'month' ? monthLabel : 'All time'}
+                    </span>
                     <button
                         type="button"
                         onClick={goToNextMonth}
+                        disabled={transactionWindow === 'all'}
                         className="rounded-md border border-slate-700 bg-slate-950 px-4 py-2 hover:bg-slate-800 active:bg-slate-900 transition-colors"
                         aria-label="Next month"
                     >
@@ -2107,7 +2665,14 @@ export default function TransactionsPage() {
                                         <select
                                             className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
                                             value={transferFromAccount}
-                                            onChange={e => setTransferFromAccount(e.target.value)}
+                                            onChange={e => {
+                                                const value = e.target.value;
+                                                setTransferFromAccount(value);
+                                                setIsAddingTransferFromAccount(value === '__add_new__');
+                                                if (value !== '__add_new__') {
+                                                    setNewTransferFromAccountName('');
+                                                }
+                                            }}
                                             required
                                         >
                                             <option value="">Select account</option>
@@ -2116,14 +2681,52 @@ export default function TransactionsPage() {
                                                     {acc.name}
                                                 </option>
                                             ))}
+                                            <option value="__add_new__">+ Add new account...</option>
                                         </select>
+                                        {isAddingTransferFromAccount && (
+                                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                                <input
+                                                    type="text"
+                                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
+                                                    value={newTransferFromAccountName}
+                                                    onChange={e =>
+                                                        setNewTransferFromAccountName(e.target.value)
+                                                    }
+                                                    placeholder="New source account name"
+                                                    required
+                                                />
+                                                <select
+                                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
+                                                    value={newTransferFromAccountType}
+                                                    onChange={e =>
+                                                        setNewTransferFromAccountType(
+                                                            e.target.value as AccountType
+                                                        )
+                                                    }
+                                                >
+                                                    <option value="checking">Checking</option>
+                                                    <option value="savings">Savings</option>
+                                                    <option value="credit">Credit</option>
+                                                    <option value="cash">Cash</option>
+                                                    <option value="investment">Investment</option>
+                                                    <option value="other">Other</option>
+                                                </select>
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="space-y-1">
                                         <label className="block text-slate-300">To Account</label>
                                         <select
                                             className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
                                             value={transferToAccount}
-                                            onChange={e => setTransferToAccount(e.target.value)}
+                                            onChange={e => {
+                                                const value = e.target.value;
+                                                setTransferToAccount(value);
+                                                setIsAddingTransferToAccount(value === '__add_new__');
+                                                if (value !== '__add_new__') {
+                                                    setNewTransferToAccountName('');
+                                                }
+                                            }}
                                             required
                                         >
                                             <option value="">Select account</option>
@@ -2132,7 +2735,38 @@ export default function TransactionsPage() {
                                                     {acc.name}
                                                 </option>
                                             ))}
+                                            <option value="__add_new__">+ Add new account...</option>
                                         </select>
+                                        {isAddingTransferToAccount && (
+                                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                                <input
+                                                    type="text"
+                                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
+                                                    value={newTransferToAccountName}
+                                                    onChange={e =>
+                                                        setNewTransferToAccountName(e.target.value)
+                                                    }
+                                                    placeholder="New destination account name"
+                                                    required
+                                                />
+                                                <select
+                                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
+                                                    value={newTransferToAccountType}
+                                                    onChange={e =>
+                                                        setNewTransferToAccountType(
+                                                            e.target.value as AccountType
+                                                        )
+                                                    }
+                                                >
+                                                    <option value="checking">Checking</option>
+                                                    <option value="savings">Savings</option>
+                                                    <option value="credit">Credit</option>
+                                                    <option value="cash">Cash</option>
+                                                    <option value="investment">Investment</option>
+                                                    <option value="other">Other</option>
+                                                </select>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </>
@@ -2179,67 +2813,55 @@ export default function TransactionsPage() {
                                 <div className="space-y-1">
                                     <label className="block text-slate-300">Category</label>
                                     <div className="space-y-1">
-                                        <input
-                                            type="text"
-                                            list={`category-list-tx-${expenseIncomeType}`}
+                                        <select
                                             className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
-                                            value={categoryName || (categoryId ? categories.find(c => c.id === categoryId)?.name || '' : '')}
-                                            onChange={async (e) => {
-                                                const inputValue = e.target.value;
-                                                setCategoryName(inputValue);
-                                                
-                                                // Try to find matching category
-                                                const matchingCategory = categories.find(
-                                                    c => c.name.toLowerCase() === inputValue.toLowerCase() && c.type === expenseIncomeType
-                                                );
-                                                
-                                                if (matchingCategory) {
-                                                    setCategoryId(matchingCategory.id);
+                                            value={isAddingFormCategory ? '__add_new__' : categoryId}
+                                            onChange={e => {
+                                                const value = e.target.value;
+                                                if (value === '__add_new__') {
+                                                    setIsAddingFormCategory(true);
+                                                    setCategoryId('');
+                                                    setCategoryName('');
                                                 } else {
-                                                    setCategoryId(''); // Will create new category on save
+                                                    setIsAddingFormCategory(false);
+                                                    setCategoryId(value);
+                                                    if (value) setCategoryName('');
                                                 }
                                             }}
-                                            placeholder="Type or select category..."
                                             required
-                                        />
-                                        <datalist id={`category-list-tx-${expenseIncomeType}`}>
-                                            {(() => {
-                                                // Organize categories into hierarchy
-                                                const groups = categories.filter(c => c.kind === 'group' && c.type === expenseIncomeType);
-                                                const subcategories = categories.filter(c => c.kind === 'category' && c.parent_id && c.type === expenseIncomeType);
-                                                const standalone = categories.filter(c => c.kind === 'category' && !c.parent_id && c.type === expenseIncomeType);
-                                                
-                                                const options: React.ReactElement[] = [];
-                                                
-                                                // Add groups with their subcategories
-                                                groups.forEach(group => {
-                                                    const groupSubcats = subcategories.filter(sc => sc.parent_id === group.id);
-                                                    if (groupSubcats.length > 0) {
-                                                        groupSubcats.forEach(subcat => {
-                                                            options.push(
-                                                                <option key={subcat.id} value={subcat.name}>
-                                                                    {group.name} — {subcat.name}
-                                                                </option>
-                                                            );
-                                                        });
-                                                    }
-                                                });
-                                                
-                                                // Add standalone categories
-                                                standalone.forEach(cat => {
-                                                    options.push(
-                                                        <option key={cat.id} value={cat.name}>
-                                                            {cat.type === 'income' ? '⬆️' : '⬇️'} {cat.name}
-                                                        </option>
-                                                    );
-                                                });
-                                                
-                                                return options;
-                                            })()}
-                                        </datalist>
-                                        <p className="text-[10px] text-slate-500">
-                                            Type a category name to create a new one, or select from the list
-                                        </p>
+                                        >
+                                            <option value="">Select category...</option>
+                                            {categories
+                                                .filter(
+                                                    c =>
+                                                        c.kind === 'category' &&
+                                                        categoryAllowedForTxType(
+                                                            c.type,
+                                                            expenseIncomeType
+                                                        )
+                                                )
+                                                .map(cat => (
+                                                    <option key={cat.id} value={cat.id}>
+                                                        {cat.type === 'income'
+                                                            ? '⬆️'
+                                                            : cat.type === 'transfer'
+                                                                ? '💱'
+                                                                : '⬇️'}{' '}
+                                                        {cat.name}
+                                                    </option>
+                                                ))}
+                                            <option value="__add_new__">+ Add new category...</option>
+                                        </select>
+                                        {isAddingFormCategory && (
+                                            <input
+                                                type="text"
+                                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
+                                                value={categoryName}
+                                                onChange={e => setCategoryName(e.target.value)}
+                                                placeholder="New category name"
+                                                required
+                                            />
+                                        )}
                                     </div>
                                 </div>
                             </>
@@ -2268,32 +2890,52 @@ export default function TransactionsPage() {
                                 </p>
                             )}
                         </div>
-                        {transactionType === 'transaction' && (
+                        {transactionType === 'transfer' && (
                             <div className="space-y-1">
-                                <label className="block text-slate-300">Person</label>
-                                <select
+                                <label className="block text-slate-300">Memo (optional)</label>
+                                <input
                                     className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
-                                    value={person}
-                                    onChange={e => setPerson(e.target.value)}
-                                    required
-                                >
-                                    <option value="Malik">Malik</option>
-                                    <option value="Mikia">Mikia</option>
-                                    <option value="Both">Both</option>
-                                </select>
+                                    value={note}
+                                    onChange={e => setNote(e.target.value)}
+                                    placeholder="e.g. Rent, credit card payment"
+                                />
                             </div>
                         )}
-                        <div className="space-y-1">
-                            <label className="block text-slate-300">
-                                Transaction Name *
-                            </label>
-                            <input
-                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
-                                value={note}
-                                onChange={e => setNote(e.target.value)}
-                                placeholder="ex. Giant groceries, date night, etc."
-                            />
-                        </div>
+                        {transactionType === 'transaction' && (
+                            <>
+                                <div className="space-y-1">
+                                    <label className="block text-slate-300">
+                                        Transaction Name *
+                                    </label>
+                                    <input
+                                        className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
+                                        value={note}
+                                        onChange={e => setNote(e.target.value)}
+                                        placeholder="ex. Giant groceries, date night, etc."
+                                    />
+                                </div>
+                                <label className="flex cursor-pointer items-start gap-2 rounded-md border border-slate-800 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
+                                    <input
+                                        type="checkbox"
+                                        className="mt-0.5 shrink-0"
+                                        checked={applyCategoryToMatchingDescriptions}
+                                        onChange={e =>
+                                            setApplyCategoryToMatchingDescriptions(e.target.checked)
+                                        }
+                                        disabled={
+                                            !merchantKeyFromNameNote(
+                                                (note || '').trim() || null,
+                                                null
+                                            )
+                                        }
+                                    />
+                                    <span>
+                                        Apply this category to all my transactions with the same
+                                        description (matches ignore case and punctuation).
+                                    </span>
+                                </label>
+                            </>
+                        )}
                         <div className="flex gap-2 mt-2">
                             {!editingId && transactionType === 'transaction' && (
                                 <button
@@ -2348,7 +2990,6 @@ export default function TransactionsPage() {
                                     categoryName: '',
                                     type: 'expense',
                                     amount: '',
-                                    person: 'Malik',
                                     note: '',
                                 }]);
                                 setShowBulkTransaction(false);
@@ -2424,7 +3065,9 @@ export default function TransactionsPage() {
                                                 
                                                 // Try to find matching category
                                                 const matchingCategory = categories.find(
-                                                    c => c.name.toLowerCase() === inputValue.toLowerCase() && c.type === tx.type
+                                                    c =>
+                                                        c.name.toLowerCase() === inputValue.toLowerCase() &&
+                                                        categoryAllowedForTxType(c.type, tx.type)
                                                 );
                                                 
                                                 if (matchingCategory) {
@@ -2440,9 +3083,23 @@ export default function TransactionsPage() {
                                             <datalist id={`bulk-category-list-tx-${index}-${tx.type}`}>
                                                 {(() => {
                                                     // Organize categories into hierarchy
-                                                    const groups = categories.filter(c => c.kind === 'group' && c.type === tx.type);
-                                                    const subcategories = categories.filter(c => c.kind === 'category' && c.parent_id && c.type === tx.type);
-                                                    const standalone = categories.filter(c => c.kind === 'category' && !c.parent_id && c.type === tx.type);
+                                                    const groups = categories.filter(
+                                                        c =>
+                                                            c.kind === 'group' &&
+                                                            categoryAllowedForTxType(c.type, tx.type)
+                                                    );
+                                                    const subcategories = categories.filter(
+                                                        c =>
+                                                            c.kind === 'category' &&
+                                                            c.parent_id &&
+                                                            categoryAllowedForTxType(c.type, tx.type)
+                                                    );
+                                                    const standalone = categories.filter(
+                                                        c =>
+                                                            c.kind === 'category' &&
+                                                            !c.parent_id &&
+                                                            categoryAllowedForTxType(c.type, tx.type)
+                                                    );
                                                     
                                                     const options: React.ReactElement[] = [];
                                                     
@@ -2474,38 +3131,20 @@ export default function TransactionsPage() {
                                             </datalist>
                                     </div>
                                 </div>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <div>
-                                        <label className="block text-[10px] text-slate-400 mb-1">Amount</label>
-                                        <input
-                                            type="number"
-                                            step="0.01"
-                                            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
-                                            value={tx.amount}
-                                            onChange={e => {
-                                                const newTxs = [...bulkTransactions];
-                                                newTxs[index].amount = e.target.value;
-                                                setBulkTransactions(newTxs);
-                                            }}
-                                            placeholder={tx.type === 'expense' ? '-45.23' : '45.23'}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-[10px] text-slate-400 mb-1">Person</label>
-                                        <select
-                                            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
-                                            value={tx.person}
-                                            onChange={e => {
-                                                const newTxs = [...bulkTransactions];
-                                                newTxs[index].person = e.target.value;
-                                                setBulkTransactions(newTxs);
-                                            }}
-                                        >
-                                            <option value="Malik">Malik</option>
-                                            <option value="Mikia">Mikia</option>
-                                            <option value="Both">Both</option>
-                                        </select>
-                                    </div>
+                                <div>
+                                    <label className="block text-[10px] text-slate-400 mb-1">Amount</label>
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                        value={tx.amount}
+                                        onChange={e => {
+                                            const newTxs = [...bulkTransactions];
+                                            newTxs[index].amount = e.target.value;
+                                            setBulkTransactions(newTxs);
+                                        }}
+                                        placeholder={tx.type === 'expense' ? '-45.23' : '45.23'}
+                                    />
                                 </div>
                                 <div>
                                     <label className="block text-[10px] text-slate-400 mb-1">Note (optional)</label>
@@ -2546,7 +3185,6 @@ export default function TransactionsPage() {
                                     categoryName: '',
                                     type: 'expense',
                                     amount: '',
-                                    person: bulkTransactions[0]?.person || 'Malik',
                                     note: '',
                                 }]);
                             }}
@@ -2826,36 +3464,47 @@ export default function TransactionsPage() {
                                                 </div>
                                             ) : (
                                                 <div className="space-y-1">
-                                                    <input
-                                                        type="text"
-                                                        list={`import-category-list-${index}`}
+                                                    <select
                                                         className="w-full rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[10px]"
-                                                        value={tx.categoryName || (tx.categoryId ? (categories.find(c => c.id === tx.categoryId)?.name || '') : '')}
-                                                        onChange={async (e) => {
-                                                            const inputValue = e.target.value;
-                                                            // Try to find matching category
-                                                            const matchingCategory = categories.find(
-                                                                c => c.name.toLowerCase() === inputValue.toLowerCase()
-                                                            );
-                                                            
-                                                            if (matchingCategory) {
-                                                                handleUpdatePendingTransaction(index, 'categoryId', matchingCategory.id);
-                                                                handleUpdatePendingTransaction(index, 'categoryName', undefined);
-                                                            } else {
-                                                                // Store the name for later creation
+                                                        value={tx.isAddingCategory ? '__add_new__' : (tx.categoryId || '')}
+                                                        onChange={e => {
+                                                            const value = e.target.value;
+                                                            if (value === '__add_new__') {
+                                                                handleUpdatePendingTransaction(index, 'isAddingCategory', true);
                                                                 handleUpdatePendingTransaction(index, 'categoryId', null);
-                                                                handleUpdatePendingTransaction(index, 'categoryName', inputValue);
+                                                                handleUpdatePendingTransaction(index, 'categoryName', '');
+                                                            } else {
+                                                                handleUpdatePendingTransaction(index, 'isAddingCategory', false);
+                                                                handleUpdatePendingTransaction(index, 'categoryId', value || null);
+                                                                if (value) {
+                                                                    handleUpdatePendingTransaction(index, 'categoryName', undefined);
+                                                                }
                                                             }
                                                         }}
-                                                        placeholder="Type or select category..."
-                                                    />
-                                                    <datalist id={`import-category-list-${index}`}>
+                                                    >
+                                                        <option value="">Select category...</option>
                                                         {categories.map(cat => (
-                                                            <option key={cat.id} value={cat.name}>
+                                                            <option key={cat.id} value={cat.id}>
                                                                 {cat.type === 'income' ? '⬆️' : '⬇️'} {cat.name}
                                                             </option>
                                                         ))}
-                                                    </datalist>
+                                                        <option value="__add_new__">+ Add new category...</option>
+                                                    </select>
+                                                    {tx.isAddingCategory && (
+                                                        <input
+                                                            type="text"
+                                                            className="w-full rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[10px]"
+                                                            value={tx.categoryName || ''}
+                                                            onChange={e =>
+                                                                handleUpdatePendingTransaction(
+                                                                    index,
+                                                                    'categoryName',
+                                                                    e.target.value
+                                                                )
+                                                            }
+                                                            placeholder="New category name"
+                                                        />
+                                                    )}
                                                 </div>
                                             )}
                                         </td>
@@ -2955,17 +3604,78 @@ export default function TransactionsPage() {
 
             {/* Transactions list */}
             <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
-                <h3 className="mb-2 text-sm font-semibold">All transactions</h3>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold">All transactions</h3>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <label className="text-[10px] text-slate-400">Category filter</label>
+                        <select
+                            className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px]"
+                            value={categoryFilterId}
+                            onChange={e => setCategoryFilterId(e.target.value)}
+                        >
+                            <option value="">All categories</option>
+                            <option value="__uncategorized__">Uncategorized</option>
+                            {categories
+                                .filter(c => c.kind === 'category')
+                                .map(cat => (
+                                    <option key={cat.id} value={cat.id}>
+                                        {cat.name}
+                                    </option>
+                                ))}
+                        </select>
+                        <label className="ml-2 text-[10px] text-slate-400">Sort</label>
+                        <select
+                            className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px]"
+                            value={sortMode}
+                            onChange={e =>
+                                setSortMode(
+                                    e.target.value as
+                                        | 'date_desc'
+                                        | 'merchant_frequency'
+                                        | 'amount_desc'
+                                        | 'amount_asc'
+                                )
+                            }
+                        >
+                            <option value="date_desc">Newest first</option>
+                            <option value="merchant_frequency">Merchant frequency</option>
+                            <option value="amount_desc">Amount: high → low</option>
+                            <option value="amount_asc">Amount: low → high</option>
+                        </select>
+                    </div>
+                </div>
 
                 {loading ? (
                     <p className="text-slate-400">Loading…</p>
-                ) : transactions.length === 0 ? (
+                ) : visibleTransactions.length === 0 ? (
                     <p className="text-slate-400">
-                        No transactions for {monthLabel}. Add one from the Home page or
-                        import a statement above.
+                        {transactionWindow === 'month'
+                            ? `No matching transactions for ${monthLabel} with this filter.`
+                            : 'No matching transactions across all time with this filter.'}
                     </p>
                 ) : (
                     <div className="space-y-3">
+                        {merchantFrequencyRows.length > 0 && (
+                            <div className="rounded-md border border-slate-800 bg-slate-950 p-2">
+                                <p className="mb-1 text-[10px] uppercase text-slate-400">
+                                    Top Merchants/Descriptions (by frequency)
+                                </p>
+                                <div className="max-h-28 space-y-1 overflow-y-auto text-[10px]">
+                                    {merchantFrequencyRows.slice(0, 8).map(row => (
+                                        <div
+                                            key={row.key}
+                                            className="flex items-center justify-between gap-2 text-slate-300"
+                                        >
+                                            <span className="truncate">{row.label}</span>
+                                            <span className="shrink-0 text-slate-400">
+                                                {row.count} tx
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
                         {/* Bulk Edit Controls */}
                         {selectedTransactionIds.size > 0 && (
                             <div className="rounded-lg border border-amber-700 bg-slate-900 p-3">
@@ -3026,6 +3736,7 @@ export default function TransactionsPage() {
                                                     className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
                                                     value={bulkEditAccount}
                                                     onChange={e => setBulkEditAccount(e.target.value)}
+                                                    disabled={bulkCategoryIsTransfer}
                                                 >
                                                     <option value="">Keep existing</option>
                                                     {accounts.map(acc => (
@@ -3045,6 +3756,46 @@ export default function TransactionsPage() {
                                                 />
                                             </div>
                                         </div>
+                                        {bulkCategoryIsTransfer && (
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-400 mb-1">
+                                                        Transfer From Account
+                                                    </label>
+                                                    <select
+                                                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                                        value={bulkTransferFromAccount}
+                                                        onChange={e => setBulkTransferFromAccount(e.target.value)}
+                                                    >
+                                                        <option value="">Select source account</option>
+                                                        {accounts.map(acc => (
+                                                            <option key={acc.id} value={acc.id}>
+                                                                {acc.name}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-400 mb-1">
+                                                        Transfer To Account
+                                                    </label>
+                                                    <select
+                                                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                                        value={bulkTransferToAccount}
+                                                        onChange={e => setBulkTransferToAccount(e.target.value)}
+                                                    >
+                                                        <option value="">Select destination account</option>
+                                                        {accounts
+                                                            .filter(acc => acc.id !== bulkTransferFromAccount)
+                                                            .map(acc => (
+                                                                <option key={acc.id} value={acc.id}>
+                                                                    {acc.name}
+                                                                </option>
+                                                            ))}
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        )}
                                         <button
                                             type="button"
                                             onClick={handleBulkUpdate}
@@ -3061,22 +3812,24 @@ export default function TransactionsPage() {
                         {/* Transaction List */}
                         <div className="max-h-[540px] space-y-2 overflow-y-auto">
                             {/* Select All Checkbox */}
-                            {transactions.length > 0 && (
+                            {displayedTransactions.length > 0 && (
                                 <div className="flex items-center gap-2 px-3 py-1 text-[10px] text-slate-400">
                                     <input
                                         type="checkbox"
                                         checked={
-                                            transactions.length > 0 &&
-                                            selectedTransactionIds.size === transactions.length
+                                            displayedTransactions.length > 0 &&
+                                            displayedTransactions.every(tx =>
+                                                selectedTransactionIds.has(tx.id)
+                                            )
                                         }
                                         onChange={handleToggleSelectAll}
                                         className="rounded border-slate-600"
                                     />
-                                    <label>Select all transactions</label>
+                                    <label>Select all visible transactions</label>
                                 </div>
                             )}
 
-                            {transactions.map(tx => (
+                            {displayedTransactions.map(tx => (
                                 <div
                                     key={tx.id}
                                     className={`flex items-center gap-2 rounded-md border px-3 py-2 ${
@@ -3098,7 +3851,9 @@ export default function TransactionsPage() {
                                             {tx.is_transfer && (
                                                 <span className="mr-1 text-blue-400">↔</span>
                                             )}
-                                            {tx.category || 'Uncategorized'} •{' '}
+                                            {tx.category ||
+                                                (tx.is_transfer ? 'Transfer' : 'Uncategorized')}{' '}
+                                            •{' '}
                                             {tx.account || 'No account'}
                                         </div>
                                         <div className="text-[11px] text-slate-400">

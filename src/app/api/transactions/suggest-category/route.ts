@@ -88,6 +88,7 @@ export async function POST(request: NextRequest) {
             .select('id, name, type, parent_id')
             .eq('user_id', user.id)
             .eq('kind', 'category')
+            .eq('is_archived', false)
             .order('name');
 
         if (categoriesError) {

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { supabase } from '@auth/supabaseClient';
+import { learnMerchantMappingFromUserCategory } from '@/lib/financial-concierge/categoryEngine';
 
 type AccountType = 'checking' | 'savings' | 'credit' | 'cash' | 'investment' | 'other';
 
@@ -133,11 +134,17 @@ export default function AccountsPage() {
             ] = await Promise.all([
                 // 🔹 Include starting_balance - filter by user_id
                 supabase.from('accounts').select('id, name, type, starting_balance').eq('user_id', user.id),
-                supabase.from('categories').select('id, name, kind, parent_id, type').eq('user_id', user.id).order('name'),
+                supabase
+                    .from('categories')
+                    .select('id, name, kind, parent_id, type')
+                    .eq('user_id', user.id)
+                    .eq('is_archived', false)
+                    .order('name'),
                 supabase
                     .from('transactions')
                     .select('id, date, amount, account_id, category_id, person, note, name, is_transfer, transfer_group_id')
                     .eq('user_id', user.id)
+                    .is('removed_at', null)
                     .gte('date', startStr)
                     .lt('date', endStr),
             ]);
@@ -448,43 +455,20 @@ export default function AccountsPage() {
             return existingCategory.id;
         }
         
-        // Category doesn't exist, create it
-        try {
-            // Get authenticated user
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
-                setNotification('You must be logged in to create categories.');
-                return null;
-            }
-
-            const { data, error } = await supabase
-                .from('categories')
-                .insert({
-                    name: trimmedName,
-                    type: type,
-                    kind: 'category',
-                    parent_id: null, // Will be a standalone category
-                    user_id: user.id,
-                })
-                .select()
-                .single();
-            
-            if (error) {
-                console.error('Error creating category:', error);
-                setNotification(`Error creating category: ${error.message}`);
-                return null;
-            }
-            
-            // Add to local state
-            setCategories(prev => [...prev, data as Category]);
-            setNotification(`Created new category: "${trimmedName}"`);
-            
-            return data.id;
-        } catch (error) {
-            console.error('Error creating category:', error);
-            setNotification('Error creating category. Check console/logs.');
-            return null;
+        const needsReview = categories.find(
+            c =>
+                c.kind === 'category' &&
+                c.type === 'expense' &&
+                c.name.toLowerCase() === 'needs review'
+        );
+        if (needsReview) {
+            setNotification(
+                `Category "${trimmedName}" is outside the 20-category master list. Routing to Needs Review.`
+            );
+            return needsReview.id;
         }
+        setNotification('Category not found in the 20-category master list.');
+        return null;
     };
     
     const handleEditTransaction = (tx: TxRow) => {
@@ -601,6 +585,7 @@ export default function AccountsPage() {
         }
 
         if (editingTxId) {
+            const prior = transactions.find(t => t.id === editingTxId);
             // UPDATE existing transaction
             const { error } = await supabase
                 .from('transactions')
@@ -618,6 +603,15 @@ export default function AccountsPage() {
                 console.error(error);
                 setNotification('Error updating transaction. Check console/logs.');
                 return;
+            }
+
+            if (finalCategoryId && prior) {
+                void learnMerchantMappingFromUserCategory(supabase, {
+                    userId: user.id,
+                    categoryId: finalCategoryId,
+                    name: prior.name,
+                    note: (txNote || '').trim() || prior.note || null,
+                });
             }
 
             setTransactions(prev =>
@@ -665,7 +659,14 @@ export default function AccountsPage() {
             setNotification('Error saving transaction. Check console/logs.');
             return;
         }
-        
+
+        void learnMerchantMappingFromUserCategory(supabase, {
+            userId: user.id,
+            categoryId: finalCategoryId,
+            name: null,
+            note: (txNote || '').trim() || null,
+        });
+
         const startOfMonth = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
         const endOfMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
         const startStr = startOfMonth.toISOString().slice(0, 10);
@@ -919,7 +920,12 @@ export default function AccountsPage() {
                                                             <span className={`font-semibold ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
                                                                 {formatCurrency(tx.amount)}
                                                             </span>
-                                                            {category && <span className="text-slate-400">{category.name}</span>}
+                                                            {(category || tx.is_transfer) && (
+                                                                <span className="text-slate-400">
+                                                                    {category?.name ??
+                                                                        (tx.is_transfer ? 'Transfer' : '')}
+                                                                </span>
+                                                            )}
                                                             {tx.is_transfer && <span className="text-blue-400 text-[10px]">↔ Transfer</span>}
                                                         </div>
                                                         <div className="text-[10px] text-slate-500 mt-0.5">
@@ -1042,7 +1048,9 @@ export default function AccountsPage() {
                                             
                                             // Try to find matching category
                                             const matchingCategory = categories.find(
-                                                c => c.name.toLowerCase() === inputValue.toLowerCase() && c.type === txType
+                                                c =>
+                                                    c.name.toLowerCase() === inputValue.toLowerCase() &&
+                                                    (c.type === txType || c.type === 'transfer')
                                             );
                                             
                                             if (matchingCategory) {
@@ -1057,9 +1065,23 @@ export default function AccountsPage() {
                                     <datalist id={`category-list-accounts-${txType}`}>
                                         {(() => {
                                             // Organize categories into hierarchy
-                                            const groups = categories.filter(c => c.kind === 'group' && c.type === txType);
-                                            const subcategories = categories.filter(c => c.kind === 'category' && c.parent_id && c.type === txType);
-                                            const standalone = categories.filter(c => c.kind === 'category' && !c.parent_id && c.type === txType);
+                                            const groups = categories.filter(
+                                                c =>
+                                                    c.kind === 'group' &&
+                                                    (c.type === txType || c.type === 'transfer')
+                                            );
+                                            const subcategories = categories.filter(
+                                                c =>
+                                                    c.kind === 'category' &&
+                                                    c.parent_id &&
+                                                    (c.type === txType || c.type === 'transfer')
+                                            );
+                                            const standalone = categories.filter(
+                                                c =>
+                                                    c.kind === 'category' &&
+                                                    !c.parent_id &&
+                                                    (c.type === txType || c.type === 'transfer')
+                                            );
                                             
                                             const options: React.ReactElement[] = [];
                                             

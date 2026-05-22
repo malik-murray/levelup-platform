@@ -65,10 +65,14 @@ export default function LoginPageClient() {
 
   return (
     <main
-      className={`${outfit.className} relative flex min-h-dvh items-center justify-center overflow-hidden bg-[#010205] px-4 py-10 text-white antialiased`}
+      className={`${outfit.className} relative flex min-h-dvh items-center justify-center overflow-hidden bg-white px-4 py-10 text-slate-900 antialiased transition-colors dark:bg-[#010205] dark:text-white`}
     >
       <div
-        className="pointer-events-none absolute inset-0"
+        className="pointer-events-none absolute inset-0 bg-gradient-to-b from-slate-800/95 via-slate-900 to-slate-950/95 dark:hidden"
+        aria-hidden
+      />
+      <div
+        className="pointer-events-none absolute inset-0 hidden dark:block"
         aria-hidden
         style={{
           background:
@@ -76,7 +80,7 @@ export default function LoginPageClient() {
         }}
       />
       <div
-        className="pointer-events-none absolute inset-0 opacity-80"
+        className="pointer-events-none absolute inset-0 hidden opacity-80 dark:block"
         aria-hidden
         style={{
           background:
@@ -84,7 +88,7 @@ export default function LoginPageClient() {
         }}
       />
       <div
-        className="pointer-events-none absolute bottom-0 left-1/2 h-56 w-[min(100%,720px)] -translate-x-1/2 rounded-[100%] blur-3xl"
+        className="pointer-events-none absolute bottom-0 left-1/2 hidden h-56 w-[min(100%,720px)] -translate-x-1/2 rounded-[100%] blur-3xl dark:block"
         style={{
           background: 'radial-gradient(ellipse at center, rgba(255,110,35,0.22) 0%, transparent 70%)',
         }}

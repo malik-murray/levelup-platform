@@ -26,9 +26,9 @@ const primaryNavApps: App[] = [
 ];
 
 const otherApps: App[] = [
-    { name: 'Finance Tracker', href: '/finance', icon: '💰', comingSoonKey: 'finance' },
-    { name: 'Newsfeed', href: '/newsfeed', icon: '📰', comingSoonKey: 'newsfeed' },
-    { name: 'Fitness Tracker', href: '/fitness', icon: '💪', comingSoonKey: 'fitness' },
+    { name: 'Finance Tracker', href: '/finance', icon: '💰' },
+    { name: 'Newsfeed', href: '/newsfeed', icon: '📰' },
+    { name: 'Fitness Tracker', href: '/fitness', icon: '💪' },
     { name: 'Stock & Crypto Analyzer', href: '/markets', icon: '📈', comingSoonKey: 'markets' },
 ];
 

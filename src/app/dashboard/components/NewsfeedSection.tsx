@@ -72,7 +72,7 @@ export default function NewsfeedSection({
         <div className="space-y-4">
             <div className="flex items-center justify-between">
                 <Link href="/newsfeed" className="transition-colors hover:text-[#ffe066]">
-                    <h2 className="text-xl font-bold text-[#ffe066]">Newsfeed</h2>
+                    <h2 className="text-xl font-bold text-[#ffe066]">Top Stories</h2>
                 </Link>
             </div>
 

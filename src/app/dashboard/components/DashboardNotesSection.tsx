@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import type { Dispatch, KeyboardEvent, SetStateAction } from 'react';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate } from '@/lib/habitHelpers';
 import { neon } from '../neonTheme';
@@ -19,6 +20,42 @@ type DailyNotesContent = {
     ideas: string | null;
     reflection: string | null;
 };
+
+function handleBulletListEnter(
+    e: KeyboardEvent<HTMLTextAreaElement>,
+    sectionKey: keyof DailyNotesContent,
+    setContent: Dispatch<SetStateAction<DailyNotesContent>>
+) {
+    if (e.key !== 'Enter' || e.shiftKey) return;
+
+    const textarea = e.currentTarget;
+    const { selectionStart, selectionEnd, value } = textarea;
+    if (selectionStart !== selectionEnd) return;
+
+    const lineStart = value.lastIndexOf('\n', selectionStart - 1) + 1;
+    const lineEndRaw = value.indexOf('\n', selectionStart);
+    const lineEnd = lineEndRaw === -1 ? value.length : lineEndRaw;
+    const currentLine = value.slice(lineStart, lineEnd);
+    const trimmedCurrentLine = currentLine.trim();
+    const isBulletLine = currentLine.startsWith('-');
+    if (!isBulletLine) return;
+
+    e.preventDefault();
+
+    // Pressing Enter on an empty bullet exits list mode.
+    const insertion = trimmedCurrentLine === '-' || trimmedCurrentLine === '- ' ? '\n' : '\n- ';
+    const nextValue = value.slice(0, selectionStart) + insertion + value.slice(selectionEnd);
+    const nextCaret = selectionStart + insertion.length;
+
+    setContent((prev) => ({ ...prev, [sectionKey]: nextValue }));
+
+    requestAnimationFrame(() => {
+        textarea.value = nextValue;
+        textarea.selectionStart = nextCaret;
+        textarea.selectionEnd = nextCaret;
+        adjustTextareaHeight(textarea);
+    });
+}
 
 const SECTIONS = [
     { key: 'notes' as const, title: 'Notes', placeholder: 'General notes...' },
@@ -208,6 +245,7 @@ export default function DashboardNotesSection({
                                                     setContent((prev) => ({ ...prev, [section.key]: e.target.value }));
                                                     adjustTextareaHeight(e.target);
                                                 }}
+                                                onKeyDown={(e) => handleBulletListEnter(e, section.key, setContent)}
                                                 onBlur={(e) => saveField(section.key, e.target.value || null)}
                                                 placeholder={section.placeholder}
                                                 className="min-h-[80px] w-full resize-none overflow-hidden rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-[#ff9d00]/55 focus:outline-none"
