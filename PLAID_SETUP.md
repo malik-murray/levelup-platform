@@ -26,6 +26,8 @@ PLAID_SKIP_WEBHOOK_VERIFY=1  # local dev only — skip JWT verification
 
 Never expose `PLAID_SECRET` or `SUPABASE_SERVICE_ROLE_KEY` to the client.
 
+**Vercel:** Set `PLAID_ENV=production` in **Production** (not only Preview/Development). Without it, the app defaults to Plaid Sandbox while using production keys and returns *invalid client_id or secret*. Redeploy after changing env vars.
+
 ## Database
 
 Apply migrations (includes `066_plaid_transactions_sync_and_notifications.sql`):
