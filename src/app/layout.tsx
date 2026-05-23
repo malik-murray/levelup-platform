@@ -11,6 +11,12 @@ const navBtnClass =
 export const metadata: Metadata = {
     title: "LevelUpSolutions",
     description: "LevelUpSolutions app ecosystem",
+    manifest: "/manifest.json",
+    appleWebApp: {
+        capable: true,
+        statusBarStyle: "black-translucent",
+        title: "LevelUp",
+    },
 };
 
 export const viewport: Viewport = {

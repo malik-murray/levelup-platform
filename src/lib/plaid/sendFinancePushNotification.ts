@@ -1,4 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+    isWebPushConfigured,
+    sendWebPushNotification,
+    type WebPushSubscriptionJson,
+} from '@/lib/push/webPushServer';
 
 export type PushPayload = {
     userId: string;
@@ -14,8 +19,7 @@ export type PushSendResult = {
 };
 
 /**
- * Delivers spend alerts to registered device tokens.
- * Requires user_push_subscriptions rows and optional Expo credentials.
+ * Delivers spend alerts to registered devices (Web Push + optional Expo).
  */
 export async function sendFinanceSpendPush(
     supabase: SupabaseClient,
@@ -23,7 +27,7 @@ export async function sendFinanceSpendPush(
 ): Promise<PushSendResult> {
     const { data: subscriptions, error } = await supabase
         .from('user_push_subscriptions')
-        .select('token, platform')
+        .select('token, platform, push_subscription')
         .eq('user_id', payload.userId);
 
     if (error) {
@@ -32,6 +36,41 @@ export async function sendFinanceSpendPush(
 
     if (!subscriptions?.length) {
         return { sent: false, skipped: true };
+    }
+
+    let anySent = false;
+    const errors: string[] = [];
+    const staleEndpoints: string[] = [];
+
+    if (isWebPushConfigured()) {
+        for (const row of subscriptions) {
+            if (row.platform !== 'web') continue;
+            const sub = row.push_subscription as WebPushSubscriptionJson | null;
+            if (!sub?.endpoint) continue;
+
+            const result = await sendWebPushNotification(sub, {
+                title: payload.title,
+                body: payload.body,
+                data: payload.data,
+            });
+
+            if (result.ok) {
+                anySent = true;
+            } else {
+                errors.push(result.error);
+                if (result.statusCode === 404 || result.statusCode === 410) {
+                    staleEndpoints.push(sub.endpoint);
+                }
+            }
+        }
+    }
+
+    if (staleEndpoints.length > 0) {
+        await supabase
+            .from('user_push_subscriptions')
+            .delete()
+            .eq('user_id', payload.userId)
+            .in('token', staleEndpoints);
     }
 
     const expoAccessToken = process.env.EXPO_ACCESS_TOKEN?.trim();
@@ -58,19 +97,18 @@ export async function sendFinanceSpendPush(
                     }))
                 ),
             });
-            if (!res.ok) {
-                const text = await res.text();
-                return { sent: false, skipped: false, error: `Expo push failed: ${text}` };
+            if (res.ok) {
+                anySent = true;
+            } else {
+                errors.push(`Expo: ${await res.text()}`);
             }
-            return { sent: true, skipped: false };
         } catch (err) {
-            const message = err instanceof Error ? err.message : 'Expo push error';
-            return { sent: false, skipped: false, error: message };
+            errors.push(err instanceof Error ? err.message : 'Expo push error');
         }
     }
 
     const webhookUrl = process.env.PUSH_WEBHOOK_URL?.trim();
-    if (webhookUrl) {
+    if (!anySent && webhookUrl) {
         try {
             const res = await fetch(webhookUrl, {
                 method: 'POST',
@@ -83,19 +121,26 @@ export async function sendFinanceSpendPush(
                     tokens: subscriptions.map(s => ({ token: s.token, platform: s.platform })),
                 }),
             });
-            if (!res.ok) {
-                return {
-                    sent: false,
-                    skipped: false,
-                    error: `PUSH_WEBHOOK_URL returned ${res.status}`,
-                };
+            if (res.ok) {
+                return { sent: true, skipped: false };
             }
-            return { sent: true, skipped: false };
+            errors.push(`PUSH_WEBHOOK_URL returned ${res.status}`);
         } catch (err) {
-            const message = err instanceof Error ? err.message : 'Push webhook error';
-            return { sent: false, skipped: false, error: message };
+            errors.push(err instanceof Error ? err.message : 'Push webhook error');
         }
     }
 
-    return { sent: false, skipped: true };
+    if (anySent) {
+        return { sent: true, skipped: false };
+    }
+
+    if (!isWebPushConfigured() && !expoAccessToken && !webhookUrl) {
+        return { sent: false, skipped: true };
+    }
+
+    return {
+        sent: false,
+        skipped: false,
+        error: errors.join('; ') || 'No push delivery channel succeeded',
+    };
 }

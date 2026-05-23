@@ -59,9 +59,11 @@ Key fields:
 
 ## Push notifications
 
+See **[PUSH_SETUP.md](./PUSH_SETUP.md)** for Web Push (phone banner alerts). Users enable under **Settings → Spend alerts (push)**.
+
 - Spending = negative `amount` in app convention.
 - `maybeNotifyUserOfNewTransaction` sets `notified_at` and writes `notification_events`.
-- Register device tokens in `user_push_subscriptions` (Expo/mobile) or set `PUSH_WEBHOOK_URL`.
+- Requires `NEXT_PUBLIC_VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` on the server.
 
 ## API Routes
 

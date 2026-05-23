@@ -12,6 +12,11 @@ import {
   playUiSound,
   setSoundEffectsEnabled,
 } from '@/lib/soundEffects';
+import {
+  isWebPushSupported,
+  subscribeToFinancePush,
+  unsubscribeFromFinancePush,
+} from '@/lib/push/clientWebPush';
 
 const outfit = Outfit({ subsets: ['latin'], weight: ['400', '600', '700', '800'] });
 const LOGO_SRC = '/brand/levelup-logo.png';
@@ -127,7 +132,9 @@ export default function SettingsPage() {
   const [editName, setEditName] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
-  const [pushOn, setPushOn] = useState(true);
+  const [pushOn, setPushOn] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushMessage, setPushMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const run = async () => {
@@ -149,6 +156,28 @@ export default function SettingsPage() {
           const p = localStorage.getItem(LS_PUSH);
           if (p !== null) setPushOn(p === '1');
         }
+
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          const statusRes = await fetch('/api/push/status', {
+            headers: { Authorization: `Bearer ${session.access_token}` },
+          });
+          if (statusRes.ok) {
+            const status = (await statusRes.json()) as {
+              subscribed?: boolean;
+              notifySpendingEnabled?: boolean;
+              serverConfigured?: boolean;
+            };
+            if (status.subscribed && status.notifySpendingEnabled !== false) {
+              setPushOn(true);
+              localStorage.setItem(LS_PUSH, '1');
+            } else if (!status.serverConfigured) {
+              setPushMessage('Spend alerts are not configured on the server yet.');
+            }
+          }
+        }
       } catch {
         window.location.href = '/login';
       } finally {
@@ -158,11 +187,50 @@ export default function SettingsPage() {
     run();
   }, []);
 
-  useEffect(() => {
-    if (!loading && typeof window !== 'undefined') {
-      localStorage.setItem(LS_PUSH, pushOn ? '1' : '0');
+  const handlePushToggle = async (enabled: boolean) => {
+    if (pushBusy) return;
+    setPushMessage(null);
+
+    if (enabled && !isWebPushSupported()) {
+      setPushMessage(
+        'Use Chrome on Android, or add this site to your iPhone Home Screen (iOS 16.4+) for banner alerts.',
+      );
+      return;
     }
-  }, [pushOn, loading]);
+
+    setPushBusy(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        setPushMessage('Please log in again to enable notifications.');
+        return;
+      }
+
+      if (enabled) {
+        const result = await subscribeToFinancePush(session.access_token);
+        if (!result.ok) {
+          setPushMessage(result.reason);
+          return;
+        }
+        setPushOn(true);
+        localStorage.setItem(LS_PUSH, '1');
+        setPushMessage('Spend alerts enabled. You will get a banner when new transactions sync.');
+      } else {
+        const result = await unsubscribeFromFinancePush(session.access_token);
+        if (!result.ok) {
+          setPushMessage(result.reason);
+          return;
+        }
+        setPushOn(false);
+        localStorage.setItem(LS_PUSH, '0');
+        setPushMessage('Spend alerts turned off.');
+      }
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   const initials = (displayName || email || '?')
     .split(/\s+/)
@@ -391,9 +459,23 @@ export default function SettingsPage() {
                     />
                   </svg>
                 </span>
-                <span className="flex-1 text-slate-800 dark:text-white">Push notifications</span>
-                <NeonToggle checked={pushOn} onChange={setPushOn} aria-label="Push notifications" />
+                <span className="flex-1 text-slate-800 dark:text-white">Spend alerts (push)</span>
+                <NeonToggle
+                  checked={pushOn}
+                  onChange={handlePushToggle}
+                  aria-label="Spend push notifications"
+                />
               </div>
+              {pushMessage ? (
+                <p className="px-1 text-center text-xs text-amber-800 dark:text-[#ffe066]/90">
+                  {pushMessage}
+                </p>
+              ) : (
+                <p className="px-1 text-center text-xs text-slate-500 dark:text-slate-400">
+                  Banner alerts when Plaid syncs a new purchase. iPhone: open in Safari → Share → Add to
+                  Home Screen, then enable here.
+                </p>
+              )}
 
               <Link href="/landing" className={`${rowShell()} block w-full no-underline`}>
                 <span

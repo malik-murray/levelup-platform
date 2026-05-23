@@ -1,0 +1,17 @@
+{
+  "name": "LevelUp Solutions",
+  "short_name": "LevelUp",
+  "description": "LevelUp finance, habits, and productivity",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#010205",
+  "theme_color": "#ff9d00",
+  "icons": [
+    {
+      "src": "/brand/levelup-logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
