@@ -13,8 +13,8 @@ self.addEventListener('push', (event) => {
 
     const options = {
         body: payload.body || '',
-        icon: '/brand/levelup-logo.png',
-        badge: '/brand/levelup-logo.png',
+        icon: '/brand/levelup-app-icon-192.png',
+        badge: '/brand/levelup-app-icon-192.png',
         tag: payload.data?.transactionId || 'levelup-spend',
         renotify: true,
         data: payload.data || {},

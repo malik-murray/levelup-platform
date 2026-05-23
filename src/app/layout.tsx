@@ -12,6 +12,10 @@ export const metadata: Metadata = {
     title: "LevelUpSolutions",
     description: "LevelUpSolutions app ecosystem",
     manifest: "/manifest.json",
+    icons: {
+        icon: [{ url: "/brand/levelup-app-icon-192.png", sizes: "192x192", type: "image/png" }],
+        apple: [{ url: "/brand/levelup-app-icon-512.png", sizes: "512x512", type: "image/png" }],
+    },
     appleWebApp: {
         capable: true,
         statusBarStyle: "black-translucent",
