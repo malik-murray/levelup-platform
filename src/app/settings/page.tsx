@@ -17,6 +17,7 @@ import {
   subscribeToFinancePush,
   unsubscribeFromFinancePush,
 } from '@/lib/push/clientWebPush';
+import { SpendAlertTestButton } from '@/components/SpendAlertTestButton';
 
 const outfit = Outfit({ subsets: ['latin'], weight: ['400', '600', '700', '800'] });
 const LOGO_SRC = '/brand/levelup-logo.png';
@@ -134,7 +135,6 @@ export default function SettingsPage() {
   const [soundOn, setSoundOn] = useState(true);
   const [pushOn, setPushOn] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
-  const [pushTestBusy, setPushTestBusy] = useState(false);
   const [pushMessage, setPushMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -230,33 +230,6 @@ export default function SettingsPage() {
       }
     } finally {
       setPushBusy(false);
-    }
-  };
-
-  const sendTestPush = async () => {
-    if (pushTestBusy) return;
-    setPushTestBusy(true);
-    setPushMessage(null);
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        setPushMessage('Please log in again.');
-        return;
-      }
-      const res = await fetch('/api/push/test', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      const data = (await res.json()) as { message?: string; error?: string };
-      if (res.ok && data.message) {
-        setPushMessage(data.message);
-      } else {
-        setPushMessage(data.error || 'Test notification failed.');
-      }
-    } finally {
-      setPushTestBusy(false);
     }
   };
 
@@ -505,16 +478,7 @@ export default function SettingsPage() {
                 </p>
               )}
 
-              {pushOn ? (
-                <button
-                  type="button"
-                  disabled={pushTestBusy}
-                  onClick={sendTestPush}
-                  className="w-full rounded-xl border border-amber-500/50 bg-amber-50/90 px-4 py-2.5 text-sm font-semibold text-amber-900 transition hover:bg-amber-100 disabled:opacity-50 dark:border-[#ff9d00]/50 dark:bg-black/40 dark:text-[#ffe066] dark:hover:bg-[#ff9d00]/10"
-                >
-                  {pushTestBusy ? 'Sending…' : 'Send test alert'}
-                </button>
-              ) : null}
+              <SpendAlertTestButton className="px-1" />
 
               <Link href="/landing" className={`${rowShell()} block w-full no-underline`}>
                 <span

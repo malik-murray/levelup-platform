@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@auth/supabaseClient';
 import { PlaidLinkButton } from '@/components/PlaidLinkButton';
+import { SpendAlertTestButton } from '@/components/SpendAlertTestButton';
 
 type PlaidItem = {
     id: string;
@@ -214,6 +215,16 @@ export default function IntegrationsPage() {
                     {notification}
                 </div>
             )}
+
+            <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+                <h3 className="text-sm font-semibold text-white">Spend alerts</h3>
+                <p className="mt-1 text-xs text-slate-400">
+                    Banner notifications when new transactions sync from Plaid.
+                </p>
+                <div className="mt-3">
+                    <SpendAlertTestButton showSettingsLink />
+                </div>
+            </div>
 
             {/* Connect new account */}
             <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
