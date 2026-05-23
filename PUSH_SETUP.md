@@ -40,6 +40,14 @@ Subscriptions are stored in `user_push_subscriptions` (`platform: web`).
 
 ## 5. Verify
 
+### Quick test (no Plaid required)
+
+1. Enable **Spend alerts (push)** in Settings.
+2. Tap **Send test alert** — you should see a banner: *You spent $1.00 at Test Merchant*.
+3. Or call `POST /api/push/test` with your session Bearer token.
+
+### Real transaction test
+
 - Supabase: row in `user_push_subscriptions` after enabling toggle.
 - Trigger a small new spend or manual sync with a new transaction.
 - `notification_events.delivery_status` should be `sent` (not `skipped`).
