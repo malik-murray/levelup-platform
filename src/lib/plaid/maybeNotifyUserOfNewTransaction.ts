@@ -5,6 +5,8 @@ import {
     normalizeMerchantLabel,
     spendNotificationIdempotencyKey,
 } from '@/lib/plaid/plaidTransactionUtils';
+import { getQuickCategoryActionsForPush } from '@/lib/push/getQuickCategoryActionsForPush';
+import { createNotificationActionToken } from '@/lib/push/notificationActionToken';
 import { sendFinanceSpendPush } from '@/lib/plaid/sendFinancePushNotification';
 
 export type TransactionForNotification = {
@@ -17,6 +19,7 @@ export type TransactionForNotification = {
     notified_at: string | null;
     plaid_transaction_id: string | null;
     original_pending_transaction_id: string | null;
+    category_id?: string | null;
 };
 
 export type NotifyResult = {
@@ -81,8 +84,16 @@ export async function maybeNotifyUserOfNewTransaction(
     }
 
     const merchant = normalizeMerchantLabel(transaction.name, transaction.note);
-    const title = 'New transaction detected';
-    const body = `You spent $${spendAbs.toFixed(2)} at ${merchant}.`;
+    const title = 'New spend';
+    const body = `$${spendAbs.toFixed(2)} at ${merchant}`;
+
+    const [quickCategories, actionToken] = await Promise.all([
+        getQuickCategoryActionsForPush(supabase, transaction.user_id, transaction.category_id ?? null),
+        createNotificationActionToken({
+            userId: transaction.user_id,
+            transactionId: transaction.id,
+        }),
+    ]);
 
     const { error: eventError } = await supabase.from('notification_events').insert({
         user_id: transaction.user_id,
@@ -117,6 +128,8 @@ export async function maybeNotifyUserOfNewTransaction(
             merchant,
             amount: String(transaction.amount),
             pending: transaction.pending ? '1' : '0',
+            actionToken: actionToken ?? '',
+            quickCategories: JSON.stringify(quickCategories),
         },
     });
 

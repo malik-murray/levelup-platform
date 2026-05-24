@@ -54,9 +54,14 @@ Subscriptions are stored in `user_push_subscriptions` (`platform: web`).
 
 ## Categorize from a notification
 
-Tap a spend alert (or choose **Categorize** on Android) to open `/finance/categorize/[transactionId]` — pick a category in one tap. Merchant mappings are learned for next time.
+| Platform | What you can do |
+|----------|-----------------|
+| **Android (Chrome)** | Swipe down / expand the notification → tap a **category button** (e.g. Groceries) to save without opening the app. Or **More categories** for the full list. |
+| **iPhone (Home Screen PWA)** | iOS does **not** show custom category buttons in the notification shade for web apps. **Tap** the notification to open the full-screen category picker. |
 
-Requires opening the PWA from your Home Screen on iPhone for best notification action support.
+After deploying `spend-push-v2`, close the app completely and reopen once so the service worker updates.
+
+Tap a spend alert to open `/finance/categorize/[transactionId]` — one tap saves and learns the merchant.
 
 ## Limits
 

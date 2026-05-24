@@ -417,6 +417,12 @@ async function processAddedTransaction(params: {
 
     await applyCategorization(supabase, userId, inserted.id, plaidTransaction);
 
+    const { data: refreshed } = await supabase
+        .from('transactions')
+        .select('category_id')
+        .eq('id', inserted.id)
+        .maybeSingle();
+
     await notifyIfNeeded(
         supabase,
         {
@@ -429,6 +435,7 @@ async function processAddedTransaction(params: {
             notified_at: inserted.notified_at,
             plaid_transaction_id: inserted.plaid_transaction_id,
             original_pending_transaction_id: inserted.original_pending_transaction_id,
+            category_id: refreshed?.category_id ?? null,
         },
         stats
     );
