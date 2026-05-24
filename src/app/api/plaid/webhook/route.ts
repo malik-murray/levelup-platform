@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getPlaidApi } from '@/lib/plaid/plaidApi';
 import { syncPlaidTransactionsForItem } from '@/lib/plaid/syncPlaidTransactionsForItem';
+import { shouldSyncForTransactionsWebhook } from '@/lib/plaid/plaidWebhookSyncCodes';
 import { verifyPlaidWebhook } from '@/lib/plaid/verifyPlaidWebhook';
 
 export const runtime = 'nodejs';
@@ -48,8 +49,8 @@ export async function POST(request: NextRequest) {
         environment: body.environment,
     });
 
-    if (body.webhook_type !== 'TRANSACTIONS' || body.webhook_code !== 'SYNC_UPDATES_AVAILABLE') {
-        return NextResponse.json({ received: true });
+    if (body.webhook_type !== 'TRANSACTIONS' || !shouldSyncForTransactionsWebhook(body.webhook_code)) {
+        return NextResponse.json({ received: true, ignored: true });
     }
 
     if (!body.item_id) {

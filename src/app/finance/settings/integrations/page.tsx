@@ -22,6 +22,7 @@ export default function IntegrationsPage() {
     const [notification, setNotification] = useState<string | null>(null);
     const [syncing, setSyncing] = useState<string | null>(null);
     const [backfillLoading, setBackfillLoading] = useState(false);
+    const [registeringWebhooks, setRegisteringWebhooks] = useState(false);
 
     // Load connected Plaid items
     useEffect(() => {
@@ -124,6 +125,35 @@ export default function IntegrationsPage() {
         }
     };
 
+    const handleEnableAutomaticSync = async () => {
+        try {
+            setRegisteringWebhooks(true);
+            setNotification(null);
+
+            const {
+                data: { session },
+            } = await supabase.auth.getSession();
+            if (!session) {
+                setNotification('Please log in');
+                return;
+            }
+
+            const response = await fetch('/api/plaid/register-webhooks', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${session.access_token}` },
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to register webhooks');
+            }
+            setNotification(data.message || `Registered automatic sync on ${data.registered} account(s).`);
+        } catch (err) {
+            setNotification(err instanceof Error ? err.message : 'Failed to enable automatic sync');
+        } finally {
+            setRegisteringWebhooks(false);
+        }
+    };
+
     const handlePlaidSuccess = () => {
         setNotification('Bank account connected successfully! Syncing accounts and transactions...');
         
@@ -215,6 +245,24 @@ export default function IntegrationsPage() {
                     {notification}
                 </div>
             )}
+
+            {plaidItems.length > 0 ? (
+                <div className="rounded-lg border border-amber-900/50 bg-amber-950/40 p-4">
+                    <h3 className="text-sm font-semibold text-amber-100">Automatic sync</h3>
+                    <p className="mt-1 text-xs text-amber-200/80">
+                        If transactions only update when you tap Sync, your bank was likely connected before
+                        webhooks were set up. Run this once (no need to disconnect).
+                    </p>
+                    <button
+                        type="button"
+                        onClick={handleEnableAutomaticSync}
+                        disabled={registeringWebhooks || loading}
+                        className="mt-3 w-full rounded-lg border border-amber-600 bg-amber-900/80 px-4 py-2 text-sm font-medium text-amber-50 hover:bg-amber-800 disabled:opacity-50"
+                    >
+                        {registeringWebhooks ? 'Enabling…' : 'Enable automatic sync'}
+                    </button>
+                </div>
+            ) : null}
 
             <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
                 <h3 className="text-sm font-semibold text-white">Spend alerts</h3>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Configuration, PlaidApi, PlaidEnvironments, CountryCode, Products } from 'plaid';
+import { getPlaidWebhookUrl } from '@/lib/plaid/plaidWebhookUrl';
 
 // Initialize Plaid client
 const configuration = new Configuration({
@@ -118,11 +119,7 @@ export async function POST(request: NextRequest) {
                 products: linkProductsFromEnv(),
                 country_codes: [CountryCode.Us],
                 language: 'en',
-                webhook:
-                    process.env.PLAID_WEBHOOK_URL ||
-                    (process.env.NEXT_PUBLIC_APP_URL
-                        ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '')}/api/plaid/webhook`
-                        : undefined),
+                webhook: getPlaidWebhookUrl(),
             });
 
             return NextResponse.json({

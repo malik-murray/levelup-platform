@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { registerPlaidItemWebhook } from '@/lib/plaid/registerPlaidItemWebhook';
 import { syncPlaidTransactionsForItem } from '@/lib/plaid/syncPlaidTransactionsForItem';
 
 /**
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
 
         const { data: plaidItem, error: itemError } = await supabase
             .from('plaid_items')
-            .select('id')
+            .select('id, access_token')
             .eq('id', plaid_item_id)
             .eq('user_id', user.id)
             .single();
@@ -55,6 +56,8 @@ export async function POST(request: NextRequest) {
         if (itemError || !plaidItem) {
             return NextResponse.json({ error: 'Plaid item not found' }, { status: 404 });
         }
+
+        const webhookReg = await registerPlaidItemWebhook(plaidItem.access_token);
 
         const result = await syncPlaidTransactionsForItem({
             supabase,
@@ -64,6 +67,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
             success: true,
+            webhook_registered: webhookReg.ok,
             skipped: result.skipped ?? false,
             accounts_synced: result.accounts_synced,
             transactions_synced: result.transactions_added,

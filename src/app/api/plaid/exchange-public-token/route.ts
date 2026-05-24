@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Configuration, PlaidApi, PlaidEnvironments, type CountryCode } from 'plaid';
+import { registerPlaidItemWebhook } from '@/lib/plaid/registerPlaidItemWebhook';
 
 // Initialize Plaid client
 const configuration = new Configuration({
@@ -137,11 +138,16 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        const webhookReg = await registerPlaidItemWebhook(accessToken);
+
         return NextResponse.json({
             success: true,
             item_id: itemId,
             plaid_item_id: plaidItem.id,
-            message: 'Successfully connected bank account',
+            webhook_registered: webhookReg.ok,
+            message: webhookReg.ok
+                ? 'Successfully connected bank account. Automatic sync is enabled.'
+                : 'Bank connected. Enable automatic sync from Integrations if transactions do not update on their own.',
         });
     } catch (error) {
         console.error('Error exchanging public token:', error);

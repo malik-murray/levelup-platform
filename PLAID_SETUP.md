@@ -42,6 +42,15 @@ Key fields:
 - `plaid_items.last_successful_update` — last successful sync timestamp
 - `transactions.pending`, `pending_transaction_id`, `original_pending_transaction_id`, `notified_at`, `removed_at`
 
+## Fix: transactions only update on manual Sync
+
+If Vercel shows **no** `[plaid-webhook]` logs, Plaid is not calling your app. Items linked **before** `PLAID_WEBHOOK_URL` was set often have no item-level webhook.
+
+**Fix (no disconnect):** Finance → Settings → Integrations → **Enable automatic sync**  
+(or `POST /api/plaid/register-webhooks` with your session token).
+
+Manual **Sync** also re-registers the webhook for that item on each run.
+
 ## How sync runs
 
 | Trigger | Route | Behavior |
