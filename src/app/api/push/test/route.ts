@@ -43,7 +43,10 @@ export async function POST(request: NextRequest) {
         userId: user.id,
         title: 'Test transaction detected',
         body: 'You spent $1.00 at Test Merchant (this is a test alert).',
-        data: { transactionId: 'test' },
+        data: {
+            transactionId: 'test',
+            url: '/finance/transactions',
+        },
     });
 
     if (result.sent) {

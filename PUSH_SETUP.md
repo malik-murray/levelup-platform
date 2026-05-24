@@ -52,6 +52,12 @@ Subscriptions are stored in `user_push_subscriptions` (`platform: web`).
 - Trigger a small new spend or manual sync with a new transaction.
 - `notification_events.delivery_status` should be `sent` (not `skipped`).
 
+## Categorize from a notification
+
+Tap a spend alert (or choose **Categorize** on Android) to open `/finance/categorize/[transactionId]` — pick a category in one tap. Merchant mappings are learned for next time.
+
+Requires opening the PWA from your Home Screen on iPhone for best notification action support.
+
 ## Limits
 
 - Alerts fire when **Plaid provides** the transaction, not necessarily at card swipe.

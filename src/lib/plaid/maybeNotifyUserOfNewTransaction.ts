@@ -111,7 +111,13 @@ export async function maybeNotifyUserOfNewTransaction(
         userId: transaction.user_id,
         title,
         body,
-        data: { transactionId: transaction.id },
+        data: {
+            transactionId: transaction.id,
+            url: `/finance/categorize/${transaction.id}`,
+            merchant,
+            amount: String(transaction.amount),
+            pending: transaction.pending ? '1' : '0',
+        },
     });
 
     await supabase
