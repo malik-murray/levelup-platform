@@ -473,8 +473,8 @@ export default function SettingsPage() {
                 </p>
               ) : (
                 <p className="px-1 text-center text-xs text-slate-500 dark:text-slate-400">
-                  Banner alerts when Plaid syncs a new purchase. iPhone: open in Safari → Share → Add to
-                  Home Screen, then enable here.
+                  Banner alerts when Plaid syncs a new purchase. iPhone: Add to Home Screen, then enable here.
+                  Tap a notification to categorize (category buttons in the tray are Android-only).
                 </p>
               )}
 

@@ -97,6 +97,16 @@ export default function QuickCategorizePage() {
         );
     }, [categories, tx?.amount]);
 
+    const suggestedCategory = useMemo(
+        () => expenseCategories.find(c => c.id === tx?.category_id) ?? null,
+        [expenseCategories, tx?.category_id]
+    );
+
+    const sortedCategories = useMemo(() => {
+        const rest = expenseCategories.filter(c => c.id !== suggestedCategory?.id);
+        return suggestedCategory ? [suggestedCategory, ...rest] : rest;
+    }, [expenseCategories, suggestedCategory]);
+
     const merchantLabel = useMemo(() => {
         if (!tx) return '';
         return (tx.note || tx.name || 'Transaction').trim();
@@ -197,34 +207,46 @@ export default function QuickCategorizePage() {
                 ) : null}
             </div>
 
-            <h1 className="text-lg font-semibold text-white">Categorize purchase</h1>
+            <p className="rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 text-xs text-slate-400">
+                On iPhone, Apple only allows <strong className="text-slate-300">tap notification → pick here</strong>.
+                Category buttons in the notification tray are not supported for web apps.
+            </p>
+
+            <h1 className="mt-4 text-lg font-semibold text-white">Categorize purchase</h1>
             <p className="mt-1 text-2xl font-bold text-violet-200">{formatMoney(tx.amount)}</p>
             <p className="mt-1 text-base text-slate-300">{merchantLabel}</p>
             <p className="text-xs text-slate-500">{tx.date}</p>
 
-            <p className="mb-3 mt-6 text-xs font-medium uppercase tracking-wide text-slate-500">
-                Pick a category
+            {suggestedCategory ? (
+                <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => void saveCategory(suggestedCategory.id)}
+                    className="mt-5 w-full rounded-2xl border-2 border-emerald-500/70 bg-emerald-950/50 px-4 py-4 text-left transition active:scale-[0.98]"
+                >
+                    <span className="text-xs font-medium uppercase tracking-wide text-emerald-300/90">
+                        Suggested · one tap
+                    </span>
+                    <span className="mt-1 block text-xl font-bold text-white">{suggestedCategory.name}</span>
+                </button>
+            ) : null}
+
+            <p className="mb-3 mt-5 text-xs font-medium uppercase tracking-wide text-slate-500">
+                {suggestedCategory ? 'Or choose another' : 'Pick a category'}
             </p>
 
-            <div className="flex flex-1 flex-col gap-2 overflow-y-auto">
-                {expenseCategories.map(cat => {
-                    const active = selectedId === cat.id;
-                    return (
-                        <button
-                            key={cat.id}
-                            type="button"
-                            disabled={saving}
-                            onClick={() => void saveCategory(cat.id)}
-                            className={`rounded-xl border px-4 py-3.5 text-left text-base font-medium transition active:scale-[0.98] ${
-                                active
-                                    ? 'border-violet-500 bg-violet-950/60 text-violet-100'
-                                    : 'border-slate-700 bg-slate-900/80 text-slate-100 hover:border-violet-600'
-                            }`}
-                        >
-                            {cat.name}
-                        </button>
-                    );
-                })}
+            <div className="grid flex-1 grid-cols-2 gap-2 overflow-y-auto content-start pb-4">
+                {(suggestedCategory ? sortedCategories.slice(1) : sortedCategories).map(cat => (
+                    <button
+                        key={cat.id}
+                        type="button"
+                        disabled={saving}
+                        onClick={() => void saveCategory(cat.id)}
+                        className="min-h-[52px] rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-3 text-left text-sm font-semibold leading-tight text-slate-100 transition active:scale-[0.98] active:border-violet-500"
+                    >
+                        {cat.name}
+                    </button>
+                ))}
             </div>
 
             {message ? <p className="mt-3 text-center text-sm text-amber-200">{message}</p> : null}
