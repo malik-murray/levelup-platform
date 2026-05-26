@@ -43,6 +43,7 @@ export default function IntegrationsPage() {
     const [notification, setNotification] = useState<string | null>(null);
     const [syncing, setSyncing] = useState<string | null>(null);
     const [backfillLoading, setBackfillLoading] = useState(false);
+    const [recentBackfillLoading, setRecentBackfillLoading] = useState(false);
     const [registeringWebhooks, setRegisteringWebhooks] = useState(false);
 
     // Load connected Plaid items
@@ -259,6 +260,46 @@ export default function IntegrationsPage() {
         }
     };
 
+    const handleBackfillRecent = async () => {
+        try {
+            setRecentBackfillLoading(true);
+            setNotification(null);
+
+            const {
+                data: { session },
+            } = await supabase.auth.getSession();
+            if (!session) {
+                setNotification('Please log in');
+                return;
+            }
+
+            const response = await fetch('/api/plaid/backfill-recent', {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${session.access_token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ days: 14 }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.error || 'Backfill failed');
+            }
+
+            const { data: refreshed } = await supabase
+                .from('plaid_items')
+                .select(PLAID_ITEM_SELECT)
+                .order('created_at', { ascending: false });
+            if (refreshed) setPlaidItems(refreshed);
+
+            setNotification(data.message || 'Recent backfill completed');
+        } catch (err) {
+            setNotification(err instanceof Error ? err.message : 'Backfill failed');
+        } finally {
+            setRecentBackfillLoading(false);
+        }
+    };
+
     const handlePlaidSuccess = () => {
         setNotification('Bank account connected successfully! Syncing accounts and transactions...');
         
@@ -362,10 +403,18 @@ export default function IntegrationsPage() {
                     <button
                         type="button"
                         onClick={handleEnableAutomaticSync}
-                        disabled={registeringWebhooks || loading}
+                        disabled={registeringWebhooks || recentBackfillLoading || loading}
                         className="mt-3 w-full rounded-lg border border-amber-600 bg-amber-900/80 px-4 py-2 text-sm font-medium text-amber-50 hover:bg-amber-800 disabled:opacity-50"
                     >
                         {registeringWebhooks ? 'Enabling…' : 'Enable automatic sync'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleBackfillRecent}
+                        disabled={recentBackfillLoading || registeringWebhooks || loading}
+                        className="mt-2 w-full rounded-lg border border-sky-700 bg-sky-900/70 px-4 py-2 text-sm font-medium text-sky-100 hover:bg-sky-800 disabled:opacity-50"
+                    >
+                        {recentBackfillLoading ? 'Backfilling…' : 'Backfill missing recent transactions (14 days)'}
                     </button>
                 </div>
             ) : null}
