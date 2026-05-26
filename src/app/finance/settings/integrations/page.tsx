@@ -231,6 +231,18 @@ export default function IntegrationsPage() {
 
             localStorage.setItem(AUTO_FIX_STORAGE_KEY, String(Date.now()));
 
+            if (!syncRes.ok) {
+                const syncErr =
+                    syncData?.error ||
+                    syncData?.message ||
+                    `HTTP ${syncRes.status}`;
+                setNotification(
+                    (data.message || `Registered automatic sync on ${data.registered} account(s).`) +
+                        ` Sync-all failed: ${syncErr}`
+                );
+                return;
+            }
+
             const syncNote =
                 syncRes.ok && syncData.transactions_added > 0
                     ? ` Pulled ${syncData.transactions_added} new transaction(s).`

@@ -16,6 +16,7 @@ export type SyncAllPlaidItemsResult = {
         institution_name: string | null;
         success: boolean;
         skipped?: boolean;
+        skip_reason?: string;
         transactions_added?: number;
         webhook_registered?: boolean;
         error?: string;
@@ -51,6 +52,14 @@ export async function syncAllPlaidItemsForUser(params: {
     let transactionsAdded = 0;
 
     for (const item of items ?? []) {
+        console.info('[plaid-sync-all] syncing item', {
+            plaid_item_id: item.id,
+            item_id: item.item_id,
+            institution_name: item.institution_name,
+            error_code: item.error_code,
+            register_webhooks: registerWebhooks,
+        });
+
         if (plaidItemNeedsReauth(item.error_code as string | null)) {
             results.push({
                 plaid_item_id: item.id,
@@ -58,6 +67,7 @@ export async function syncAllPlaidItemsForUser(params: {
                 institution_name: item.institution_name,
                 success: false,
                 skipped: true,
+                skip_reason: item.error_code ?? undefined,
                 error: item.error_code as string,
             });
             skipped += 1;
@@ -91,8 +101,19 @@ export async function syncAllPlaidItemsForUser(params: {
                 institution_name: item.institution_name,
                 success: true,
                 skipped: syncResult.skipped,
+                skip_reason: syncResult.skip_reason,
                 transactions_added: syncResult.transactions_added,
                 webhook_registered: webhookRegistered,
+            });
+
+            console.info('[plaid-sync-all] item finished', {
+                plaid_item_id: item.id,
+                success: true,
+                skipped: syncResult.skipped,
+                skip_reason: syncResult.skip_reason,
+                transactions_added: syncResult.transactions_added,
+                notifications_sent: syncResult.notifications_sent,
+                cursor_updated: syncResult.cursor_updated,
             });
         } catch (err) {
             failed += 1;
@@ -102,6 +123,12 @@ export async function syncAllPlaidItemsForUser(params: {
                 institution_name: item.institution_name,
                 success: false,
                 webhook_registered: webhookRegistered,
+                error: err instanceof Error ? err.message : 'Sync failed',
+            });
+
+            console.error('[plaid-sync-all] item failed', {
+                plaid_item_id: item.id,
+                item_id: item.item_id,
                 error: err instanceof Error ? err.message : 'Sync failed',
             });
         }

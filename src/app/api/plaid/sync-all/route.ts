@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { syncAllPlaidItemsForUser } from '@/lib/plaid/syncAllPlaidItemsForUser';
 
 export const runtime = 'nodejs';
-export const maxDuration = 300;
+export const maxDuration = 600;
 
 /**
  * Sync all of the user's Plaid items (and re-register webhooks).
@@ -43,6 +43,16 @@ export async function POST(request: NextRequest) {
             supabase,
             userId: user.id,
             registerWebhooks: body.register_webhooks !== false,
+        });
+
+        console.info('[plaid-sync-all] finished', {
+            user_id: user.id,
+            total: summary.total,
+            synced: summary.synced,
+            skipped: summary.skipped,
+            failed: summary.failed,
+            webhooks_registered: summary.webhooks_registered,
+            transactions_added: summary.transactions_added,
         });
 
         return NextResponse.json({
