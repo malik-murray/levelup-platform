@@ -32,6 +32,7 @@ export async function POST(request: NextRequest) {
 
         const body = (await request.json().catch(() => ({}))) as {
             register_webhooks?: boolean;
+            request_refresh?: boolean;
         };
 
         const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -43,6 +44,7 @@ export async function POST(request: NextRequest) {
             supabase,
             userId: user.id,
             registerWebhooks: body.register_webhooks !== false,
+            requestRefresh: body.request_refresh === true,
         });
 
         console.info('[plaid-sync-all] finished', {
@@ -53,6 +55,7 @@ export async function POST(request: NextRequest) {
             failed: summary.failed,
             webhooks_registered: summary.webhooks_registered,
             transactions_added: summary.transactions_added,
+            pending_inserted: summary.pending_inserted,
         });
 
         return NextResponse.json({
@@ -60,8 +63,14 @@ export async function POST(request: NextRequest) {
             ...summary,
             message:
                 summary.transactions_added > 0
-                    ? `Imported ${summary.transactions_added} new transaction(s)`
-                    : 'Accounts are up to date',
+                    ? `Imported ${summary.transactions_added} new transaction(s)${
+                          summary.pending_inserted > 0
+                              ? ` (${summary.pending_inserted} pending)`
+                              : ''
+                      }`
+                    : summary.pending_inserted > 0
+                      ? `Imported ${summary.pending_inserted} pending transaction(s).`
+                      : 'Accounts are up to date',
         });
     } catch (error) {
         console.error('[plaid-sync-all]', error);

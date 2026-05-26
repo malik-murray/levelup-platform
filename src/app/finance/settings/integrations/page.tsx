@@ -101,7 +101,7 @@ export default function IntegrationsPage() {
                         Authorization: `Bearer ${session.access_token}`,
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ register_webhooks: false }),
+                    body: JSON.stringify({ register_webhooks: false, request_refresh: true }),
                 });
                 if (syncRes.ok) {
                     localStorage.setItem(AUTO_FIX_STORAGE_KEY, String(Date.now()));
@@ -147,7 +147,15 @@ export default function IntegrationsPage() {
 
             const data = await response.json();
             setNotification(
-                `Successfully synced ${data.accounts_synced} accounts and ${data.transactions_synced} transactions`
+                data.skipped
+                    ? 'Sync already in progress'
+                    : `Synced ${data.accounts_synced} accounts; ${data.transactions_synced} new transaction(s)${
+                          data.pending_inserted > 0 ? ` (${data.pending_inserted} pending)` : ''
+                      }${
+                          data.refresh_requested
+                              ? '. Requested fresh pull from bank — if still missing, wait a few minutes and sync again.'
+                              : ''
+                      }`
             );
 
             // Reload Plaid items to update last_successful_update
@@ -220,7 +228,7 @@ export default function IntegrationsPage() {
                     Authorization: `Bearer ${session.access_token}`,
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ register_webhooks: false }),
+                body: JSON.stringify({ register_webhooks: false, request_refresh: true }),
             });
             const syncData = await syncRes.json().catch(() => ({}));
 
@@ -246,10 +254,16 @@ export default function IntegrationsPage() {
 
             const syncNote =
                 syncRes.ok && syncData.transactions_added > 0
-                    ? ` Pulled ${syncData.transactions_added} new transaction(s).`
-                    : syncRes.ok
-                      ? ' Accounts are up to date.'
-                      : '';
+                    ? ` Pulled ${syncData.transactions_added} new transaction(s)${
+                          syncData.pending_inserted > 0
+                              ? ` (${syncData.pending_inserted} pending).`
+                              : '.'
+                      }`
+                    : syncRes.ok && syncData.pending_inserted > 0
+                      ? ` Pulled ${syncData.pending_inserted} pending transaction(s).`
+                      : syncRes.ok
+                        ? ' Plaid had no new transactions yet — banks can take hours for pending purchases.'
+                        : '';
             setNotification(
                 (data.message || `Registered automatic sync on ${data.registered} account(s).`) + syncNote
             );
@@ -396,9 +410,9 @@ export default function IntegrationsPage() {
                 <div className="rounded-lg border border-amber-900/50 bg-amber-950/40 p-4">
                     <h3 className="text-sm font-semibold text-amber-100">Automatic sync</h3>
                     <p className="mt-1 text-xs text-amber-200/80">
-                        Registers Plaid webhooks and pulls the latest transactions. Finance also syncs in the
-                        background when you open the app (about every 15 minutes). Banks update on Plaid&apos;s
-                        schedule — usually within minutes, not instant.
+                        Registers Plaid webhooks and pulls the latest transactions (including pending when
+                        your bank sends them to Plaid). Manual Sync now requests a fresh bank pull first and
+                        may take ~20 seconds. Pending purchases can lag hours depending on the institution.
                     </p>
                     <button
                         type="button"

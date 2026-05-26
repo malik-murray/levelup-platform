@@ -35,6 +35,7 @@ type Transaction = {
     categoryId: string | null;
     is_transfer: boolean;
     transfer_group_id: string | null;
+    pending: boolean;
 };
 
 type TxRow = {
@@ -48,6 +49,7 @@ type TxRow = {
     category_id: string | null;
     is_transfer: boolean;
     transfer_group_id: string | null;
+    pending?: boolean;
     accounts:
         | { id: string | null; name: string | null }
         | { id: string | null; name: string | null }[]
@@ -488,6 +490,7 @@ export default function TransactionsPage() {
           category_id,
           is_transfer,
           transfer_group_id,
+          pending,
           accounts ( id, name ),
           categories ( id, name )
         `;
@@ -520,6 +523,7 @@ export default function TransactionsPage() {
           category_id,
           is_transfer,
           transfer_group_id,
+          pending,
           accounts ( id, name ),
           categories ( id, name )
         `)
@@ -567,6 +571,7 @@ export default function TransactionsPage() {
                 categoryId: tx.category_id,
                 is_transfer: tx.is_transfer ?? false,
                 transfer_group_id: tx.transfer_group_id,
+                pending: tx.pending ?? false,
             }));
 
             setTransactions(mapped);
@@ -3858,6 +3863,11 @@ export default function TransactionsPage() {
                                         </div>
                                         <div className="text-[11px] text-slate-400">
                                             {tx.date} • {tx.name || tx.person}
+                                            {tx.pending ? (
+                                                <span className="ml-1 rounded bg-amber-900/60 px-1.5 py-0.5 text-[10px] text-amber-200">
+                                                    Pending
+                                                </span>
+                                            ) : null}
                                             {tx.note ? ` • ${tx.note}` : ''}
                                         </div>
                                     </div>

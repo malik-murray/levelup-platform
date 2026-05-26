@@ -63,6 +63,7 @@ export async function POST(request: NextRequest) {
             supabase,
             plaidItemId: plaidItem.id,
             userId: user.id,
+            requestRefresh: true,
         });
 
         return NextResponse.json({
@@ -75,6 +76,8 @@ export async function POST(request: NextRequest) {
             transactions_removed: result.transactions_removed,
             pending_inserted: result.pending_inserted,
             pending_merged_to_posted: result.pending_merged_to_posted,
+            refresh_requested: result.refresh_requested ?? false,
+            refresh_error: result.refresh_error,
             notifications_sent: result.notifications_sent,
             transfer_pairs_linked: result.transfer_pairs_linked,
             transfer_rows_category_fixed: result.transfer_rows_category_fixed,

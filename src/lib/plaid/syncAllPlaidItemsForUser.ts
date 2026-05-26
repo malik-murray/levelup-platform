@@ -10,6 +10,7 @@ export type SyncAllPlaidItemsResult = {
     failed: number;
     webhooks_registered: number;
     transactions_added: number;
+    pending_inserted: number;
     results: Array<{
         plaid_item_id: string;
         item_id: string;
@@ -18,6 +19,7 @@ export type SyncAllPlaidItemsResult = {
         skipped?: boolean;
         skip_reason?: string;
         transactions_added?: number;
+        pending_inserted?: number;
         webhook_registered?: boolean;
         error?: string;
     }>;
@@ -31,8 +33,9 @@ export async function syncAllPlaidItemsForUser(params: {
     supabase: SupabaseClient;
     userId: string;
     registerWebhooks?: boolean;
+    requestRefresh?: boolean;
 }): Promise<SyncAllPlaidItemsResult> {
-    const { supabase, userId, registerWebhooks = true } = params;
+    const { supabase, userId, registerWebhooks = true, requestRefresh = false } = params;
 
     const { data: items, error } = await supabase
         .from('plaid_items')
@@ -50,6 +53,7 @@ export async function syncAllPlaidItemsForUser(params: {
     let failed = 0;
     let webhooksRegistered = 0;
     let transactionsAdded = 0;
+    let pendingInserted = 0;
 
     for (const item of items ?? []) {
         console.info('[plaid-sync-all] syncing item', {
@@ -86,6 +90,7 @@ export async function syncAllPlaidItemsForUser(params: {
                 supabase,
                 plaidItemId: item.id,
                 userId,
+                requestRefresh,
             });
 
             if (syncResult.skipped) {
@@ -93,6 +98,7 @@ export async function syncAllPlaidItemsForUser(params: {
             } else {
                 synced += 1;
                 transactionsAdded += syncResult.transactions_added;
+                pendingInserted += syncResult.pending_inserted;
             }
 
             results.push({
@@ -103,6 +109,7 @@ export async function syncAllPlaidItemsForUser(params: {
                 skipped: syncResult.skipped,
                 skip_reason: syncResult.skip_reason,
                 transactions_added: syncResult.transactions_added,
+                pending_inserted: syncResult.pending_inserted,
                 webhook_registered: webhookRegistered,
             });
 
@@ -141,6 +148,7 @@ export async function syncAllPlaidItemsForUser(params: {
         failed,
         webhooks_registered: webhooksRegistered,
         transactions_added: transactionsAdded,
+        pending_inserted: pendingInserted,
         results,
     };
 }

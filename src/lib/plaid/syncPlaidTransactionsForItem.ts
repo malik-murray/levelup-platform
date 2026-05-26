@@ -7,6 +7,7 @@ import {
     syncPlaidAccountsForItem,
     type PlaidSyncStats,
 } from '@/lib/plaid/persistPlaidSyncTransactions';
+import { requestPlaidTransactionRefresh } from '@/lib/plaid/requestPlaidTransactionRefresh';
 
 const SYNC_LOCK_MINUTES = 5;
 
@@ -14,6 +15,8 @@ export type SyncPlaidTransactionsResult = {
     success: boolean;
     skipped?: boolean;
     skip_reason?: string;
+    refresh_requested?: boolean;
+    refresh_error?: string;
     accounts_synced: number;
     transactions_added: number;
     transactions_modified: number;
@@ -58,6 +61,8 @@ export async function syncPlaidTransactionsForItem(params: {
     /** UUID primary key from plaid_items.id */
     plaidItemId: string;
     userId?: string;
+    /** Ask Plaid to pull latest from bank before syncing (helps pending transactions). */
+    requestRefresh?: boolean;
 }): Promise<SyncPlaidTransactionsResult> {
     const { supabase, plaidItemId } = params;
     const plaidClient = getPlaidApi();
@@ -89,6 +94,7 @@ export async function syncPlaidTransactionsForItem(params: {
             success: true,
             skipped: true,
             skip_reason: 'sync_in_progress',
+            refresh_requested: false,
             accounts_synced: 0,
             transactions_added: 0,
             transactions_modified: 0,
@@ -110,13 +116,30 @@ export async function syncPlaidTransactionsForItem(params: {
 
     const stats = emptyStats();
     let cursorUpdated = false;
+    let refreshRequested = false;
+    let refreshError: string | undefined;
 
     try {
         console.info('[plaid-sync] started', {
             plaidItemId,
             item_id: plaidItem.item_id,
             has_cursor: Boolean(plaidItem.transactions_cursor),
+            request_refresh: Boolean(params.requestRefresh),
         });
+
+        if (params.requestRefresh) {
+            const refresh = await requestPlaidTransactionRefresh({
+                plaidClient,
+                accessToken: plaidItem.access_token,
+                itemId: plaidItem.item_id as string,
+            });
+            refreshRequested = refresh.requested;
+            refreshError = refresh.error;
+            if (refresh.requested) {
+                // Plaid refresh is async; give the institution a moment before cursor sync.
+                await new Promise(resolve => setTimeout(resolve, 15_000));
+            }
+        }
 
         const accountsSynced = await syncPlaidAccountsForItem({
             supabase,
@@ -193,6 +216,8 @@ export async function syncPlaidTransactionsForItem(params: {
 
         return {
             success: true,
+            refresh_requested: refreshRequested,
+            refresh_error: refreshError,
             accounts_synced: accountsSynced,
             transactions_added: stats.added,
             transactions_modified: stats.modified,
