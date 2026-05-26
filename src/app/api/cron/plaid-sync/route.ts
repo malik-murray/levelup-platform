@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { plaidItemNeedsReauth } from '@/lib/plaid/plaidItemNeedsReauth';
 import { syncPlaidTransactionsForItem } from '@/lib/plaid/syncPlaidTransactionsForItem';
 
 export const runtime = 'nodejs';
@@ -28,8 +29,7 @@ async function runPlaidBackupSync() {
 
     const { data: items, error } = await supabase
         .from('plaid_items')
-        .select('id, user_id, item_id, institution_name')
-        .is('error_code', null)
+        .select('id, user_id, item_id, institution_name, error_code')
         .order('last_successful_update', { ascending: true, nullsFirst: true });
 
     if (error) {
@@ -45,6 +45,16 @@ async function runPlaidBackupSync() {
     }> = [];
 
     for (const item of items ?? []) {
+        if (plaidItemNeedsReauth(item.error_code as string | null)) {
+            results.push({
+                plaid_item_id: item.id,
+                item_id: item.item_id,
+                success: false,
+                error: `skipped:${item.error_code}`,
+            });
+            continue;
+        }
+
         try {
             const syncResult = await syncPlaidTransactionsForItem({
                 supabase,

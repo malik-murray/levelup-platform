@@ -157,19 +157,22 @@ export async function syncPlaidTransactionsForItem(params: {
             hasMore = data.has_more;
         }
 
+        const now = new Date().toISOString();
+        const itemUpdate: Record<string, string | null> = {
+            last_successful_update: now,
+            error_code: null,
+            error_message: null,
+        };
         if (cursor) {
-            const { error: cursorError } = await supabase
-                .from('plaid_items')
-                .update({
-                    transactions_cursor: cursor,
-                    last_successful_update: new Date().toISOString(),
-                    error_code: null,
-                    error_message: null,
-                })
-                .eq('id', plaidItemId);
-
-            if (!cursorError) cursorUpdated = true;
+            itemUpdate.transactions_cursor = cursor;
         }
+
+        const { error: cursorError } = await supabase
+            .from('plaid_items')
+            .update(itemUpdate)
+            .eq('id', plaidItemId);
+
+        if (!cursorError && cursor) cursorUpdated = true;
 
         const linkResult = await linkInternalTransferPairsForUser(supabase, userId, {
             sinceDays: 120,

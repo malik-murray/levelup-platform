@@ -55,9 +55,12 @@ Manual **Sync** also re-registers the webhook for that item on each run.
 
 | Trigger | Route | Behavior |
 |---------|-------|----------|
-| Plaid webhook | `POST /api/plaid/webhook` | Responds `200` immediately; runs sync in background on `SYNC_UPDATES_AVAILABLE` |
-| Manual | `POST /api/plaid/sync` | Same `syncPlaidTransactionsForItem` |
-| Cron backup | `GET /api/cron/plaid-sync` | Every 6 hours (Vercel); `Authorization: Bearer {CRON_SECRET}` |
+| Plaid webhook | `POST /api/plaid/webhook` | Responds `200` immediately; sync runs via Vercel `waitUntil` |
+| Finance app open | `POST /api/plaid/sync-all` | Every ~15 min per tab while you use Finance (fallback) |
+| Manual | `POST /api/plaid/sync` or sync-all | Same sync engine + webhook registration |
+| Cron backup | `GET /api/cron/plaid-sync` | Hourly (Vercel); `Authorization: Bearer {CRON_SECRET}` |
+
+**Not truly real-time:** Plaid and your bank refresh on their own schedule (often minutes to a few hours). Webhooks notify us when Plaid has new data; opening Finance or the hourly cron catches anything webhooks miss.
 
 ## Pending → posted deduping
 

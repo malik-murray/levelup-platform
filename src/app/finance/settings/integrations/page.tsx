@@ -12,9 +12,30 @@ type PlaidItem = {
     institution_id: string | null;
     created_at: string;
     last_successful_update: string | null;
+    last_webhook_at: string | null;
     error_code: string | null;
     error_message: string | null;
 };
+
+const PLAID_ITEM_SELECT =
+    'id, item_id, institution_name, institution_id, created_at, last_successful_update, last_webhook_at, error_code, error_message';
+
+const STALE_SYNC_MS = 24 * 60 * 60 * 1000;
+const AUTO_FIX_STORAGE_KEY = 'plaid-integrations-auto-fix-at';
+
+function formatSyncTimestamp(iso: string): string {
+    return new Date(iso).toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+    });
+}
+
+function isSyncStale(lastUpdate: string | null): boolean {
+    if (!lastUpdate) return true;
+    return Date.now() - new Date(lastUpdate).getTime() > STALE_SYNC_MS;
+}
 
 export default function IntegrationsPage() {
     const [plaidItems, setPlaidItems] = useState<PlaidItem[]>([]);
@@ -31,7 +52,7 @@ export default function IntegrationsPage() {
                 setLoading(true);
                 const { data, error } = await supabase
                     .from('plaid_items')
-                    .select('id, item_id, institution_name, institution_id, created_at, last_successful_update, error_code, error_message')
+                    .select(PLAID_ITEM_SELECT)
                     .order('created_at', { ascending: false });
 
                 if (error) {
@@ -51,6 +72,51 @@ export default function IntegrationsPage() {
 
         loadPlaidItems();
     }, []);
+
+    // If sync is stale, re-register webhooks and pull once per day when visiting this page
+    useEffect(() => {
+        if (loading || plaidItems.length === 0) return;
+
+        const anyStale = plaidItems.some(item => isSyncStale(item.last_successful_update));
+        if (!anyStale) return;
+
+        const lastFix = localStorage.getItem(AUTO_FIX_STORAGE_KEY);
+        if (lastFix && Date.now() - Number(lastFix) < STALE_SYNC_MS) return;
+
+        const runAutoFix = async () => {
+            const {
+                data: { session },
+            } = await supabase.auth.getSession();
+            if (!session) return;
+
+            try {
+                await fetch('/api/plaid/register-webhooks', {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${session.access_token}` },
+                });
+                const syncRes = await fetch('/api/plaid/sync-all', {
+                    method: 'POST',
+                    headers: {
+                        Authorization: `Bearer ${session.access_token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ register_webhooks: false }),
+                });
+                if (syncRes.ok) {
+                    localStorage.setItem(AUTO_FIX_STORAGE_KEY, String(Date.now()));
+                    const { data } = await supabase
+                        .from('plaid_items')
+                        .select(PLAID_ITEM_SELECT)
+                        .order('created_at', { ascending: false });
+                    if (data) setPlaidItems(data);
+                }
+            } catch {
+                // User can still use Enable automatic sync / Sync
+            }
+        };
+
+        void runAutoFix();
+    }, [loading, plaidItems]);
 
     const handleSync = async (plaidItemId: string) => {
         try {
@@ -86,7 +152,7 @@ export default function IntegrationsPage() {
             // Reload Plaid items to update last_successful_update
             const { data: updatedItems } = await supabase
                 .from('plaid_items')
-                .select('id, item_id, institution_name, institution_id, created_at, last_successful_update, error_code, error_message')
+                .select(PLAID_ITEM_SELECT)
                 .order('created_at', { ascending: false });
 
             if (updatedItems) {
@@ -146,7 +212,34 @@ export default function IntegrationsPage() {
             if (!response.ok) {
                 throw new Error(data.error || 'Failed to register webhooks');
             }
-            setNotification(data.message || `Registered automatic sync on ${data.registered} account(s).`);
+
+            const syncRes = await fetch('/api/plaid/sync-all', {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${session.access_token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ register_webhooks: false }),
+            });
+            const syncData = await syncRes.json().catch(() => ({}));
+
+            const { data: refreshed } = await supabase
+                .from('plaid_items')
+                .select(PLAID_ITEM_SELECT)
+                .order('created_at', { ascending: false });
+            if (refreshed) setPlaidItems(refreshed);
+
+            localStorage.setItem(AUTO_FIX_STORAGE_KEY, String(Date.now()));
+
+            const syncNote =
+                syncRes.ok && syncData.transactions_added > 0
+                    ? ` Pulled ${syncData.transactions_added} new transaction(s).`
+                    : syncRes.ok
+                      ? ' Accounts are up to date.'
+                      : '';
+            setNotification(
+                (data.message || `Registered automatic sync on ${data.registered} account(s).`) + syncNote
+            );
         } catch (err) {
             setNotification(err instanceof Error ? err.message : 'Failed to enable automatic sync');
         } finally {
@@ -161,7 +254,7 @@ export default function IntegrationsPage() {
         const reloadItems = async () => {
             const { data } = await supabase
                 .from('plaid_items')
-                .select('id, item_id, institution_name, institution_id, created_at, last_successful_update, error_code, error_message')
+                .select(PLAID_ITEM_SELECT)
                 .order('created_at', { ascending: false });
 
             if (data) {
@@ -250,8 +343,9 @@ export default function IntegrationsPage() {
                 <div className="rounded-lg border border-amber-900/50 bg-amber-950/40 p-4">
                     <h3 className="text-sm font-semibold text-amber-100">Automatic sync</h3>
                     <p className="mt-1 text-xs text-amber-200/80">
-                        If transactions only update when you tap Sync, your bank was likely connected before
-                        webhooks were set up. Run this once (no need to disconnect).
+                        Registers Plaid webhooks and pulls the latest transactions. Finance also syncs in the
+                        background when you open the app (about every 15 minutes). Banks update on Plaid&apos;s
+                        schedule — usually within minutes, not instant.
                     </p>
                     <button
                         type="button"
@@ -307,9 +401,33 @@ export default function IntegrationsPage() {
                                         <div className="text-[11px] text-slate-400">
                                             Connected: {new Date(item.created_at).toLocaleDateString()}
                                         </div>
-                                        {item.last_successful_update && (
-                                            <div className="text-[11px] text-slate-400">
-                                                Last synced: {new Date(item.last_successful_update).toLocaleDateString()}
+                                        {item.last_successful_update ? (
+                                            <div
+                                                className={`text-[11px] ${
+                                                    isSyncStale(item.last_successful_update)
+                                                        ? 'text-amber-400'
+                                                        : 'text-slate-400'
+                                                }`}
+                                            >
+                                                Last synced:{' '}
+                                                {formatSyncTimestamp(item.last_successful_update)}
+                                                {isSyncStale(item.last_successful_update)
+                                                    ? ' — stale, open Finance or tap Sync'
+                                                    : ''}
+                                            </div>
+                                        ) : (
+                                            <div className="text-[11px] text-amber-400">
+                                                Never synced — tap Sync or Enable automatic sync
+                                            </div>
+                                        )}
+                                        {item.last_webhook_at ? (
+                                            <div className="text-[11px] text-slate-500">
+                                                Last Plaid webhook:{' '}
+                                                {formatSyncTimestamp(item.last_webhook_at)}
+                                            </div>
+                                        ) : (
+                                            <div className="text-[11px] text-slate-500">
+                                                No Plaid webhooks received yet
                                             </div>
                                         )}
                                         {item.error_code && (

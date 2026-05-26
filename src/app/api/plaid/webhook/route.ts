@@ -1,4 +1,4 @@
-import { after } from 'next/server';
+import { waitUntil } from '@vercel/functions';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getPlaidApi } from '@/lib/plaid/plaidApi';
@@ -7,9 +7,10 @@ import { shouldSyncForTransactionsWebhook } from '@/lib/plaid/plaidWebhookSyncCo
 import { verifyPlaidWebhook } from '@/lib/plaid/verifyPlaidWebhook';
 
 export const runtime = 'nodejs';
+export const maxDuration = 300;
 
 /**
- * Plaid webhooks: respond immediately, run sync in background via after().
+ * Plaid webhooks: respond immediately, run sync via waitUntil (reliable on Vercel).
  * Configure PLAID_WEBHOOK_URL and SUPABASE_SERVICE_ROLE_KEY in production.
  */
 export async function POST(request: NextRequest) {
@@ -66,44 +67,51 @@ export async function POST(request: NextRequest) {
 
     const itemId = body.item_id;
 
-    after(async () => {
-        const supabase = createClient(supabaseUrl, serviceKey, {
-            auth: { persistSession: false },
-        });
-
-        const { data: plaidItem, error } = await supabase
-            .from('plaid_items')
-            .select('id, user_id')
-            .eq('item_id', itemId)
-            .maybeSingle();
-
-        if (error) {
-            console.error('[plaid-webhook] plaid_items lookup error', {
-                item_id: itemId,
-                message: error.message,
+    waitUntil(
+        (async () => {
+            const supabase = createClient(supabaseUrl, serviceKey, {
+                auth: { persistSession: false },
             });
-            return;
-        }
 
-        if (!plaidItem?.id || !plaidItem.user_id) {
-            console.warn('[plaid-webhook] unknown plaid item_id — ignoring', { item_id: itemId });
-            return;
-        }
+            const { data: plaidItem, error } = await supabase
+                .from('plaid_items')
+                .select('id, user_id')
+                .eq('item_id', itemId)
+                .maybeSingle();
 
-        try {
-            await syncPlaidTransactionsForItem({
-                supabase,
-                plaidItemId: plaidItem.id,
-                userId: plaidItem.user_id as string,
-            });
-        } catch (err) {
-            console.error('[plaid-webhook] background sync failed', {
-                item_id: itemId,
-                plaid_item_id: plaidItem.id,
-                message: err instanceof Error ? err.message : 'unknown',
-            });
-        }
-    });
+            if (error) {
+                console.error('[plaid-webhook] plaid_items lookup error', {
+                    item_id: itemId,
+                    message: error.message,
+                });
+                return;
+            }
+
+            if (!plaidItem?.id || !plaidItem.user_id) {
+                console.warn('[plaid-webhook] unknown plaid item_id — ignoring', { item_id: itemId });
+                return;
+            }
+
+            await supabase
+                .from('plaid_items')
+                .update({ last_webhook_at: new Date().toISOString() })
+                .eq('id', plaidItem.id);
+
+            try {
+                await syncPlaidTransactionsForItem({
+                    supabase,
+                    plaidItemId: plaidItem.id,
+                    userId: plaidItem.user_id as string,
+                });
+            } catch (err) {
+                console.error('[plaid-webhook] background sync failed', {
+                    item_id: itemId,
+                    plaid_item_id: plaidItem.id,
+                    message: err instanceof Error ? err.message : 'unknown',
+                });
+            }
+        })()
+    );
 
     return NextResponse.json({ received: true });
 }
