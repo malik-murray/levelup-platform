@@ -13,12 +13,13 @@ type PlaidItem = {
     created_at: string;
     last_successful_update: string | null;
     last_webhook_at: string | null;
+    last_cron_sync_at: string | null;
     error_code: string | null;
     error_message: string | null;
 };
 
 const PLAID_ITEM_SELECT =
-    'id, item_id, institution_name, institution_id, created_at, last_successful_update, last_webhook_at, error_code, error_message';
+    'id, item_id, institution_name, institution_id, created_at, last_successful_update, last_webhook_at, last_cron_sync_at, error_code, error_message';
 
 const STALE_SYNC_MS = 24 * 60 * 60 * 1000;
 const AUTO_FIX_STORAGE_KEY = 'plaid-integrations-auto-fix-at';
@@ -410,9 +411,10 @@ export default function IntegrationsPage() {
                 <div className="rounded-lg border border-amber-900/50 bg-amber-950/40 p-4">
                     <h3 className="text-sm font-semibold text-amber-100">Automatic sync</h3>
                     <p className="mt-1 text-xs text-amber-200/80">
-                        Registers Plaid webhooks and pulls the latest transactions (including pending when
-                        your bank sends them to Plaid). Manual Sync now requests a fresh bank pull first and
-                        may take ~20 seconds. Pending purchases can lag hours depending on the institution.
+                        <strong>While the app is closed:</strong> our server checks Plaid every 10 minutes and
+                        sends push alerts when new transactions arrive (requires <code className="text-amber-100">CRON_SECRET</code>{' '}
+                        on Vercel). <strong>While the app is open:</strong> we also poll every few minutes. Plaid
+                        webhooks (registered below) are the fastest path when your bank sends data.
                     </p>
                     <button
                         type="button"
@@ -503,6 +505,16 @@ export default function IntegrationsPage() {
                                         ) : (
                                             <div className="text-[11px] text-slate-500">
                                                 No Plaid webhooks received yet
+                                            </div>
+                                        )}
+                                        {item.last_cron_sync_at ? (
+                                            <div className="text-[11px] text-slate-500">
+                                                Last server sync (app closed):{' '}
+                                                {formatSyncTimestamp(item.last_cron_sync_at)}
+                                            </div>
+                                        ) : (
+                                            <div className="text-[11px] text-amber-500">
+                                                Server background sync has not run — check CRON_SECRET on Vercel
                                             </div>
                                         )}
                                         {item.error_code && (

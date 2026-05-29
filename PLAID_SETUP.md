@@ -58,9 +58,29 @@ Manual **Sync** also re-registers the webhook for that item on each run.
 | Plaid webhook | `POST /api/plaid/webhook` | Responds `200` immediately; sync runs via Vercel `waitUntil` |
 | Finance app open | `POST /api/plaid/sync-all` | Every ~15 min per tab while you use Finance (fallback) |
 | Manual | `POST /api/plaid/sync` or sync-all | Same sync engine + webhook registration |
-| Cron sync | `GET /api/cron/plaid-sync` | Every 15 minutes (cursor sync) |
-| Cron refresh | `GET /api/cron/plaid-refresh` | Every 6 hours (bank refresh when webhooks are quiet) |
-| App open (PWA) | `POST /api/plaid/sync-all` | Every ~3 minutes while LevelUp is visible |
+| Cron sync | `GET /api/cron/plaid-sync` | Every **10 minutes** on the server (app closed) — imports txs + sends push |
+| App open (PWA) | `POST /api/plaid/sync-all` | Every ~3 minutes while LevelUp is visible (extra catch-up) |
+
+### Background alerts while the app is closed
+
+Push notifications are sent **from the server** when cron or webhooks import a transaction. They do **not** require the app to be open.
+
+**Required on Vercel (Production):**
+
+1. `CRON_SECRET` — long random string. Vercel Cron sends `Authorization: Bearer {CRON_SECRET}` automatically.
+2. `SUPABASE_SERVICE_ROLE_KEY` — webhooks and cron use the service role.
+3. `NEXT_PUBLIC_VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` — Web Push delivery.
+
+**Verify:** After 15–20 minutes without opening the app, Integrations should show **Last server sync (app closed)** updating. If it stays empty, cron is not running (missing `CRON_SECRET` or Hobby plan cron limits).
+
+**Hobby plan:** Vercel allows only **2 cron jobs** per project. This repo uses 3 (`monthly-refresh`, `weekly-insights`, `plaid-sync`). Upgrade to **Pro** or remove/replace another cron so `plaid-sync` can run.
+
+**External fallback:** Ping every 10 minutes (e.g. [cron-job.org](https://cron-job.org)):
+
+```bash
+curl -sS -H "Authorization: Bearer YOUR_CRON_SECRET" \
+  "https://ai.levelupsolutions1.com/api/cron/plaid-sync"
+```
 
 **Not truly real-time:** Many banks (including some credit unions) send transactions to Plaid **1–3 days after the purchase**, especially before they post. Our alerts fire as soon as Plaid delivers the row — we cannot notify before the bank/Plaid has the data. Check Integrations → **Last Plaid webhook**; if that is recent but alerts are still days late, the delay is on the bank→Plaid side.
 

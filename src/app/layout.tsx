@@ -6,6 +6,7 @@ import { AuthHashErrorHandler } from "@/components/AuthHashErrorHandler";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ServiceWorkerUpdater } from "@/components/ServiceWorkerUpdater";
 import { PlaidSyncPoller } from "@/components/PlaidSyncPoller";
+import { PlaidWebhookBootstrap } from "@/components/PlaidWebhookBootstrap";
 
 const navBtnClass =
     "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[#ff9d00]/60 bg-black/50 text-[#ffe066] shadow-[0_0_18px_rgba(255,157,0,0.25)] transition hover:border-[#ff9d00] hover:bg-black/70";
@@ -43,6 +44,7 @@ export default function RootLayout({
         <ThemeProvider>
             <ServiceWorkerUpdater />
             <PlaidSyncPoller />
+            <PlaidWebhookBootstrap />
             <AuthHashErrorHandler />
             <div className="fixed right-4 top-8 z-50 flex items-center gap-2">
                 <ThemeToggle className={`${navBtnClass} rounded-xl p-0`} />

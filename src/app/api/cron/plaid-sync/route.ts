@@ -1,41 +1,58 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { authorizeCronRequest, isCronConfigured } from '@/lib/cron/authorizeCronRequest';
 import { runPlaidCronSync } from '@/lib/plaid/runPlaidCronSync';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
-
-function authorizeCron(request: NextRequest): boolean {
-    const authHeader = request.headers.get('authorization');
-    const cronSecret = process.env.CRON_SECRET;
-    if (!cronSecret) {
-        console.error('[plaid-cron] CRON_SECRET is not configured');
-        return false;
-    }
-    return authHeader === `Bearer ${cronSecret}`;
-}
+export const dynamic = 'force-dynamic';
 
 /**
- * Fast backup sync every 15 minutes (cursor only, no bank refresh).
+ * Server-side Plaid sync — runs on a schedule even when the app is closed.
+ * Vercel: set CRON_SECRET; schedule in vercel.json (e.g. every 10–15 minutes).
+ * External fallback: curl with Authorization: Bearer $CRON_SECRET
  */
 export async function GET(request: NextRequest) {
-    if (!authorizeCron(request)) {
+    if (!isCronConfigured()) {
+        return NextResponse.json(
+            {
+                error: 'CRON_SECRET is not set on the server. Background sync and push alerts while the app is closed will not run.',
+            },
+            { status: 503 }
+        );
+    }
+
+    if (!authorizeCronRequest(request)) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!supabaseUrl || !serviceKey) {
-        return NextResponse.json({ error: 'Server not configured' }, { status: 503 });
+        return NextResponse.json(
+            { error: 'Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY' },
+            { status: 503 }
+        );
     }
 
     try {
         const supabase = createClient(supabaseUrl, serviceKey, {
             auth: { persistSession: false },
         });
-        const summary = await runPlaidCronSync(supabase, { allowRefresh: false });
-        console.info('[plaid-cron] finished', summary);
-        return NextResponse.json({ ok: true, mode: 'sync', ...summary });
+
+        const summary = await runPlaidCronSync(supabase, { allowRefresh: true });
+
+        console.info('[plaid-cron] finished', {
+            ...summary,
+            triggered_by: request.headers.get('x-vercel-cron') ? 'vercel' : 'external',
+        });
+
+        return NextResponse.json({
+            ok: true,
+            mode: 'server_background',
+            cron_configured: true,
+            ...summary,
+        });
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Cron sync failed';
         console.error('[plaid-cron]', message);

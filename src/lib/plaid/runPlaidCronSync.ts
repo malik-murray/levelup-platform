@@ -64,6 +64,14 @@ export async function runPlaidCronSync(
             });
             transactionsAdded += syncResult.transactions_added;
             notificationsSent += syncResult.notifications_sent;
+
+            if (!syncResult.skipped) {
+                await supabase
+                    .from('plaid_items')
+                    .update({ last_cron_sync_at: new Date().toISOString() })
+                    .eq('id', item.id);
+            }
+
             results.push({
                 plaid_item_id: item.id,
                 item_id: item.item_id,
