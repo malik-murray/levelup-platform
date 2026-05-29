@@ -9,14 +9,14 @@ function authorizeCron(request: NextRequest): boolean {
     const authHeader = request.headers.get('authorization');
     const cronSecret = process.env.CRON_SECRET;
     if (!cronSecret) {
-        console.error('[plaid-cron] CRON_SECRET is not configured');
+        console.error('[plaid-cron-refresh] CRON_SECRET is not configured');
         return false;
     }
     return authHeader === `Bearer ${cronSecret}`;
 }
 
 /**
- * Fast backup sync every 15 minutes (cursor only, no bank refresh).
+ * Every ~6 hours: request bank refresh (rate-limited) then sync — catches data Plaid has not pushed via webhook.
  */
 export async function GET(request: NextRequest) {
     if (!authorizeCron(request)) {
@@ -33,12 +33,12 @@ export async function GET(request: NextRequest) {
         const supabase = createClient(supabaseUrl, serviceKey, {
             auth: { persistSession: false },
         });
-        const summary = await runPlaidCronSync(supabase, { allowRefresh: false });
-        console.info('[plaid-cron] finished', summary);
-        return NextResponse.json({ ok: true, mode: 'sync', ...summary });
+        const summary = await runPlaidCronSync(supabase, { allowRefresh: true });
+        console.info('[plaid-cron-refresh] finished', summary);
+        return NextResponse.json({ ok: true, mode: 'refresh', ...summary });
     } catch (err) {
-        const message = err instanceof Error ? err.message : 'Cron sync failed';
-        console.error('[plaid-cron]', message);
+        const message = err instanceof Error ? err.message : 'Cron refresh failed';
+        console.error('[plaid-cron-refresh]', message);
         return NextResponse.json({ error: message }, { status: 500 });
     }
 }

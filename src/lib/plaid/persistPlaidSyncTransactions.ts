@@ -401,7 +401,7 @@ async function processAddedTransaction(params: {
         .from('transactions')
         .insert(insertRow)
         .select(
-            'id, user_id, amount, name, note, pending, notified_at, plaid_transaction_id, original_pending_transaction_id'
+            'id, user_id, amount, name, note, date, pending, notified_at, plaid_transaction_id, original_pending_transaction_id'
         )
         .single();
 
@@ -431,6 +431,7 @@ async function processAddedTransaction(params: {
             amount: inserted.amount,
             name: inserted.name,
             note: inserted.note,
+            date: inserted.date as string | null,
             pending: inserted.pending,
             notified_at: inserted.notified_at,
             plaid_transaction_id: inserted.plaid_transaction_id,

@@ -6,7 +6,6 @@ import { usePathname } from 'next/navigation';
 import Image from 'next/image';
 import logo from '../logo.png';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import { FinancePlaidBackgroundSync } from '@/app/finance/components/FinancePlaidBackgroundSync';
 
 const financeTabs = [
     { href: '/finance', label: 'Home' },
@@ -30,7 +29,6 @@ export default function FinanceLayout({
             className="min-h-screen min-w-0 max-w-full text-slate-200 transition-colors"
             style={{ backgroundColor: '#0a0e14' }}
         >
-            <FinancePlaidBackgroundSync />
             <header
                 className="border-b transition-colors"
                 style={{ borderColor: '#1e293b', backgroundColor: '#0f1419' }}

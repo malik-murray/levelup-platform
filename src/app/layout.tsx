@@ -5,6 +5,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import { AuthHashErrorHandler } from "@/components/AuthHashErrorHandler";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ServiceWorkerUpdater } from "@/components/ServiceWorkerUpdater";
+import { PlaidSyncPoller } from "@/components/PlaidSyncPoller";
 
 const navBtnClass =
     "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[#ff9d00]/60 bg-black/50 text-[#ffe066] shadow-[0_0_18px_rgba(255,157,0,0.25)] transition hover:border-[#ff9d00] hover:bg-black/70";
@@ -41,6 +42,7 @@ export default function RootLayout({
         <body className="min-w-0 max-w-full overflow-x-clip antialiased bg-white text-slate-900 dark:bg-black dark:text-white transition-colors">
         <ThemeProvider>
             <ServiceWorkerUpdater />
+            <PlaidSyncPoller />
             <AuthHashErrorHandler />
             <div className="fixed right-4 top-8 z-50 flex items-center gap-2">
                 <ThemeToggle className={`${navBtnClass} rounded-xl p-0`} />

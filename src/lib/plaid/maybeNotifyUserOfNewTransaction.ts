@@ -15,6 +15,7 @@ export type TransactionForNotification = {
     amount: number;
     name: string | null;
     note: string | null;
+    date?: string | null;
     pending: boolean;
     notified_at: string | null;
     plaid_transaction_id: string | null;
@@ -85,7 +86,11 @@ export async function maybeNotifyUserOfNewTransaction(
 
     const merchant = normalizeMerchantLabel(transaction.name, transaction.note);
     const title = 'New spend';
-    const body = `$${spendAbs.toFixed(2)} at ${merchant}`;
+    const dateSuffix =
+        transaction.date && /^\d{4}-\d{2}-\d{2}$/.test(transaction.date)
+            ? ` (${transaction.date})`
+            : '';
+    const body = `$${spendAbs.toFixed(2)} at ${merchant}${dateSuffix}`;
 
     const [quickCategories, actionToken] = await Promise.all([
         getQuickCategoryActionsForPush(supabase, transaction.user_id, transaction.category_id ?? null),

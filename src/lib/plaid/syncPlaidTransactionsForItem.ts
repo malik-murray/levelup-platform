@@ -63,6 +63,8 @@ export async function syncPlaidTransactionsForItem(params: {
     userId?: string;
     /** Ask Plaid to pull latest from bank before syncing (helps pending transactions). */
     requestRefresh?: boolean;
+    /** Wait after refresh before cursor sync (ms). Use 0 for webhooks. */
+    refreshWaitMs?: number;
 }): Promise<SyncPlaidTransactionsResult> {
     const { supabase, plaidItemId } = params;
     const plaidClient = getPlaidApi();
@@ -70,7 +72,7 @@ export async function syncPlaidTransactionsForItem(params: {
     const { data: plaidItem, error: itemError } = await supabase
         .from('plaid_items')
         .select(
-            'id, user_id, item_id, access_token, transactions_cursor, sync_in_progress_at, error_code, error_message'
+            'id, user_id, item_id, access_token, transactions_cursor, sync_in_progress_at, error_code, error_message, last_plaid_refresh_at, last_webhook_at, last_successful_update'
         )
         .eq('id', plaidItemId)
         .maybeSingle();
@@ -136,8 +138,14 @@ export async function syncPlaidTransactionsForItem(params: {
             refreshRequested = refresh.requested;
             refreshError = refresh.error;
             if (refresh.requested) {
-                // Plaid refresh is async; give the institution a moment before cursor sync.
-                await new Promise(resolve => setTimeout(resolve, 15_000));
+                const waitMs = params.refreshWaitMs ?? 15_000;
+                if (waitMs > 0) {
+                    await new Promise(resolve => setTimeout(resolve, waitMs));
+                }
+                await supabase
+                    .from('plaid_items')
+                    .update({ last_plaid_refresh_at: new Date().toISOString() })
+                    .eq('id', plaidItemId);
             }
         }
 
