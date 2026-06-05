@@ -1,2 +1,6 @@
 /** @deprecated Use /api/cron/plaid-sync — refresh runs there when eligible. */
-export { GET, POST, runtime, maxDuration, dynamic } from '../plaid-sync/route';
+export const runtime = 'nodejs';
+export const maxDuration = 300;
+export const dynamic = 'force-dynamic';
+
+export { GET, POST } from '../plaid-sync/route';
