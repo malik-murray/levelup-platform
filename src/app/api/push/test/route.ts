@@ -1,10 +1,27 @@
+import { waitUntil } from '@vercel/functions';
 import { NextRequest, NextResponse } from 'next/server';
 import { sendFinanceSpendPush } from '@/lib/plaid/sendFinancePushNotification';
 import { isWebPushConfigured } from '@/lib/push/webPushServer';
 import { getUserFromBearer, supabaseForUser } from '@/lib/push/pushApiAuth';
 
+export const maxDuration = 60;
+
+const TEST_PAYLOAD = {
+    title: 'Test transaction detected',
+    body: 'You spent $1.00 at Test Merchant (this is a test alert).',
+    data: {
+        transactionId: 'test',
+        url: '/finance/transactions',
+    },
+} as const;
+
+function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 /**
  * POST /api/push/test — send a test spend banner to the current user's devices.
+ * Optional body: { delaySeconds?: number } — schedules push server-side so you can close the app first.
  */
 export async function POST(request: NextRequest) {
     const authHeader = request.headers.get('authorization');
@@ -39,14 +56,31 @@ export async function POST(request: NextRequest) {
         );
     }
 
+    const body = (await request.json().catch(() => ({}))) as { delaySeconds?: number };
+    const delaySeconds = Math.min(60, Math.max(0, Math.floor(Number(body.delaySeconds) || 0)));
+
+    if (delaySeconds > 0) {
+        waitUntil(
+            (async () => {
+                await sleep(delaySeconds * 1000);
+                await sendFinanceSpendPush(supabase, {
+                    userId: user.id,
+                    ...TEST_PAYLOAD,
+                });
+            })()
+        );
+
+        return NextResponse.json({
+            success: true,
+            scheduled: true,
+            delaySeconds,
+            message: `Test scheduled in ${delaySeconds}s — close the app now and wait for the banner.`,
+        });
+    }
+
     const result = await sendFinanceSpendPush(supabase, {
         userId: user.id,
-        title: 'Test transaction detected',
-        body: 'You spent $1.00 at Test Merchant (this is a test alert).',
-        data: {
-            transactionId: 'test',
-            url: '/finance/transactions',
-        },
+        ...TEST_PAYLOAD,
     });
 
     if (result.sent) {
