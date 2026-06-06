@@ -65,7 +65,10 @@ export async function subscribeToFinancePush(accessToken: string): Promise<PushS
             Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ subscription: subscription.toJSON() }),
+        body: JSON.stringify({
+            subscription: subscription.toJSON(),
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
     });
 
     if (!res.ok) {

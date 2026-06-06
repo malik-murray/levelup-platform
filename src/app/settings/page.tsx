@@ -18,6 +18,7 @@ import {
   unsubscribeFromFinancePush,
 } from '@/lib/push/clientWebPush';
 import { SpendAlertTestButton } from '@/components/SpendAlertTestButton';
+import { HabitReminderSettings } from '@/components/HabitReminderSettings';
 
 const outfit = Outfit({ subsets: ['latin'], weight: ['400', '600', '700', '800'] });
 const LOGO_SRC = '/brand/levelup-logo.png';
@@ -479,6 +480,12 @@ export default function SettingsPage() {
               )}
 
               <SpendAlertTestButton className="px-1" />
+
+              <HabitReminderSettings
+                pushEnabled={pushOn}
+                rowShell={rowShell}
+                NeonToggle={NeonToggle}
+              />
 
               <Link href="/landing" className={`${rowShell()} block w-full no-underline`}>
                 <span

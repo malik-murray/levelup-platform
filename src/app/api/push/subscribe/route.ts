@@ -10,7 +10,10 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader!.replace('Bearer ', '').trim();
-    const body = (await request.json()) as { subscription?: WebPushSubscriptionJson };
+    const body = (await request.json()) as {
+        subscription?: WebPushSubscriptionJson;
+        timezone?: string;
+    };
     const subscription = body.subscription;
 
     if (!subscription?.endpoint || !subscription.keys?.p256dh || !subscription.keys?.auth) {
@@ -39,6 +42,26 @@ export async function POST(request: NextRequest) {
         {
             user_id: user.id,
             notify_spending_enabled: true,
+            updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id' }
+    );
+
+    const timezone =
+        typeof body.timezone === 'string' && body.timezone.trim()
+            ? body.timezone.trim()
+            : 'America/New_York';
+
+    await supabase.from('habit_notification_preferences').upsert(
+        {
+            user_id: user.id,
+            notify_habits_enabled: true,
+            notify_priorities_enabled: true,
+            notify_todos_enabled: true,
+            timezone,
+            habit_reminder_times: ['08:00', '14:00', '20:00'],
+            priorities_reminder_times: ['07:30'],
+            todos_reminder_times: ['09:00', '18:00'],
             updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' }

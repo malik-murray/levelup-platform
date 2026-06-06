@@ -1,8 +1,29 @@
-/* LevelUp finance spend alerts — v2 quick category actions */
-const SW_VERSION = 'spend-push-v2';
+/* LevelUp push notifications — finance spend + habit reminders (v3) */
+const SW_VERSION = 'levelup-push-v3';
 
 function categorizeUrl(transactionId) {
     return `/finance/categorize/${encodeURIComponent(transactionId)}`;
+}
+
+function habitDashboardUrl(data) {
+    const section = data?.section;
+    if (section) {
+        return `/dashboard?habitSection=${encodeURIComponent(section)}`;
+    }
+    return data?.url || '/dashboard';
+}
+
+function isHabitNotification(data) {
+    const type = data?.type || '';
+    return (
+        type === 'habit_reminder' ||
+        type === 'priorities_reminder' ||
+        type === 'todos_reminder' ||
+        Boolean(data?.kind && String(data.kind).startsWith('habits_')) ||
+        data?.kind === 'priorities_setup' ||
+        data?.kind === 'todos_setup' ||
+        data?.kind === 'todos_finish'
+    );
 }
 
 function parseQuickCategories(data) {
@@ -51,7 +72,7 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('push', event => {
-    let payload = { title: 'New spend', body: 'Tap to categorize', data: {} };
+    let payload = { title: 'LevelUp', body: 'Tap to open', data: {} };
     try {
         if (event.data) {
             payload = { ...payload, ...event.data.json() };
@@ -64,27 +85,36 @@ self.addEventListener('push', event => {
 
     const data = payload.data || {};
     const txId = data.transactionId;
-    const quickCategories = parseQuickCategories(data);
+    const habit = isHabitNotification(data);
+    const quickCategories = habit ? [] : parseQuickCategories(data);
 
     const body =
         payload.body ||
-        (quickCategories.length > 0
-            ? 'Expand for quick categories, or tap to see all'
-            : 'Tap to pick a category');
+        (habit
+            ? 'Tap to open your habit tracker'
+            : quickCategories.length > 0
+              ? 'Expand for quick categories, or tap to see all'
+              : 'Tap to pick a category');
+
+    const defaultUrl = habit
+        ? habitDashboardUrl(data)
+        : txId
+          ? categorizeUrl(txId)
+          : '/finance/transactions';
 
     const options = {
         body,
         icon: '/brand/levelup-app-icon-192.png',
         badge: '/brand/levelup-app-icon-192.png',
-        tag: txId || 'levelup-spend',
+        tag: habit ? `levelup-habit-${data.kind || data.type || 'reminder'}` : txId || 'levelup-spend',
         renotify: true,
         requireInteraction: false,
         data: {
             ...data,
             swVersion: SW_VERSION,
-            url: txId ? categorizeUrl(txId) : '/finance/transactions',
+            url: data.url || defaultUrl,
         },
-        actions: txId && quickCategories.length > 0 ? buildActions(quickCategories) : [],
+        actions: !habit && txId && quickCategories.length > 0 ? buildActions(quickCategories) : [],
     };
 
     event.waitUntil(self.registration.showNotification(payload.title, options));
@@ -109,7 +139,7 @@ function openUrl(url) {
 self.addEventListener('notificationclick', event => {
     event.notification.close();
     const data = event.notification.data || {};
-    const url = data.url || (data.transactionId ? categorizeUrl(data.transactionId) : '/finance/transactions');
+    const url = data.url || (data.transactionId ? categorizeUrl(data.transactionId) : '/dashboard');
     event.waitUntil(openUrl(url));
 });
 
@@ -143,5 +173,7 @@ self.addEventListener('notificationactionclick', event => {
 
     if (txId) {
         event.waitUntil(openUrl(categorizeUrl(txId)));
+    } else {
+        event.waitUntil(openUrl(habitDashboardUrl(data)));
     }
 });
