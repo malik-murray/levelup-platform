@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { authorizeCronRequest, isCronConfigured } from '@/lib/cron/authorizeCronRequest';
 import { runPlaidCronSync } from '@/lib/plaid/runPlaidCronSync';
+import { runHabitReminderCron } from '@/lib/habit/runHabitReminderCron';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -41,9 +42,11 @@ export async function GET(request: NextRequest) {
         });
 
         const summary = await runPlaidCronSync(supabase, { allowRefresh: true });
+        const habitReminders = await runHabitReminderCron(supabase);
 
         console.info('[plaid-cron] finished', {
             ...summary,
+            habit_reminders: habitReminders,
             triggered_by: request.headers.get('x-vercel-cron') ? 'vercel' : 'external',
         });
 
@@ -52,6 +55,7 @@ export async function GET(request: NextRequest) {
             mode: 'server_background',
             cron_configured: true,
             ...summary,
+            habit_reminders: habitReminders,
         });
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Cron sync failed';

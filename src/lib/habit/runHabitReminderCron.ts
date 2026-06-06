@@ -1,17 +1,19 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendUserPush } from '@/lib/push/sendUserPushNotification';
 import {
+    activeReminderTimes,
+    REMINDER_WINDOW_MINUTES,
+} from '@/lib/habit/habitReminderDiagnostics';
+import {
     defaultHabitReminderPrefs,
     getLocalDateParts,
     habitReminderIdempotencyKey,
-    isTimeInReminderWindow,
     parseHabitReminderPrefsFromRow,
     truncateList,
     type HabitReminderPrefs,
     type ReminderCategory,
 } from '@/lib/habit/habitReminderUtils';
 
-const REMINDER_WINDOW_MINUTES = 15;
 const HABIT_DASHBOARD_URL = '/dashboard';
 
 type HabitTemplate = {
@@ -31,6 +33,12 @@ export type HabitReminderCronSummary = {
     reminders_sent: number;
     reminders_skipped: number;
     errors: string[];
+};
+
+export type ProcessUserRemindersOptions = {
+    ignoreTimeWindow?: boolean;
+    forceIdempotencySuffix?: string;
+    habitsOnly?: boolean;
 };
 
 async function wasReminderSent(
@@ -53,9 +61,12 @@ async function sendHabitReminder(
     dateStr: string,
     title: string,
     body: string,
-    payload: Record<string, string>
+    payload: Record<string, string>,
+    idempotencySuffix?: string
 ): Promise<{ sent: boolean; skipped: boolean; error?: string }> {
-    const idempotencyKey = habitReminderIdempotencyKey(userId, dateStr, category, time);
+    const idempotencyKey = idempotencySuffix
+        ? `${habitReminderIdempotencyKey(userId, dateStr, category, time)}:${idempotencySuffix}`
+        : habitReminderIdempotencyKey(userId, dateStr, category, time);
 
     if (await wasReminderSent(supabase, idempotencyKey)) {
         return { sent: false, skipped: true };
@@ -123,17 +134,25 @@ function incompleteHabits(
     return templates.filter(t => !t.is_bad_habit && !checkedIds.has(t.id));
 }
 
-function activeTimes(times: string[], minutesSinceMidnight: number): string[] {
-    return times.filter(time =>
-        isTimeInReminderWindow(minutesSinceMidnight, time, REMINDER_WINDOW_MINUTES)
-    );
+function timesForCategory(
+    times: string[],
+    minutesSinceMidnight: number,
+    ignoreTimeWindow: boolean
+): string[] {
+    if (ignoreTimeWindow) {
+        return times.length > 0 ? [times[0]] : [];
+    }
+    return activeReminderTimes(times, minutesSinceMidnight, REMINDER_WINDOW_MINUTES);
 }
 
-async function processUserReminders(
+export async function processUserReminders(
     supabase: SupabaseClient,
     prefs: HabitReminderPrefs,
-    summary: HabitReminderCronSummary
+    summary: HabitReminderCronSummary,
+    options: ProcessUserRemindersOptions = {}
 ): Promise<void> {
+    const { ignoreTimeWindow = false, forceIdempotencySuffix, habitsOnly = false } = options;
+
     const { data: subs } = await supabase
         .from('user_push_subscriptions')
         .select('id')
@@ -161,8 +180,12 @@ async function processUserReminders(
         payload: Record<string, string>;
     }> = [];
 
-    if (prefs.notify_priorities_enabled) {
-        for (const time of activeTimes(prefs.priorities_reminder_times, minutesSinceMidnight)) {
+    if (prefs.notify_priorities_enabled && !habitsOnly) {
+        for (const time of timesForCategory(
+            prefs.priorities_reminder_times,
+            minutesSinceMidnight,
+            ignoreTimeWindow
+        )) {
             const { count } = await supabase
                 .from('habit_daily_priorities')
                 .select('id', { count: 'exact', head: true })
@@ -201,8 +224,12 @@ async function processUserReminders(
         }
     }
 
-    if (prefs.notify_todos_enabled) {
-        for (const time of activeTimes(prefs.todos_reminder_times, minutesSinceMidnight)) {
+    if (prefs.notify_todos_enabled && !habitsOnly) {
+        for (const time of timesForCategory(
+            prefs.todos_reminder_times,
+            minutesSinceMidnight,
+            ignoreTimeWindow
+        )) {
             const { data: todos } = await supabase
                 .from('habit_daily_todos')
                 .select('title, is_done')
@@ -242,7 +269,12 @@ async function processUserReminders(
     }
 
     if (prefs.notify_habits_enabled) {
-        const habitTimes = activeTimes(prefs.habit_reminder_times, minutesSinceMidnight);
+        const habitTimes = timesForCategory(
+            prefs.habit_reminder_times,
+            minutesSinceMidnight,
+            ignoreTimeWindow
+        );
+
         if (habitTimes.length > 0) {
             const [{ data: templates }, { data: entries }] = await Promise.all([
                 supabase
@@ -296,7 +328,8 @@ async function processUserReminders(
             dateStr,
             reminder.title,
             reminder.body,
-            reminder.payload
+            reminder.payload,
+            forceIdempotencySuffix
         );
 
         if (result.sent) {
@@ -309,6 +342,39 @@ async function processUserReminders(
             );
         }
     }
+}
+
+export async function runHabitRemindersForUser(
+    supabase: SupabaseClient,
+    userId: string,
+    options: ProcessUserRemindersOptions = {}
+): Promise<HabitReminderCronSummary> {
+    const summary: HabitReminderCronSummary = {
+        users_checked: 1,
+        reminders_sent: 0,
+        reminders_skipped: 0,
+        errors: [],
+    };
+
+    const { data: prefsRow } = await supabase
+        .from('habit_notification_preferences')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+    const prefs = parseHabitReminderPrefsFromRow(userId, prefsRow);
+
+    if (
+        !prefs.notify_habits_enabled &&
+        !prefs.notify_priorities_enabled &&
+        !prefs.notify_todos_enabled
+    ) {
+        summary.reminders_skipped += 1;
+        return summary;
+    }
+
+    await processUserReminders(supabase, prefs, summary, options);
+    return summary;
 }
 
 export async function runHabitReminderCron(
@@ -335,14 +401,13 @@ export async function runHabitReminderCron(
         return summary;
     }
 
-    const { data: prefsRows, error } = await supabase
+    const { data: prefsRows, error: prefsError } = await supabase
         .from('habit_notification_preferences')
         .select('*')
         .in('user_id', userIds);
 
-    if (error) {
-        summary.errors.push(error.message);
-        return summary;
+    if (prefsError) {
+        summary.errors.push(`habit_notification_preferences: ${prefsError.message}`);
     }
 
     const prefsByUser = new Map(

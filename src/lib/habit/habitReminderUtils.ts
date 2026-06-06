@@ -98,7 +98,8 @@ export function getLocalDateParts(
     const year = get('year');
     const month = get('month');
     const day = get('day');
-    const hour = Number(get('hour'));
+    const hourRaw = Number(get('hour'));
+    const hour = hourRaw === 24 ? 0 : hourRaw;
     const minute = Number(get('minute'));
 
     return {
@@ -135,6 +136,30 @@ export function parseHabitReminderPrefsFromRow(
 ): HabitReminderPrefs {
     if (!row) return defaultHabitReminderPrefs(userId);
 
+    const habitTimes = normalizeTimeList(row.habit_reminder_times, DEFAULT_HABIT_REMINDER_TIMES);
+    const prioritiesTimes = normalizeTimeList(
+        row.priorities_reminder_times,
+        DEFAULT_PRIORITIES_REMINDER_TIMES
+    );
+    const todosTimes = normalizeTimeList(row.todos_reminder_times, DEFAULT_TODOS_REMINDER_TIMES);
+
+    // Backward compat if migration 072 has not run yet
+    const legacyHabitTimes = [
+        row.morning_habit_time,
+        row.afternoon_habit_time,
+        row.evening_habit_time,
+    ]
+        .filter((t): t is string => typeof t === 'string' && t.length > 0)
+        .map(t => normalizeTimeToHHMM(t));
+
+    const legacyPriorities =
+        typeof row.priorities_reminder_time === 'string'
+            ? [normalizeTimeToHHMM(row.priorities_reminder_time)]
+            : [];
+    const legacyTodos = [row.todos_setup_reminder_time, row.todos_finish_reminder_time]
+        .filter((t): t is string => typeof t === 'string' && t.length > 0)
+        .map(t => normalizeTimeToHHMM(t));
+
     return {
         user_id: userId,
         notify_habits_enabled: row.notify_habits_enabled !== false,
@@ -144,18 +169,24 @@ export function parseHabitReminderPrefsFromRow(
             typeof row.timezone === 'string' && row.timezone.trim()
                 ? row.timezone.trim()
                 : 'America/New_York',
-        habit_reminder_times: normalizeTimeList(
-            row.habit_reminder_times,
-            DEFAULT_HABIT_REMINDER_TIMES
-        ),
-        priorities_reminder_times: normalizeTimeList(
-            row.priorities_reminder_times,
-            DEFAULT_PRIORITIES_REMINDER_TIMES
-        ),
-        todos_reminder_times: normalizeTimeList(
-            row.todos_reminder_times,
-            DEFAULT_TODOS_REMINDER_TIMES
-        ),
+        habit_reminder_times:
+            row.habit_reminder_times != null
+                ? habitTimes
+                : legacyHabitTimes.length > 0
+                  ? [...new Set(legacyHabitTimes)]
+                  : habitTimes,
+        priorities_reminder_times:
+            row.priorities_reminder_times != null
+                ? prioritiesTimes
+                : legacyPriorities.length > 0
+                  ? legacyPriorities
+                  : prioritiesTimes,
+        todos_reminder_times:
+            row.todos_reminder_times != null
+                ? todosTimes
+                : legacyTodos.length > 0
+                  ? [...new Set(legacyTodos)]
+                  : todosTimes,
     };
 }
 
