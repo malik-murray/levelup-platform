@@ -1,19 +1,38 @@
-export type ReminderCategory = 'habits' | 'priorities' | 'todos';
+export type ReminderCategory =
+    | 'habits'
+    | 'priorities'
+    | 'todos'
+    | 'morning_score'
+    | 'afternoon_score'
+    | 'evening_score'
+    | 'plan_tomorrow';
 
 export type HabitReminderPrefs = {
     user_id: string;
     notify_habits_enabled: boolean;
     notify_priorities_enabled: boolean;
     notify_todos_enabled: boolean;
+    notify_morning_score_enabled: boolean;
+    notify_afternoon_score_enabled: boolean;
+    notify_evening_score_enabled: boolean;
+    notify_plan_tomorrow_enabled: boolean;
     timezone: string;
     habit_reminder_times: string[];
     priorities_reminder_times: string[];
     todos_reminder_times: string[];
+    morning_score_time: string;
+    afternoon_score_time: string;
+    evening_score_time: string;
+    plan_tomorrow_time: string;
 };
 
 export const DEFAULT_HABIT_REMINDER_TIMES = ['08:00', '14:00', '20:00'];
 export const DEFAULT_PRIORITIES_REMINDER_TIMES = ['07:30'];
 export const DEFAULT_TODOS_REMINDER_TIMES = ['09:00', '18:00'];
+export const DEFAULT_MORNING_SCORE_TIME = '12:00';
+export const DEFAULT_AFTERNOON_SCORE_TIME = '17:00';
+export const DEFAULT_EVENING_SCORE_TIME = '21:00';
+export const DEFAULT_PLAN_TOMORROW_TIME = '20:30';
 export const MAX_REMINDER_TIMES_PER_CATEGORY = 8;
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -123,11 +142,37 @@ export function defaultHabitReminderPrefs(userId: string): HabitReminderPrefs {
         notify_habits_enabled: true,
         notify_priorities_enabled: true,
         notify_todos_enabled: true,
+        notify_morning_score_enabled: true,
+        notify_afternoon_score_enabled: true,
+        notify_evening_score_enabled: true,
+        notify_plan_tomorrow_enabled: true,
         timezone: 'America/New_York',
         habit_reminder_times: [...DEFAULT_HABIT_REMINDER_TIMES],
         priorities_reminder_times: [...DEFAULT_PRIORITIES_REMINDER_TIMES],
         todos_reminder_times: [...DEFAULT_TODOS_REMINDER_TIMES],
+        morning_score_time: DEFAULT_MORNING_SCORE_TIME,
+        afternoon_score_time: DEFAULT_AFTERNOON_SCORE_TIME,
+        evening_score_time: DEFAULT_EVENING_SCORE_TIME,
+        plan_tomorrow_time: DEFAULT_PLAN_TOMORROW_TIME,
     };
+}
+
+export function isAnyHabitNotificationEnabled(prefs: HabitReminderPrefs): boolean {
+    return (
+        prefs.notify_habits_enabled ||
+        prefs.notify_priorities_enabled ||
+        prefs.notify_todos_enabled ||
+        prefs.notify_morning_score_enabled ||
+        prefs.notify_afternoon_score_enabled ||
+        prefs.notify_evening_score_enabled ||
+        prefs.notify_plan_tomorrow_enabled
+    );
+}
+
+export function parseTimeField(value: unknown, fallback: string): string {
+    if (typeof value !== 'string' || !value.trim()) return fallback;
+    const normalized = normalizeTimeToHHMM(value);
+    return isValidReminderTime(normalized) ? normalized : fallback;
 }
 
 export function parseHabitReminderPrefsFromRow(
@@ -165,6 +210,10 @@ export function parseHabitReminderPrefsFromRow(
         notify_habits_enabled: row.notify_habits_enabled !== false,
         notify_priorities_enabled: row.notify_priorities_enabled !== false,
         notify_todos_enabled: row.notify_todos_enabled !== false,
+        notify_morning_score_enabled: row.notify_morning_score_enabled !== false,
+        notify_afternoon_score_enabled: row.notify_afternoon_score_enabled !== false,
+        notify_evening_score_enabled: row.notify_evening_score_enabled !== false,
+        notify_plan_tomorrow_enabled: row.notify_plan_tomorrow_enabled !== false,
         timezone:
             typeof row.timezone === 'string' && row.timezone.trim()
                 ? row.timezone.trim()
@@ -187,6 +236,10 @@ export function parseHabitReminderPrefsFromRow(
                 : legacyTodos.length > 0
                   ? [...new Set(legacyTodos)]
                   : todosTimes,
+        morning_score_time: parseTimeField(row.morning_score_time, DEFAULT_MORNING_SCORE_TIME),
+        afternoon_score_time: parseTimeField(row.afternoon_score_time, DEFAULT_AFTERNOON_SCORE_TIME),
+        evening_score_time: parseTimeField(row.evening_score_time, DEFAULT_EVENING_SCORE_TIME),
+        plan_tomorrow_time: parseTimeField(row.plan_tomorrow_time, DEFAULT_PLAN_TOMORROW_TIME),
     };
 }
 
@@ -214,9 +267,17 @@ export function prefsToApiResponse(prefs: HabitReminderPrefs) {
         notifyHabitsEnabled: prefs.notify_habits_enabled,
         notifyPrioritiesEnabled: prefs.notify_priorities_enabled,
         notifyTodosEnabled: prefs.notify_todos_enabled,
+        notifyMorningScoreEnabled: prefs.notify_morning_score_enabled,
+        notifyAfternoonScoreEnabled: prefs.notify_afternoon_score_enabled,
+        notifyEveningScoreEnabled: prefs.notify_evening_score_enabled,
+        notifyPlanTomorrowEnabled: prefs.notify_plan_tomorrow_enabled,
         timezone: prefs.timezone,
         habitReminderTimes: prefs.habit_reminder_times,
         prioritiesReminderTimes: prefs.priorities_reminder_times,
         todosReminderTimes: prefs.todos_reminder_times,
+        morningScoreTime: prefs.morning_score_time,
+        afternoonScoreTime: prefs.afternoon_score_time,
+        eveningScoreTime: prefs.evening_score_time,
+        planTomorrowTime: prefs.plan_tomorrow_time,
     };
 }

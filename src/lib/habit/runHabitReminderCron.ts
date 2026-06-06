@@ -1,6 +1,15 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendUserPush } from '@/lib/push/sendUserPushNotification';
 import {
+    addDaysToDateStr,
+    buildPlanTomorrowNotification,
+    buildScoreRecapNotification,
+    getDisplayFirstName,
+    isWeekendInTimezone,
+} from '@/lib/habit/habitNotificationCopy';
+import { computeDailyScoreSnapshot } from '@/lib/habit/computeDailyScores';
+import type { TimeOfDay } from '@/lib/habitHelpers';
+import {
     activeReminderTimes,
     REMINDER_WINDOW_MINUTES,
 } from '@/lib/habit/habitReminderDiagnostics';
@@ -8,6 +17,8 @@ import {
     defaultHabitReminderPrefs,
     getLocalDateParts,
     habitReminderIdempotencyKey,
+    isAnyHabitNotificationEnabled,
+    isTimeInReminderWindow,
     parseHabitReminderPrefsFromRow,
     truncateList,
     type HabitReminderPrefs,
@@ -39,7 +50,48 @@ export type ProcessUserRemindersOptions = {
     ignoreTimeWindow?: boolean;
     forceIdempotencySuffix?: string;
     habitsOnly?: boolean;
+    firstName?: string | null;
 };
+
+function notificationEventType(category: ReminderCategory): string {
+    if (
+        category === 'morning_score' ||
+        category === 'afternoon_score' ||
+        category === 'evening_score'
+    ) {
+        return 'score_recap';
+    }
+    if (category === 'plan_tomorrow') return 'plan_tomorrow_reminder';
+    if (category === 'habits') return 'habit_reminder';
+    if (category === 'priorities') return 'priorities_reminder';
+    return 'todos_reminder';
+}
+
+async function resolveFirstName(
+    supabase: SupabaseClient,
+    userId: string
+): Promise<string | null> {
+    try {
+        const { data, error } = await supabase.auth.admin.getUserById(userId);
+        if (error || !data.user) return null;
+        return getDisplayFirstName(data.user.user_metadata);
+    } catch {
+        return null;
+    }
+}
+
+function isScheduledTimeDue(
+    time: string,
+    minutesSinceMidnight: number,
+    ignoreTimeWindow: boolean
+): boolean {
+    if (ignoreTimeWindow) return true;
+    return isTimeInReminderWindow(
+        minutesSinceMidnight,
+        time,
+        REMINDER_WINDOW_MINUTES
+    );
+}
 
 async function wasReminderSent(
     supabase: SupabaseClient,
@@ -72,12 +124,7 @@ async function sendHabitReminder(
         return { sent: false, skipped: true };
     }
 
-    const eventType =
-        category === 'habits'
-            ? 'habit_reminder'
-            : category === 'priorities'
-              ? 'priorities_reminder'
-              : 'todos_reminder';
+    const eventType = notificationEventType(category);
 
     const { error: eventError } = await supabase.from('notification_events').insert({
         user_id: userId,
@@ -151,7 +198,8 @@ export async function processUserReminders(
     summary: HabitReminderCronSummary,
     options: ProcessUserRemindersOptions = {}
 ): Promise<void> {
-    const { ignoreTimeWindow = false, forceIdempotencySuffix, habitsOnly = false } = options;
+    const { ignoreTimeWindow = false, forceIdempotencySuffix, habitsOnly = false, firstName } =
+        options;
 
     const { data: subs } = await supabase
         .from('user_push_subscriptions')
@@ -319,6 +367,146 @@ export async function processUserReminders(
         }
     }
 
+    const needsScoreOrPlan =
+        !habitsOnly &&
+        (prefs.notify_morning_score_enabled ||
+            prefs.notify_afternoon_score_enabled ||
+            prefs.notify_evening_score_enabled ||
+            prefs.notify_plan_tomorrow_enabled);
+
+    if (needsScoreOrPlan) {
+        const resolvedName =
+            firstName !== undefined ? firstName : await resolveFirstName(supabase, prefs.user_id);
+
+        const [{ data: scoreTemplates }, { data: scoreEntries }, { data: priorities }, { data: todos }] =
+            await Promise.all([
+                supabase
+                    .from('habit_templates')
+                    .select('id, time_of_day, is_bad_habit')
+                    .eq('user_id', prefs.user_id)
+                    .eq('is_active', true),
+                supabase
+                    .from('habit_daily_entries')
+                    .select('habit_template_id, status')
+                    .eq('user_id', prefs.user_id)
+                    .eq('date', dateStr),
+                supabase
+                    .from('habit_daily_priorities')
+                    .select('completed')
+                    .eq('user_id', prefs.user_id)
+                    .eq('date', dateStr),
+                supabase
+                    .from('habit_daily_todos')
+                    .select('is_done')
+                    .eq('user_id', prefs.user_id)
+                    .eq('date', dateStr),
+            ]);
+
+        const scores = computeDailyScoreSnapshot({
+            templates: scoreTemplates ?? [],
+            entries: scoreEntries ?? [],
+            priorities: priorities ?? [],
+            todos: todos ?? [],
+        });
+
+        const scoreConfigs: Array<{
+            enabled: boolean;
+            time: string;
+            slot: TimeOfDay;
+            category: ReminderCategory;
+            slotScore: typeof scores.morning;
+        }> = [
+            {
+                enabled: prefs.notify_morning_score_enabled,
+                time: prefs.morning_score_time,
+                slot: 'morning',
+                category: 'morning_score',
+                slotScore: scores.morning,
+            },
+            {
+                enabled: prefs.notify_afternoon_score_enabled,
+                time: prefs.afternoon_score_time,
+                slot: 'afternoon',
+                category: 'afternoon_score',
+                slotScore: scores.afternoon,
+            },
+            {
+                enabled: prefs.notify_evening_score_enabled,
+                time: prefs.evening_score_time,
+                slot: 'evening',
+                category: 'evening_score',
+                slotScore: scores.evening,
+            },
+        ];
+
+        for (const config of scoreConfigs) {
+            if (!config.enabled || !config.slotScore) continue;
+            if (!isScheduledTimeDue(config.time, minutesSinceMidnight, ignoreTimeWindow)) continue;
+
+            const recap = buildScoreRecapNotification({
+                slot: config.slot,
+                slotScore: config.slotScore,
+                scoreOverall: scores.scoreOverall,
+                gradeOverall: scores.gradeOverall,
+                firstName: resolvedName,
+                dateStr,
+            });
+
+            pending.push({
+                category: config.category,
+                time: config.time,
+                title: recap.title,
+                body: recap.body,
+                payload: {
+                    section: 'scores',
+                    slot: config.slot,
+                    score: String(config.slotScore.score),
+                    grade: config.slotScore.grade,
+                },
+            });
+        }
+
+        if (
+            prefs.notify_plan_tomorrow_enabled &&
+            isScheduledTimeDue(prefs.plan_tomorrow_time, minutesSinceMidnight, ignoreTimeWindow)
+        ) {
+            const tomorrowDateStr = addDaysToDateStr(dateStr, 1);
+            const [{ count: tomorrowPriorities }, { count: tomorrowTodos }] = await Promise.all([
+                supabase
+                    .from('habit_daily_priorities')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('user_id', prefs.user_id)
+                    .eq('date', tomorrowDateStr),
+                supabase
+                    .from('habit_daily_todos')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('user_id', prefs.user_id)
+                    .eq('date', tomorrowDateStr),
+            ]);
+
+            const planCopy = buildPlanTomorrowNotification({
+                firstName: resolvedName,
+                dateStr,
+                tomorrowDateStr,
+                tomorrowPrioritiesCount: tomorrowPriorities ?? 0,
+                tomorrowTodosCount: tomorrowTodos ?? 0,
+                todayScoreOverall: scores.scoreOverall,
+                isWeekend: isWeekendInTimezone(prefs.timezone),
+            });
+
+            pending.push({
+                category: 'plan_tomorrow',
+                time: prefs.plan_tomorrow_time,
+                title: planCopy.title,
+                body: planCopy.body,
+                payload: {
+                    section: 'plan',
+                    targetDate: tomorrowDateStr,
+                },
+            });
+        }
+    }
+
     for (const reminder of pending) {
         const result = await sendHabitReminder(
             supabase,
@@ -364,11 +552,7 @@ export async function runHabitRemindersForUser(
 
     const prefs = parseHabitReminderPrefsFromRow(userId, prefsRow);
 
-    if (
-        !prefs.notify_habits_enabled &&
-        !prefs.notify_priorities_enabled &&
-        !prefs.notify_todos_enabled
-    ) {
+    if (!isAnyHabitNotificationEnabled(prefs)) {
         summary.reminders_skipped += 1;
         return summary;
     }
@@ -418,11 +602,7 @@ export async function runHabitReminderCron(
 
     for (const userId of userIds) {
         const prefs = prefsByUser.get(userId) ?? defaultHabitReminderPrefs(userId);
-        if (
-            !prefs.notify_habits_enabled &&
-            !prefs.notify_priorities_enabled &&
-            !prefs.notify_todos_enabled
-        ) {
+        if (!isAnyHabitNotificationEnabled(prefs)) {
             continue;
         }
 

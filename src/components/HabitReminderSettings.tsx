@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react';
 import { supabase } from '@auth/supabaseClient';
 import {
+    DEFAULT_AFTERNOON_SCORE_TIME,
+    DEFAULT_EVENING_SCORE_TIME,
     DEFAULT_HABIT_REMINDER_TIMES,
+    DEFAULT_MORNING_SCORE_TIME,
+    DEFAULT_PLAN_TOMORROW_TIME,
     DEFAULT_PRIORITIES_REMINDER_TIMES,
     DEFAULT_TODOS_REMINDER_TIMES,
     MAX_REMINDER_TIMES_PER_CATEGORY,
@@ -15,9 +19,17 @@ type HabitReminderPrefsState = {
     notifyHabitsEnabled: boolean;
     notifyPrioritiesEnabled: boolean;
     notifyTodosEnabled: boolean;
+    notifyMorningScoreEnabled: boolean;
+    notifyAfternoonScoreEnabled: boolean;
+    notifyEveningScoreEnabled: boolean;
+    notifyPlanTomorrowEnabled: boolean;
     habitReminderTimes: string[];
     prioritiesReminderTimes: string[];
     todosReminderTimes: string[];
+    morningScoreTime: string;
+    afternoonScoreTime: string;
+    eveningScoreTime: string;
+    planTomorrowTime: string;
 };
 
 type Props = {
@@ -40,6 +52,7 @@ function ReminderTimeRow({
     onCommit,
     onRemove,
     removeDisabled,
+    hideRemove,
     label,
     index,
 }: {
@@ -47,6 +60,7 @@ function ReminderTimeRow({
     onCommit: (value: string) => void;
     onRemove: () => void;
     removeDisabled: boolean;
+    hideRemove?: boolean;
     label: string;
     index: number;
 }) {
@@ -81,15 +95,60 @@ function ReminderTimeRow({
                 defaultValue={time}
                 className="min-w-0 flex-1 rounded-lg border border-amber-400/50 bg-white px-2 py-1.5 text-sm text-slate-800 dark:border-[#ff9d00]/40 dark:bg-black/50 dark:text-white"
             />
-            <button
-                type="button"
-                disabled={removeDisabled}
-                onClick={onRemove}
-                className="shrink-0 rounded-lg border border-red-400/50 px-2 py-1.5 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-950/40"
-                aria-label={`Remove ${label} time ${index + 1}`}
-            >
-                Remove
-            </button>
+            {!hideRemove ? (
+                <button
+                    type="button"
+                    disabled={removeDisabled}
+                    onClick={onRemove}
+                    className="shrink-0 rounded-lg border border-red-400/50 px-2 py-1.5 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-950/40"
+                    aria-label={`Remove ${label} time ${index + 1}`}
+                >
+                    Remove
+                </button>
+            ) : null}
+        </div>
+    );
+}
+
+function SingleTimeSlotEditor({
+    label,
+    description,
+    enabled,
+    onEnabledChange,
+    time,
+    onTimeCommit,
+    rowShell,
+    NeonToggle,
+}: {
+    label: string;
+    description: string;
+    enabled: boolean;
+    onEnabledChange: (on: boolean) => void;
+    time: string;
+    onTimeCommit: (time: string) => void;
+    rowShell: (className?: string) => string;
+    NeonToggle: Props['NeonToggle'];
+}) {
+    return (
+        <div className="space-y-2">
+            <div className={rowShell()}>
+                <span className="flex-1 text-slate-800 dark:text-white">{label}</span>
+                <NeonToggle checked={enabled} onChange={onEnabledChange} aria-label={`${label} notifications`} />
+            </div>
+            <p className="px-1 text-xs text-slate-500 dark:text-slate-400">{description}</p>
+            {enabled ? (
+                <div className={`${rowShell()} flex-col items-stretch gap-2`}>
+                    <ReminderTimeRow
+                        time={time}
+                        label={label}
+                        index={0}
+                        onCommit={onTimeCommit}
+                        onRemove={() => {}}
+                        removeDisabled
+                        hideRemove
+                    />
+                </div>
+            ) : null}
         </div>
     );
 }
@@ -199,9 +258,17 @@ export function HabitReminderSettings({ pushEnabled, rowShell, NeonToggle }: Pro
         notifyHabitsEnabled: true,
         notifyPrioritiesEnabled: true,
         notifyTodosEnabled: true,
+        notifyMorningScoreEnabled: true,
+        notifyAfternoonScoreEnabled: true,
+        notifyEveningScoreEnabled: true,
+        notifyPlanTomorrowEnabled: true,
         habitReminderTimes: [...DEFAULT_HABIT_REMINDER_TIMES],
         prioritiesReminderTimes: [...DEFAULT_PRIORITIES_REMINDER_TIMES],
         todosReminderTimes: [...DEFAULT_TODOS_REMINDER_TIMES],
+        morningScoreTime: DEFAULT_MORNING_SCORE_TIME,
+        afternoonScoreTime: DEFAULT_AFTERNOON_SCORE_TIME,
+        eveningScoreTime: DEFAULT_EVENING_SCORE_TIME,
+        planTomorrowTime: DEFAULT_PLAN_TOMORROW_TIME,
     });
     const prefsRef = useRef(prefs);
     prefsRef.current = prefs;
@@ -346,6 +413,73 @@ export function HabitReminderSettings({ pushEnabled, rowShell, NeonToggle }: Pro
                     applyTimesChange('todosReminderTimes', todosReminderTimes)
                 }
                 saving={saving}
+                rowShell={rowShell}
+                NeonToggle={NeonToggle}
+            />
+
+            <div className={`${rowShell()} mt-2 flex-col items-stretch gap-1`}>
+                <p className="text-sm font-medium text-slate-800 dark:text-white">Score recaps</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Personal score summaries when each part of your day ends — with your name and stats.
+                </p>
+            </div>
+
+            <SingleTimeSlotEditor
+                label="Morning score"
+                description="Sent when morning ends (default 12:00pm) with your morning habit score."
+                enabled={prefs.notifyMorningScoreEnabled}
+                onEnabledChange={(on) => applyToggleChange({ notifyMorningScoreEnabled: on })}
+                time={prefs.morningScoreTime}
+                onTimeCommit={(morningScoreTime) => {
+                    const next = { ...prefsRef.current, morningScoreTime };
+                    setPrefs(next);
+                    void savePrefs(next);
+                }}
+                rowShell={rowShell}
+                NeonToggle={NeonToggle}
+            />
+
+            <SingleTimeSlotEditor
+                label="Afternoon score"
+                description="Afternoon habit score recap (default 5:00pm)."
+                enabled={prefs.notifyAfternoonScoreEnabled}
+                onEnabledChange={(on) => applyToggleChange({ notifyAfternoonScoreEnabled: on })}
+                time={prefs.afternoonScoreTime}
+                onTimeCommit={(afternoonScoreTime) => {
+                    const next = { ...prefsRef.current, afternoonScoreTime };
+                    setPrefs(next);
+                    void savePrefs(next);
+                }}
+                rowShell={rowShell}
+                NeonToggle={NeonToggle}
+            />
+
+            <SingleTimeSlotEditor
+                label="Evening score"
+                description="Evening habit score recap (default 9:00pm)."
+                enabled={prefs.notifyEveningScoreEnabled}
+                onEnabledChange={(on) => applyToggleChange({ notifyEveningScoreEnabled: on })}
+                time={prefs.eveningScoreTime}
+                onTimeCommit={(eveningScoreTime) => {
+                    const next = { ...prefsRef.current, eveningScoreTime };
+                    setPrefs(next);
+                    void savePrefs(next);
+                }}
+                rowShell={rowShell}
+                NeonToggle={NeonToggle}
+            />
+
+            <SingleTimeSlotEditor
+                label="Plan tomorrow"
+                description="End-of-day nudge to map tomorrow's priorities — intentional, not generic."
+                enabled={prefs.notifyPlanTomorrowEnabled}
+                onEnabledChange={(on) => applyToggleChange({ notifyPlanTomorrowEnabled: on })}
+                time={prefs.planTomorrowTime}
+                onTimeCommit={(planTomorrowTime) => {
+                    const next = { ...prefsRef.current, planTomorrowTime };
+                    setPrefs(next);
+                    void savePrefs(next);
+                }}
                 rowShell={rowShell}
                 NeonToggle={NeonToggle}
             />

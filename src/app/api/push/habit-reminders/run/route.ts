@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getHabitReminderDiagnostics } from '@/lib/habit/habitReminderDiagnostics';
+import { getDisplayFirstName } from '@/lib/habit/habitNotificationCopy';
 import { runHabitRemindersForUser } from '@/lib/habit/runHabitReminderCron';
 import { getUserFromBearer, supabaseForUser } from '@/lib/push/pushApiAuth';
 
@@ -27,6 +28,7 @@ export async function POST(request: NextRequest) {
         runHabitRemindersForUser(supabase, user.id, {
             ignoreTimeWindow: force,
             habitsOnly,
+            firstName: getDisplayFirstName(user.user_metadata),
             forceIdempotencySuffix: force ? `manual-${Date.now()}` : undefined,
         }),
     ]);

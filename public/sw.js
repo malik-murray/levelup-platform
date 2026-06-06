@@ -19,6 +19,8 @@ function isHabitNotification(data) {
         type === 'habit_reminder' ||
         type === 'priorities_reminder' ||
         type === 'todos_reminder' ||
+        type === 'score_recap' ||
+        type === 'plan_tomorrow_reminder' ||
         Boolean(data?.kind && String(data.kind).startsWith('habits_')) ||
         data?.kind === 'priorities_setup' ||
         data?.kind === 'todos_setup' ||
