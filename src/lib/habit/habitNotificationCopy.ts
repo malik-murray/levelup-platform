@@ -150,7 +150,7 @@ export function addDaysToDateStr(dateStr: string, days: number): string {
     return dt.toISOString().slice(0, 10);
 }
 
-function isWeekendInTimezone(timezone: string, now = new Date()): boolean {
+export function isWeekendInTimezone(timezone: string, now = new Date()): boolean {
     const weekday = new Intl.DateTimeFormat('en-US', {
         timeZone: timezone,
         weekday: 'short',
