@@ -1,13 +1,16 @@
 import {
+    calculateCategoryScore,
     calculateDailyScore,
     calculateItemScore,
     getGrade,
+    type Category,
     type HabitStatus,
     type TimeOfDay,
 } from '@/lib/habitHelpers';
 
 export type HabitTemplateRow = {
     id: string;
+    category: Category;
     time_of_day: TimeOfDay | null;
     is_bad_habit: boolean;
 };
@@ -18,10 +21,12 @@ export type HabitEntryRow = {
 };
 
 export type PriorityRow = {
+    category: Category | null;
     completed: boolean;
 };
 
 export type TodoRow = {
+    category: Category | null;
     is_done: boolean;
 };
 
@@ -38,10 +43,40 @@ export type DailyScoreSnapshot = {
     scoreHabits: number;
     scorePriorities: number;
     scoreTodos: number;
+    scorePhysical: number;
+    scoreMental: number;
+    scoreSpiritual: number;
+    scoreMorning: number;
+    scoreAfternoon: number;
+    scoreEvening: number;
     morning: SlotScore | null;
     afternoon: SlotScore | null;
     evening: SlotScore | null;
 };
+
+function computeCategoryScore(
+    templates: HabitTemplateRow[],
+    entries: HabitEntryRow[],
+    priorities: PriorityRow[],
+    todos: TodoRow[],
+    targetCategory: Category,
+): number {
+    const habitItems = templates
+        .filter((t) => !t.is_bad_habit && t.category === targetCategory)
+        .map((t) => {
+            const entry = entries.find((e) => e.habit_template_id === t.id);
+            return { category: t.category, status: (entry?.status ?? 'missed') as HabitStatus };
+        });
+    const priorityItems = priorities
+        .filter((p) => p.category === targetCategory)
+        .map((p) => ({ category: p.category ?? undefined, completed: p.completed }));
+    const todoItems = todos
+        .filter((t) => t.category === targetCategory)
+        .map((t) => ({ category: t.category ?? undefined, is_done: t.is_done }));
+
+    const allItems = [...habitItems, ...priorityItems, ...todoItems];
+    return calculateCategoryScore(allItems, targetCategory, allItems.length);
+}
 
 export function habitsForTimeSlot(
     templates: HabitTemplateRow[],
@@ -112,6 +147,9 @@ export function computeDailyScoreSnapshot(input: {
         Math.max(1, input.todos.length)
     );
     const scoreOverall = calculateDailyScore(scoreHabits, scorePriorities, scoreTodos);
+    const morning = computeSlotScore(input.templates, input.entries, 'morning');
+    const afternoon = computeSlotScore(input.templates, input.entries, 'afternoon');
+    const evening = computeSlotScore(input.templates, input.entries, 'evening');
 
     return {
         scoreOverall,
@@ -119,8 +157,32 @@ export function computeDailyScoreSnapshot(input: {
         scoreHabits,
         scorePriorities,
         scoreTodos,
-        morning: computeSlotScore(input.templates, input.entries, 'morning'),
-        afternoon: computeSlotScore(input.templates, input.entries, 'afternoon'),
-        evening: computeSlotScore(input.templates, input.entries, 'evening'),
+        scorePhysical: computeCategoryScore(
+            input.templates,
+            input.entries,
+            input.priorities,
+            input.todos,
+            'physical',
+        ),
+        scoreMental: computeCategoryScore(
+            input.templates,
+            input.entries,
+            input.priorities,
+            input.todos,
+            'mental',
+        ),
+        scoreSpiritual: computeCategoryScore(
+            input.templates,
+            input.entries,
+            input.priorities,
+            input.todos,
+            'spiritual',
+        ),
+        scoreMorning: morning?.score ?? 0,
+        scoreAfternoon: afternoon?.score ?? 0,
+        scoreEvening: evening?.score ?? 0,
+        morning,
+        afternoon,
+        evening,
     };
 }

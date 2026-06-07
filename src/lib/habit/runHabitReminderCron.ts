@@ -382,7 +382,7 @@ export async function processUserReminders(
             await Promise.all([
                 supabase
                     .from('habit_templates')
-                    .select('id, time_of_day, is_bad_habit')
+                    .select('id, category, time_of_day, is_bad_habit')
                     .eq('user_id', prefs.user_id)
                     .eq('is_active', true),
                 supabase
@@ -392,12 +392,12 @@ export async function processUserReminders(
                     .eq('date', dateStr),
                 supabase
                     .from('habit_daily_priorities')
-                    .select('completed')
+                    .select('category, completed')
                     .eq('user_id', prefs.user_id)
                     .eq('date', dateStr),
                 supabase
                     .from('habit_daily_todos')
-                    .select('is_done')
+                    .select('category, is_done')
                     .eq('user_id', prefs.user_id)
                     .eq('date', dateStr),
             ]);

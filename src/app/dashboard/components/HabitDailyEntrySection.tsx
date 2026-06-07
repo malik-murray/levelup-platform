@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { supabase } from '@auth/supabaseClient';
-import { formatDate, getGrade, calculateItemScore, calculateDailyScore, type Category, type TimeOfDay, type HabitStatus } from '@/lib/habitHelpers';
+import { formatDate, type Category, type TimeOfDay, type HabitStatus } from '@/lib/habitHelpers';
+import { computeDailyScoreSnapshot } from '@/lib/habit/computeDailyScores';
 import { syncBacklogCompletion, syncBacklogTitle } from '@/lib/habitBacklog';
 import { neon } from '../neonTheme';
 import CollapsiblePanel from './CollapsiblePanel';
@@ -66,6 +67,12 @@ export type DailyScoresForHeader = {
     score_habits: number;
     score_priorities: number;
     score_todos: number;
+    score_physical: number;
+    score_mental: number;
+    score_spiritual: number;
+    score_morning: number;
+    score_afternoon: number;
+    score_evening: number;
     grade: string;
 };
 
@@ -640,37 +647,38 @@ export default function HabitDailyEntrySection({
     // Good habits: checked = positive. Bad habits: each checked subtracts 3% from habit score.
     useEffect(() => {
         if (!onScoresChange || timeframe !== 'daily') return;
-        const goodTemplates = habitTemplates.filter((t) => !t.is_bad_habit);
-        const badTemplates = habitTemplates.filter((t) => t.is_bad_habit);
-        const goodStatuses = goodTemplates.map((t) => {
-            const entry = habitEntries.find((e) => e.habit_template_id === t.id);
-            return { status: (entry?.status ?? 'missed') as HabitStatus };
+        const snapshot = computeDailyScoreSnapshot({
+            templates: habitTemplates.map((t) => ({
+                id: t.id,
+                category: t.category,
+                time_of_day: t.time_of_day,
+                is_bad_habit: Boolean(t.is_bad_habit),
+            })),
+            entries: habitEntries.map((e) => ({
+                habit_template_id: e.habit_template_id,
+                status: e.status,
+            })),
+            priorities: priorities.map((p) => ({
+                category: p.category,
+                completed: p.completed,
+            })),
+            todos: todos.map((t) => ({
+                category: t.category,
+                is_done: t.is_done,
+            })),
         });
-        const goodHabitsScore =
-            goodTemplates.length > 0
-                ? calculateItemScore(goodStatuses, goodTemplates.length)
-                : 0;
-        const checkedBadCount = badTemplates.filter((t) => {
-            const entry = habitEntries.find((e) => e.habit_template_id === t.id);
-            return entry?.status === 'checked';
-        }).length;
-        const habitsScore = Math.max(0, goodHabitsScore - checkedBadCount * 3);
-        const prioritiesScore = calculateItemScore(
-            priorities.map((p) => ({ completed: p.completed })),
-            Math.max(1, priorities.length)
-        );
-        const todosScore = calculateItemScore(
-            todos.map((t) => ({ is_done: t.is_done })),
-            Math.max(1, todos.length)
-        );
-        const score_overall = calculateDailyScore(habitsScore, prioritiesScore, todosScore);
-        const grade = getGrade(score_overall);
         onScoresChange({
-            score_overall,
-            score_habits: habitsScore,
-            score_priorities: prioritiesScore,
-            score_todos: todosScore,
-            grade,
+            score_overall: snapshot.scoreOverall,
+            score_habits: snapshot.scoreHabits,
+            score_priorities: snapshot.scorePriorities,
+            score_todos: snapshot.scoreTodos,
+            score_physical: snapshot.scorePhysical,
+            score_mental: snapshot.scoreMental,
+            score_spiritual: snapshot.scoreSpiritual,
+            score_morning: snapshot.scoreMorning,
+            score_afternoon: snapshot.scoreAfternoon,
+            score_evening: snapshot.scoreEvening,
+            grade: snapshot.gradeOverall,
         });
         if (userId && timeframe === 'daily') {
             const dateStr = formatDate(selectedDate);
@@ -679,11 +687,17 @@ export default function HabitDailyEntrySection({
                 .upsert({
                     user_id: userId,
                     date: dateStr,
-                    score_overall,
-                    grade,
-                    score_habits: habitsScore,
-                    score_priorities: prioritiesScore,
-                    score_todos: todosScore,
+                    score_overall: snapshot.scoreOverall,
+                    grade: snapshot.gradeOverall,
+                    score_habits: snapshot.scoreHabits,
+                    score_priorities: snapshot.scorePriorities,
+                    score_todos: snapshot.scoreTodos,
+                    score_physical: snapshot.scorePhysical,
+                    score_mental: snapshot.scoreMental,
+                    score_spiritual: snapshot.scoreSpiritual,
+                    score_morning: snapshot.scoreMorning,
+                    score_afternoon: snapshot.scoreAfternoon,
+                    score_evening: snapshot.scoreEvening,
                 }, { onConflict: 'user_id,date' })
                 .then(() => {});
         }
