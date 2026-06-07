@@ -16,6 +16,7 @@ import {
 import type { GritHabitFormDraft, GritHabitTemplate } from '../../lib/gritTypes';
 import { HabitFormScreen } from '../../components/grit/HabitFormScreen';
 import { HabitFlowLoading } from '../../components/HabitFlowShell';
+import { deactivateHabitTemplate } from '@/lib/habit/habitTemplateActions';
 
 export default function EditHabitPage() {
   const router = useRouter();
@@ -27,6 +28,7 @@ export default function EditHabitPage() {
   const [draft, setDraft] = useState<GritHabitFormDraft | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!id) {
@@ -131,6 +133,39 @@ export default function EditHabitPage() {
     router.push(getReturnPath() || '/habit/today');
   };
 
+  const handleDelete = async () => {
+    if (!id || !draft) return;
+    const confirmed = window.confirm(`Delete "${draft.name.trim()}"? Past check-ins will stay in your history.`);
+    if (!confirmed) return;
+    await deleteHabitAndExit();
+  };
+
+  const deleteHabitAndExit = async () => {
+    if (!id) return;
+
+    setDeleting(true);
+    try {
+      if (isPreview) {
+        preview.setHabit((prev) => ({
+          ...prev,
+          habitTemplates: prev.habitTemplates.map((template) =>
+            template.id === id ? { ...template, is_active: false } : template
+          ),
+        }));
+      } else {
+        await deactivateHabitTemplate(id);
+      }
+
+      setStoredDraft(null);
+      clearReturnPath();
+      router.push(getReturnPath() || '/habit/today');
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (loading || !draft) {
     return <HabitFlowLoading />;
   }
@@ -143,7 +178,10 @@ export default function EditHabitPage() {
       habitId={id}
       onSave={handleSave}
       onCancel={handleCancel}
+      onDelete={handleDelete}
+      onCurrentHabitDeleted={deleteHabitAndExit}
       saving={saving}
+      deleting={deleting}
     />
   );
 }

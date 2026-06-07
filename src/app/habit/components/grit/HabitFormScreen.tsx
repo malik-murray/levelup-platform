@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import type { GritHabitFormDraft } from '../../lib/gritTypes';
 import { HabitFlowShell } from '../HabitFlowShell';
+import { HabitManageSection } from './HabitManageSection';
 import { neon } from '@/app/dashboard/neonTheme';
 
 interface HabitFormScreenProps {
@@ -12,7 +13,10 @@ interface HabitFormScreenProps {
   habitId?: string;
   onSave: () => void;
   onCancel: () => void;
+  onDelete?: () => void;
+  onCurrentHabitDeleted?: () => void;
   saving?: boolean;
+  deleting?: boolean;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -36,7 +40,10 @@ export function HabitFormScreen({
   habitId,
   onSave,
   onCancel,
+  onDelete,
+  onCurrentHabitDeleted,
   saving,
+  deleting,
 }: HabitFormScreenProps) {
   const frequencyLabel = FREQUENCY_LABELS[draft.time_of_day ?? ''] ?? 'Daily';
 
@@ -127,6 +134,17 @@ export function HabitFormScreen({
         <SettingsRow label="Ends" value="—" comingSoon last />
       </div>
 
+      {isEdit && habitId ? (
+        <>
+          <div className="mt-10 border-t border-[#ff9d00]/15 pt-8">
+            <HabitManageSection
+              currentHabitId={habitId}
+              onCurrentHabitDeleted={onCurrentHabitDeleted ?? onDelete}
+            />
+          </div>
+        </>
+      ) : null}
+
       <button
         type="button"
         onClick={onCancel}
@@ -134,6 +152,17 @@ export function HabitFormScreen({
       >
         Cancel
       </button>
+
+      {isEdit && onDelete && (
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={saving || deleting}
+          className="mt-4 w-full min-h-[48px] rounded-xl border-2 border-red-400/40 py-3 text-sm font-semibold text-red-300 transition hover:border-red-400/70 hover:bg-red-500/10 disabled:pointer-events-none disabled:opacity-40"
+        >
+          {deleting ? 'Deleting…' : 'Delete Habit'}
+        </button>
+      )}
     </HabitFlowShell>
   );
 }

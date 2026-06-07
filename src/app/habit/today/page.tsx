@@ -8,6 +8,10 @@ import { formatDate } from '@/lib/habitHelpers';
 import { dbToGrit, type GritHabitTemplate } from '../lib/gritTypes';
 import { setStoredDraft, setReturnPath, initDraftFromTemplate, initDraftFromHabit } from '../lib/habitFormStore';
 import { HabitTodayScreen } from '../components/grit/HabitTodayScreen';
+import {
+  deactivateHabitTemplate,
+  reorderHabitTemplates,
+} from '@/lib/habit/habitTemplateActions';
 
 type HabitWithStatus = GritHabitTemplate & {
   status: 'checked' | 'half' | 'missed';
@@ -175,6 +179,46 @@ export default function HabitTodayPage() {
     [router]
   );
 
+  const onDeleteHabit = useCallback(
+    async (habitId: string) => {
+      if (isPreview) {
+        preview.setHabit((prev) => ({
+          ...prev,
+          habitTemplates: prev.habitTemplates.map((template) =>
+            template.id === habitId ? { ...template, is_active: false } : template
+          ),
+        }));
+        loadData(true);
+        return;
+      }
+
+      await deactivateHabitTemplate(habitId);
+      loadData(true);
+    },
+    [isPreview, preview, loadData]
+  );
+
+  const onReorderHabits = useCallback(
+    async (habitIds: string[]) => {
+      if (isPreview) {
+        preview.setHabit((prev) => ({
+          ...prev,
+          habitTemplates: prev.habitTemplates.map((template) => {
+            const nextIndex = habitIds.indexOf(template.id);
+            if (nextIndex === -1) return template;
+            return { ...template, sort_order: nextIndex };
+          }),
+        }));
+        loadData(true);
+        return;
+      }
+
+      await reorderHabitTemplates(habitIds);
+      loadData(true);
+    },
+    [isPreview, preview, loadData]
+  );
+
   return (
     <HabitTodayScreen
       selectedDate={selectedDate}
@@ -184,6 +228,8 @@ export default function HabitTodayPage() {
       onToggleHabit={onToggleHabit}
       onCreateHabit={onCreateHabit}
       onEditHabit={onEditHabit}
+      onDeleteHabit={onDeleteHabit}
+      onReorderHabits={onReorderHabits}
       isPreview={isPreview}
     />
   );

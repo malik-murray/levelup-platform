@@ -7,6 +7,7 @@ import { Outfit } from 'next/font/google';
 import { formatDate } from '@/lib/habitHelpers';
 import type { GritHabitTemplate, TimeOfDay } from '../../lib/gritTypes';
 import { TemplatesModal } from './TemplatesModal';
+import { SortableHabitList } from './SortableHabitList';
 import AppSidebar from '@/app/dashboard/components/AppSidebar';
 import { neon } from '@/app/dashboard/neonTheme';
 
@@ -28,6 +29,8 @@ interface HabitTodayScreenProps {
   onToggleHabit: (habitId: string, date: string) => Promise<void>;
   onCreateHabit: (template?: { name: string; icon: string; type: 'good' | 'health' | 'bad' | 'todo' }) => void;
   onEditHabit?: (habit: GritHabitTemplate) => void;
+  onDeleteHabit?: (habitId: string) => Promise<void>;
+  onReorderHabits?: (habitIds: string[]) => Promise<void>;
   isPreview?: boolean;
 }
 
@@ -56,7 +59,7 @@ function HabitRow({
   return (
     <div
       className={`
-        ${neon.section} flex items-center gap-4 p-4 transition-all
+        ${neon.section} flex items-center gap-3 p-4 transition-all
         ${habit.status === 'checked' ? 'opacity-90' : ''}
       `}
     >
@@ -131,10 +134,17 @@ export function HabitTodayScreen({
   onToggleHabit,
   onCreateHabit,
   onEditHabit,
+  onDeleteHabit,
+  onReorderHabits,
   isPreview,
 }: HabitTodayScreenProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [manageMode, setManageMode] = useState(false);
+  const [manageBusy, setManageBusy] = useState(false);
+  const [manageError, setManageError] = useState<string | null>(null);
+
+  const canManage = Boolean(onDeleteHabit && onReorderHabits);
 
   const dateStr = formatDate(selectedDate);
 
@@ -161,6 +171,60 @@ export function HabitTodayScreen({
 
   const handleToggle = async (habitId: string) => {
     await onToggleHabit(habitId, dateStr);
+  };
+
+  const handleReorderHabits = async (habitIds: string[]) => {
+    if (!onReorderHabits) return;
+
+    setManageBusy(true);
+    setManageError(null);
+    try {
+      await onReorderHabits(habitIds);
+    } catch (error) {
+      setManageError(error instanceof Error ? error.message : 'Failed to reorder habits');
+      throw error;
+    } finally {
+      setManageBusy(false);
+    }
+  };
+
+  const handleDeleteHabit = async (habit: HabitWithStatus) => {
+    if (!onDeleteHabit) return;
+    const confirmed = window.confirm(`Delete "${habit.name}"? Past check-ins will stay in your history.`);
+    if (!confirmed) return;
+
+    setManageBusy(true);
+    setManageError(null);
+    try {
+      await onDeleteHabit(habit.id);
+    } catch (error) {
+      setManageError(error instanceof Error ? error.message : 'Failed to delete habit');
+    } finally {
+      setManageBusy(false);
+    }
+  };
+
+  const renderHabitList = (list: HabitWithStatus[]) => {
+    if (manageMode) {
+      return (
+        <SortableHabitList
+          habits={list}
+          busy={manageBusy}
+          onReorder={handleReorderHabits}
+          onDelete={handleDeleteHabit}
+        />
+      );
+    }
+
+    return (
+      <ul className="space-y-3">
+        {list.map((habit) => (
+          <li key={habit.id}>
+            <HabitRow habit={habit} onToggle={handleToggle} onEditHabit={onEditHabit} />
+          </li>
+        ))}
+      </ul>
+    );
   };
 
   const handleCreateNew = () => {
@@ -271,6 +335,34 @@ export function HabitTodayScreen({
                 </div>
               ) : (
                 <>
+                  {canManage && (
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <p className="text-sm text-slate-400">
+                        {manageMode
+                          ? 'Drag habits to reorder within each section, or tap delete.'
+                          : 'Tap a habit to check it off.'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManageMode((value) => !value);
+                          setManageError(null);
+                        }}
+                        className={`shrink-0 rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                          manageMode
+                            ? 'border-[#ff9d00] bg-[#ff9d00]/15 text-[#ffe066]'
+                            : 'border-[#ff9d00]/35 text-slate-300 hover:border-[#ff9d00]/60 hover:text-[#ffe066]'
+                        }`}
+                      >
+                        {manageMode ? 'Done' : 'Manage'}
+                      </button>
+                    </div>
+                  )}
+                  {manageError && (
+                    <p className="mb-4 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                      {manageError}
+                    </p>
+                  )}
                   <div className="space-y-8">
                     {TIME_SECTIONS.map(({ slot, title }) => {
                       const list = habitsByTime.bySlot[slot];
@@ -280,17 +372,7 @@ export function HabitTodayScreen({
                           <h2 className="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-[#ff9d00]/90">
                             {title}
                           </h2>
-                          <ul className="space-y-3">
-                            {list.map((habit) => (
-                              <li key={habit.id}>
-                                <HabitRow
-                                  habit={habit}
-                                  onToggle={handleToggle}
-                                  onEditHabit={onEditHabit}
-                                />
-                              </li>
-                            ))}
-                          </ul>
+                          {renderHabitList(list)}
                         </section>
                       );
                     })}
@@ -299,42 +381,36 @@ export function HabitTodayScreen({
                         <h2 className="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-[#ff9d00]/90">
                           Anytime
                         </h2>
-                        <ul className="space-y-3">
-                          {habitsByTime.unset.map((habit) => (
-                            <li key={habit.id}>
-                              <HabitRow
-                                habit={habit}
-                                onToggle={handleToggle}
-                                onEditHabit={onEditHabit}
-                              />
-                            </li>
-                          ))}
-                        </ul>
+                        {renderHabitList(habitsByTime.unset)}
                       </section>
                     )}
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleCreateNew}
-                    className="mt-6 w-full min-h-[48px] rounded-xl border-2 border-dashed border-[#ff9d00]/35 py-3 text-sm font-semibold text-slate-300 transition hover:border-[#ff9d00]/60 hover:text-[#ffe066]"
-                  >
-                    + Add another habit
-                  </button>
+                  {!manageMode && (
+                    <button
+                      type="button"
+                      onClick={handleCreateNew}
+                      className="mt-6 w-full min-h-[48px] rounded-xl border-2 border-dashed border-[#ff9d00]/35 py-3 text-sm font-semibold text-slate-300 transition hover:border-[#ff9d00]/60 hover:text-[#ffe066]"
+                    >
+                      + Add another habit
+                    </button>
+                  )}
                 </>
               )}
             </div>
           </main>
 
           <div className="fixed bottom-6 right-4 z-20 safe-area-pb sm:right-6">
-            <button
-              type="button"
-              onClick={handleCreateNew}
-              className="flex h-14 w-14 min-h-[56px] min-w-[56px] items-center justify-center rounded-full border-2 border-[#ff9d00]/60 bg-[#ff9d00] text-lg font-bold text-black shadow-[0_0_24px_rgba(255,157,0,0.45)] transition hover:scale-[1.02] active:scale-95"
-              aria-label="Create new habit"
-            >
-              <span className="text-2xl leading-none">+</span>
-            </button>
+            {!manageMode && (
+              <button
+                type="button"
+                onClick={handleCreateNew}
+                className="flex h-14 w-14 min-h-[56px] min-w-[56px] items-center justify-center rounded-full border-2 border-[#ff9d00]/60 bg-[#ff9d00] text-lg font-bold text-black shadow-[0_0_24px_rgba(255,157,0,0.45)] transition hover:scale-[1.02] active:scale-95"
+                aria-label="Create new habit"
+              >
+                <span className="text-2xl leading-none">+</span>
+              </button>
+            )}
           </div>
 
           {showTemplates && (
