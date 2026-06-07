@@ -188,7 +188,7 @@ export function HabitTodayScreen({
     }
   };
 
-  const handleDeleteHabit = async (habit: HabitWithStatus) => {
+  const handleDeleteHabit = async (habit: GritHabitTemplate) => {
     if (!onDeleteHabit) return;
     const confirmed = window.confirm(`Delete "${habit.name}"? Past check-ins will stay in your history.`);
     if (!confirmed) return;
