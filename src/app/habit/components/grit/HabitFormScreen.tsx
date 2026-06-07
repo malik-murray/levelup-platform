@@ -78,10 +78,15 @@ export function HabitFormScreen({
           }
         >
           <span className="shrink-0 text-2xl">{draft.icon || '📝'}</span>
-          <div className="min-w-0 text-left">
-            <p className="break-words font-semibold text-white [overflow-wrap:anywhere]">
-              {draft.name || 'Habit name'}
-            </p>
+          <div className="min-w-0 flex-1 text-left">
+            <input
+              type="text"
+              value={draft.name}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+              placeholder="Habit name"
+              aria-label="Habit name"
+              className="w-full bg-transparent font-semibold text-white placeholder:text-white/40 focus:outline-none focus:ring-0 [overflow-wrap:anywhere]"
+            />
             <p className="text-xs text-[#ff9d00]/75">{frequencyLabel}</p>
           </div>
         </div>
