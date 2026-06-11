@@ -1,6 +1,6 @@
 {
-  "name": "LevelUp Solutions",
-  "short_name": "LevelUp",
+  "name": "LevelUpSolutions",
+  "short_name": "LevelUpSolutions",
   "description": "LevelUp finance, habits, and productivity",
   "start_url": "/dashboard",
   "display": "standalone",

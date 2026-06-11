@@ -7,7 +7,7 @@ import { getUserFromBearer, supabaseForUser } from '@/lib/push/pushApiAuth';
 export const maxDuration = 60;
 
 const TEST_PAYLOAD = {
-    title: 'Test transaction detected',
+    title: 'New Transaction',
     body: 'You spent $1.00 at Test Merchant (this is a test alert).',
     data: {
         transactionId: 'test',

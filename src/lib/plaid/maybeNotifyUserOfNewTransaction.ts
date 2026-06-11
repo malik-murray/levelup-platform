@@ -85,7 +85,7 @@ export async function maybeNotifyUserOfNewTransaction(
     }
 
     const merchant = normalizeMerchantLabel(transaction.name, transaction.note);
-    const title = 'New spend';
+    const title = 'New Transaction';
     const dateSuffix =
         transaction.date && /^\d{4}-\d{2}-\d{2}$/.test(transaction.date)
             ? ` (${transaction.date})`

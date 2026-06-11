@@ -1,5 +1,7 @@
-/* LevelUp push notifications — finance spend + habit reminders (v3) */
-const SW_VERSION = 'levelup-push-v3';
+/* LevelUp push notifications — finance spend + habit reminders (v4) */
+const SW_VERSION = 'levelup-push-v4';
+const APP_NAME = 'LevelUpSolutions';
+const NEW_TRANSACTION_TITLE = 'New Transaction';
 
 function categorizeUrl(transactionId) {
     return `/finance/categorize/${encodeURIComponent(transactionId)}`;
@@ -74,7 +76,7 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('push', event => {
-    let payload = { title: 'LevelUp', body: 'Tap to open', data: {} };
+    let payload = { title: APP_NAME, body: 'Tap to open', data: {} };
     try {
         if (event.data) {
             payload = { ...payload, ...event.data.json() };
@@ -89,6 +91,9 @@ self.addEventListener('push', event => {
     const txId = data.transactionId;
     const habit = isHabitNotification(data);
     const quickCategories = habit ? [] : parseQuickCategories(data);
+    const isTransaction = Boolean(txId) && !habit;
+
+    const title = isTransaction ? NEW_TRANSACTION_TITLE : payload.title || APP_NAME;
 
     const body =
         payload.body ||
@@ -119,7 +124,7 @@ self.addEventListener('push', event => {
         actions: !habit && txId && quickCategories.length > 0 ? buildActions(quickCategories) : [],
     };
 
-    event.waitUntil(self.registration.showNotification(payload.title, options));
+    event.waitUntil(self.registration.showNotification(title, options));
 });
 
 function openUrl(url) {
