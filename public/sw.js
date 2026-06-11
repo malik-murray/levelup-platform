@@ -1,14 +1,14 @@
-/* LevelUp push notifications — finance spend + habit reminders (v5) */
-const SW_VERSION = 'levelup-push-v5';
+/* LevelUp push notifications — finance spend + habit reminders (v6) */
+const SW_VERSION = 'levelup-push-v6';
 const APP_NAME = 'LevelUpSolutions';
 const NEW_TRANSACTION_TITLE = 'New Transaction';
 
-function formatTransactionNotification(detailsBody) {
-    const details = (detailsBody || '').trim();
-    return {
-        title: APP_NAME,
-        body: details ? `${NEW_TRANSACTION_TITLE}\n${details}` : NEW_TRANSACTION_TITLE,
-    };
+/** Strip legacy "New Transaction\\n" prefix so server + SW never double-label. */
+function transactionDetailsBody(rawBody) {
+    const body = (rawBody || '').trim();
+    if (!body) return '';
+    const prefix = `${NEW_TRANSACTION_TITLE}\n`;
+    return body.startsWith(prefix) ? body.slice(prefix.length).trim() : body;
 }
 
 function categorizeUrl(transactionId) {
@@ -110,7 +110,10 @@ self.addEventListener('push', event => {
               : 'Tap to pick a category');
 
     const { title, body } = isTransaction
-        ? formatTransactionNotification(detailsBody)
+        ? {
+              title: NEW_TRANSACTION_TITLE,
+              body: transactionDetailsBody(detailsBody),
+          }
         : { title: payload.title || APP_NAME, body: detailsBody };
 
     const defaultUrl = habit
