@@ -1,7 +1,15 @@
-/* LevelUp push notifications — finance spend + habit reminders (v4) */
-const SW_VERSION = 'levelup-push-v4';
+/* LevelUp push notifications — finance spend + habit reminders (v5) */
+const SW_VERSION = 'levelup-push-v5';
 const APP_NAME = 'LevelUpSolutions';
 const NEW_TRANSACTION_TITLE = 'New Transaction';
+
+function formatTransactionNotification(detailsBody) {
+    const details = (detailsBody || '').trim();
+    return {
+        title: APP_NAME,
+        body: details ? `${NEW_TRANSACTION_TITLE}\n${details}` : NEW_TRANSACTION_TITLE,
+    };
+}
 
 function categorizeUrl(transactionId) {
     return `/finance/categorize/${encodeURIComponent(transactionId)}`;
@@ -93,15 +101,17 @@ self.addEventListener('push', event => {
     const quickCategories = habit ? [] : parseQuickCategories(data);
     const isTransaction = Boolean(txId) && !habit;
 
-    const title = isTransaction ? NEW_TRANSACTION_TITLE : payload.title || APP_NAME;
-
-    const body =
+    const detailsBody =
         payload.body ||
         (habit
             ? 'Tap to open your habit tracker'
             : quickCategories.length > 0
               ? 'Expand for quick categories, or tap to see all'
               : 'Tap to pick a category');
+
+    const { title, body } = isTransaction
+        ? formatTransactionNotification(detailsBody)
+        : { title: payload.title || APP_NAME, body: detailsBody };
 
     const defaultUrl = habit
         ? habitDashboardUrl(data)

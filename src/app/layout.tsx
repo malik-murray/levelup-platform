@@ -12,6 +12,7 @@ const navBtnClass =
     "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[#ff9d00]/60 bg-black/50 text-[#ffe066] shadow-[0_0_18px_rgba(255,157,0,0.25)] transition hover:border-[#ff9d00] hover:bg-black/70";
 
 export const metadata: Metadata = {
+    applicationName: "LevelUpSolutions",
     title: "LevelUpSolutions",
     description: "LevelUpSolutions app ecosystem",
     manifest: "/manifest.json",
