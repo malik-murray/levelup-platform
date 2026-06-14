@@ -13,6 +13,7 @@ const financeTabs = [
     { href: '/finance/transactions', label: 'Transactions' },
     { href: '/finance/budget', label: 'Budget' },
     { href: '/finance/reports', label: 'Reports' },
+    { href: '/finance/chat', label: 'Ask' },
     { href: '/finance/concierge', label: 'Concierge' },
     { href: '/finance/settings/integrations', label: 'Settings' },
 ];
@@ -74,7 +75,9 @@ export default function FinanceLayout({
                                 (tab.href === '/finance/settings/integrations' &&
                                     pathname?.startsWith('/finance/settings')) ||
                                 (tab.href === '/finance/concierge' &&
-                                    pathname?.startsWith('/finance/concierge'));
+                                    pathname?.startsWith('/finance/concierge')) ||
+                                (tab.href === '/finance/chat' &&
+                                    pathname?.startsWith('/finance/chat'));
 
                             return (
                                 <Link
