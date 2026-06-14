@@ -3,7 +3,15 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@auth/supabaseClient';
-import { formatDate, getGrade, getMonthRange, getDatesInMonth, isSameDay } from '@/lib/habitHelpers';
+import {
+    formatDate,
+    getGrade,
+    getMonthRange,
+    getDatesInMonth,
+    getWeekStart,
+    getWeekDates,
+    isSameDay,
+} from '@/lib/habitHelpers';
 import { neon } from '../neonTheme';
 
 type DayScore = {
@@ -29,7 +37,12 @@ export default function DashboardCalendarOverview({
 
     useEffect(() => {
         if (!userId) return;
-        const { start, end } = getMonthRange(currentMonth);
+        const { start: monthStart, end: monthEnd } = getMonthRange(currentMonth);
+        const weekStart = getWeekStart(new Date());
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        const start = new Date(Math.min(monthStart.getTime(), weekStart.getTime()));
+        const end = new Date(Math.max(monthEnd.getTime(), weekEnd.getTime()));
         const startStr = formatDate(start);
         const endStr = formatDate(end);
         setLoading(true);
@@ -72,6 +85,26 @@ export default function DashboardCalendarOverview({
     const monthOverall =
         monthOverallPct !== null
             ? { percent: monthOverallPct, grade: getGrade(monthOverallPct) }
+            : null;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const currentWeekDays = getWeekDates(getWeekStart(today));
+    let weekOverallSum = 0;
+    let weekOverallCount = 0;
+    for (const date of currentWeekDays) {
+        if (date > today) break;
+        const score = scoresByDate.get(formatDate(date));
+        if (score) {
+            weekOverallSum += score.score_overall;
+            weekOverallCount += 1;
+        }
+    }
+    const weekOverallPct =
+        weekOverallCount > 0 ? Math.round(weekOverallSum / weekOverallCount) : null;
+    const weekOverall =
+        weekOverallPct !== null
+            ? { percent: weekOverallPct, grade: getGrade(weekOverallPct) }
             : null;
 
     const monthName = currentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -138,28 +171,53 @@ export default function DashboardCalendarOverview({
                         </Link>
                     </div>
                     {!loading && (
-                        <div
-                            className="mb-4 flex flex-wrap items-center justify-center gap-2 rounded-lg border border-[#ff9d00]/20 bg-[#060a14]/60 px-3 py-2 text-sm"
-                            role="status"
-                            aria-label={
-                                monthOverall
-                                    ? `Monthly overall score ${monthOverall.percent} percent, grade ${monthOverall.grade}`
-                                    : 'No daily scores yet for this month'
-                            }
-                        >
-                            <span className="text-slate-400">Month overall</span>
-                            {monthOverall ? (
-                                <>
-                                    <span className="font-bold tabular-nums text-[#ffcc66]">
-                                        {monthOverall.percent}%
-                                    </span>
-                                    <span className="inline-flex items-center rounded bg-[#ff9d00]/20 px-2 py-0.5 text-xs font-semibold text-[#ffcc66]">
-                                        {monthOverall.grade}
-                                    </span>
-                                </>
-                            ) : (
-                                <span className="text-slate-500">No scores this month</span>
-                            )}
+                        <div className="mb-4 flex flex-col gap-2">
+                            <div
+                                className="flex flex-wrap items-center justify-center gap-2 rounded-lg border border-[#ff9d00]/20 bg-[#060a14]/60 px-3 py-2 text-sm"
+                                role="status"
+                                aria-label={
+                                    monthOverall
+                                        ? `Monthly overall score ${monthOverall.percent} percent, grade ${monthOverall.grade}`
+                                        : 'No daily scores yet for this month'
+                                }
+                            >
+                                <span className="text-slate-400">Month overall</span>
+                                {monthOverall ? (
+                                    <>
+                                        <span className="font-bold tabular-nums text-[#ffcc66]">
+                                            {monthOverall.percent}%
+                                        </span>
+                                        <span className="inline-flex items-center rounded bg-[#ff9d00]/20 px-2 py-0.5 text-xs font-semibold text-[#ffcc66]">
+                                            {monthOverall.grade}
+                                        </span>
+                                    </>
+                                ) : (
+                                    <span className="text-slate-500">No scores this month</span>
+                                )}
+                            </div>
+                            <div
+                                className="flex flex-wrap items-center justify-center gap-2 rounded-lg border border-[#ff9d00]/20 bg-[#060a14]/60 px-3 py-2 text-sm"
+                                role="status"
+                                aria-label={
+                                    weekOverall
+                                        ? `Weekly overall score ${weekOverall.percent} percent, grade ${weekOverall.grade}`
+                                        : 'No daily scores yet for this week'
+                                }
+                            >
+                                <span className="text-slate-400">Week overall</span>
+                                {weekOverall ? (
+                                    <>
+                                        <span className="font-bold tabular-nums text-[#ffcc66]">
+                                            {weekOverall.percent}%
+                                        </span>
+                                        <span className="inline-flex items-center rounded bg-[#ff9d00]/20 px-2 py-0.5 text-xs font-semibold text-[#ffcc66]">
+                                            {weekOverall.grade}
+                                        </span>
+                                    </>
+                                ) : (
+                                    <span className="text-slate-500">No scores this week</span>
+                                )}
+                            </div>
                         </div>
                     )}
                     {loading ? (

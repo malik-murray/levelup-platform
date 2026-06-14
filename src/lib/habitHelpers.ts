@@ -155,6 +155,31 @@ export function getMonthRange(date: Date): { start: Date; end: Date } {
 }
 
 /**
+ * Get Sunday of the week containing the given date
+ */
+export function getWeekStart(date: Date): Date {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - d.getDay());
+    return d;
+}
+
+/**
+ * Get all 7 dates in a week starting from Sunday
+ */
+export function getWeekDates(weekStart: Date): Date[] {
+    const dates: Date[] = [];
+    const start = new Date(weekStart);
+    start.setHours(0, 0, 0, 0);
+    for (let i = 0; i < 7; i++) {
+        const day = new Date(start);
+        day.setDate(start.getDate() + i);
+        dates.push(day);
+    }
+    return dates;
+}
+
+/**
  * Get all dates in a month
  */
 export function getDatesInMonth(date: Date): Date[] {
