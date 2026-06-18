@@ -97,8 +97,12 @@ export async function GET(request: NextRequest) {
             throw prefError;
         }
 
-        const selectedSourceIds = preferences?.selected_source_ids || [];
-        const selectedTopicIds = preferences?.selected_topic_ids || [];
+        const selectedSourceIds: string[] = Array.isArray(preferences?.selected_source_ids)
+            ? preferences.selected_source_ids
+            : [];
+        const selectedTopicIds: string[] = Array.isArray(preferences?.selected_topic_ids)
+            ? preferences.selected_topic_ids
+            : [];
 
         if (topicIdFilter) {
             const { data: selectedTopic } = await supabase
