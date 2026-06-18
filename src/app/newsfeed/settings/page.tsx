@@ -344,6 +344,15 @@ export default function NewsfeedSettingsPage() {
             setSaved(true);
             setError(null);
 
+            void fetch('/api/newsfeed/ingest', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({}),
+            }).catch((ingestError) => {
+                console.error('Background ingestion after save failed:', ingestError);
+            });
+
             // Redirect to feed after successful save
             setTimeout(() => {
                 window.location.href = '/newsfeed';

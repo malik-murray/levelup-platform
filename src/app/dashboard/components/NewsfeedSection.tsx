@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { formatLocalDate } from '@/lib/newsfeed/dateRange';
 import { neon } from '../neonTheme';
 
 type Article = {
@@ -43,7 +44,7 @@ export default function NewsfeedSection({
     const loadArticles = async () => {
         setLoading(true);
         try {
-            const dateStr = selectedDate.toISOString().split('T')[0];
+            const dateStr = formatLocalDate(selectedDate);
             const response = await fetch(`/api/newsfeed/articles?date=${dateStr}&filter=feed`);
             const data = await response.json();
             setArticles(data.articles || []);

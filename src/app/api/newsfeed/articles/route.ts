@@ -1,9 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { buildArticleDateRange, buildFallbackDateRange } from '@/lib/newsfeed/dateRange';
+import { triggerNewsfeedIngestionIfStale } from '@/lib/newsfeed/runIngestionIfStale';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+type RawArticle = {
+    id: string;
+    title: string;
+    url: string;
+    publish_time: string;
+    description: string | null;
+    image_url: string | null;
+    topic_ids: string[];
+    source_id: string;
+    newsfeed_sources: {
+        id: string;
+        name: string;
+        display_name: string;
+    } | null;
+    newsfeed_article_summaries: Array<{
+        summary_1_paragraph: string | null;
+        summary_2_paragraphs: string | null;
+        summary_3_paragraphs: string | null;
+        summary_4_paragraphs: string | null;
+        summary_5_paragraphs: string | null;
+        why_it_matters: string | null;
+    }>;
+};
 
 /**
  * GET /api/newsfeed/articles
@@ -45,12 +71,11 @@ export async function GET(request: NextRequest) {
 
         const { searchParams } = new URL(request.url);
         const dateParam = searchParams.get('date');
-        const filter = searchParams.get('filter') || 'feed'; // feed, saved, archived
+        const filter = searchParams.get('filter') || 'feed';
         const sourceIdFilter = searchParams.get('sourceId');
         const topicIdFilter = searchParams.get('topicId');
         let expandedTopicFilterIds: string[] | null = null;
 
-        // Get user preferences
         const { data: preferences, error: prefError } = await supabase
             .from('newsfeed_user_preferences')
             .select('selected_source_ids, selected_topic_ids')
@@ -64,8 +89,6 @@ export async function GET(request: NextRequest) {
         const selectedSourceIds = preferences?.selected_source_ids || [];
         const selectedTopicIds = preferences?.selected_topic_ids || [];
 
-        // Expand topic filter aliases so related federal categories remain discoverable.
-        // Example: "federal_workforce" and "fed_gov" should be treated as a shared filter group.
         if (topicIdFilter) {
             const { data: selectedTopic } = await supabase
                 .from('newsfeed_topics')
@@ -84,50 +107,24 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        // Log preferences for debugging
-        console.log('User preferences:', {
-            userId: user.id,
-            selectedSourceIds: selectedSourceIds.length,
-            selectedTopicIds: selectedTopicIds.length,
-            sourceIds: selectedSourceIds,
-            topicIds: selectedTopicIds,
-        });
-
-        // Build date range - use last 36 hours instead of strict midnight boundaries
-        // This prevents timezone issues and ensures we catch recent articles
-        let startDate: Date;
-        let endDate: Date;
-
-        if (dateParam) {
-            const targetDate = new Date(dateParam);
-            // For a specific date, show articles from 36 hours before to 12 hours after
-            // This gives a 48-hour window centered on the selected date
-            endDate = new Date(targetDate);
-            endDate.setHours(12, 0, 0, 0); // End at noon of selected date
-            startDate = new Date(endDate);
-            startDate.setHours(startDate.getHours() - 36); // 36 hours before
-        } else {
-            // Default to last 36 hours from now
-            endDate = new Date();
-            startDate = new Date(endDate);
-            startDate.setHours(startDate.getHours() - 36);
-        }
-
-        console.log('Date range:', {
-            startDate: startDate.toISOString(),
-            endDate: endDate.toISOString(),
-            dateParam,
-            filter,
-        });
-
-        // If neither sources nor topics are selected, return empty array
         if (selectedSourceIds.length === 0 && selectedTopicIds.length === 0) {
-            console.log('No sources or topics selected - returning empty array');
             return NextResponse.json({ articles: [] });
         }
 
-        // Helper function to build and execute the query
-        const executeQuery = async () => {
+        if (filter === 'feed') {
+            triggerNewsfeedIngestionIfStale({
+                sourceIds: selectedSourceIds.length > 0 ? selectedSourceIds : undefined,
+            });
+        }
+
+        const primaryRange = buildArticleDateRange(dateParam);
+        const canUseFallback =
+            primaryRange.isToday &&
+            filter === 'feed' &&
+            !sourceIdFilter &&
+            !topicIdFilter;
+
+        const loadArticlesForRange = async (startDate: Date, endDate: Date) => {
             let query = supabase
                 .from('newsfeed_articles')
                 .select(`
@@ -147,189 +144,136 @@ export async function GET(request: NextRequest) {
                 .lte('publish_time', endDate.toISOString())
                 .order('publish_time', { ascending: false });
 
-        // Apply source filters
-        if (sourceIdFilter) {
-            // Client-side filter override
-            query = query.eq('source_id', sourceIdFilter);
-        } else if (selectedSourceIds.length > 0) {
-            // User preferences filter
-            query = query.in('source_id', selectedSourceIds);
-        }
+            if (sourceIdFilter) {
+                query = query.eq('source_id', sourceIdFilter);
+            } else if (selectedSourceIds.length > 0) {
+                query = query.in('source_id', selectedSourceIds);
+            }
 
-            return await query;
-        };
+            const { data, error } = await query;
+            if (error) {
+                throw error;
+            }
 
-        let { data: articlesData, error } = await executeQuery();
+            let filteredArticles = (data || []) as RawArticle[];
 
-        if (error) {
-            console.error('Error fetching articles from database:', error);
-            throw error;
-        }
+            if (filteredArticles.length > 0) {
+                filteredArticles = filteredArticles.filter((article) => {
+                    const articleSourceId = article.source_id;
+                    const articleTopics = article.topic_ids || [];
 
-        const rawArticleCount = articlesData?.length || 0;
-        console.log(`Raw articles fetched from database: ${rawArticleCount}`);
-        
-        // Check how many articles have no topics
-        const articlesWithoutTopics = articlesData?.filter((a: any) => 
-            !a.topic_ids || (Array.isArray(a.topic_ids) && a.topic_ids.length === 0)
-        ) || [];
-        
-        // If many articles lack topics, trigger topic update in background
-        if (articlesWithoutTopics.length > 0 && articlesWithoutTopics.length > rawArticleCount * 0.5) {
-            console.log(`⚠️  ${articlesWithoutTopics.length} articles without topics - triggering background update`);
-            // Trigger update in background (don't wait)
-            fetch(`${request.url.split('/api')[0]}/api/newsfeed/update-topics`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-            }).catch(err => console.error('Background topic update failed:', err));
-        }
-        
-        // Ingestion is intentionally decoupled from this read path for fast response times.
-
-        // Filter by topics/sources using OR logic
-        // Article matches if:
-        // - It's from a selected source OR
-        // - It matches a selected topic
-        let filteredArticles = articlesData || [];
-
-        if (filteredArticles.length > 0) {
-            const beforeFilterCount = filteredArticles.length;
-            
-            filteredArticles = filteredArticles.filter((article: any) => {
-                const articleSourceId = article.source_id;
-                const articleTopics = article.topic_ids || [];
-                
-                // PRIORITY 1: Client-side filters (from UI dropdowns) take precedence
-                // If topic filter is set, article MUST match that topic
-                if (topicIdFilter) {
-                    const allowedTopicIds = expandedTopicFilterIds || [topicIdFilter];
-                    if (!allowedTopicIds.some((topicId: string) => articleTopics.includes(topicId))) {
-                        return false; // Reject if doesn't match topic filter
+                    if (topicIdFilter) {
+                        const allowedTopicIds = expandedTopicFilterIds || [topicIdFilter];
+                        if (!allowedTopicIds.some((topicId) => articleTopics.includes(topicId))) {
+                            return false;
+                        }
                     }
-                }
-                
-                // If source filter is set, article MUST match that source
-                if (sourceIdFilter) {
-                    if (articleSourceId !== sourceIdFilter) {
-                        return false; // Reject if doesn't match source filter
+
+                    if (sourceIdFilter && articleSourceId !== sourceIdFilter) {
+                        return false;
                     }
-                }
-                
-                // PRIORITY 2: User preferences (if no client-side filters)
-                // Only apply user preference filtering if no client-side filters are set
-                if (!topicIdFilter && !sourceIdFilter) {
-                    // Match if article is from a selected source
-                    const matchesSource = selectedSourceIds.length === 0 || selectedSourceIds.includes(articleSourceId);
-                    
-                    // Match if article has at least one selected topic
-                    const matchesTopic = selectedTopicIds.length === 0 || 
-                        selectedTopicIds.some((topicId: string) => articleTopics.includes(topicId));
-                    
-                    // OR logic: match if source OR topic matches
-                    // If no sources selected, only check topics
-                    // If no topics selected, only check sources
-                    // If both selected, match if either matches
-                    if (selectedSourceIds.length === 0) {
-                        return matchesTopic;
-                    } else if (selectedTopicIds.length === 0) {
-                        return matchesSource;
-                    } else {
+
+                    if (!topicIdFilter && !sourceIdFilter) {
+                        const matchesSource =
+                            selectedSourceIds.length === 0 || selectedSourceIds.includes(articleSourceId);
+                        const matchesTopic =
+                            selectedTopicIds.length === 0 ||
+                            selectedTopicIds.some((topicId) => articleTopics.includes(topicId));
+
+                        if (selectedSourceIds.length === 0) {
+                            return matchesTopic;
+                        }
+                        if (selectedTopicIds.length === 0) {
+                            return matchesSource;
+                        }
                         return matchesSource || matchesTopic;
                     }
-                }
-                
-                // If client-side filters are set and article passed them, include it
-                return true;
-            });
-            
-            const afterFilterCount = filteredArticles.length;
-            console.log(`Articles after source/topic filtering: ${beforeFilterCount} → ${afterFilterCount}`);
-        } else {
-            console.log('No articles in date range - database may be empty or date range too narrow');
-        }
 
-        // Get article IDs for fetching user actions
-        const articleIds = filteredArticles.map((a: any) => a.id);
+                    return true;
+                });
+            }
 
-        // Fetch user actions for these articles
-        let userActionsMap: Record<string, any> = {};
-        if (articleIds.length > 0) {
-            const { data: actions } = await supabase
-                .from('newsfeed_user_article_actions')
-                .select('*')
-                .eq('user_id', user.id)
-                .in('article_id', articleIds);
+            const articleIds = filteredArticles.map((article) => article.id);
+            const userActionsMap: Record<string, any> = {};
 
-            if (actions) {
-                actions.forEach((action) => {
+            if (articleIds.length > 0) {
+                const { data: actions } = await supabase
+                    .from('newsfeed_user_article_actions')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .in('article_id', articleIds);
+
+                actions?.forEach((action) => {
                     userActionsMap[action.article_id] = action;
                 });
             }
+
+            if (filter === 'saved') {
+                filteredArticles = filteredArticles.filter((article) => {
+                    const action = userActionsMap[article.id];
+                    return action && action.is_saved === true;
+                });
+            } else if (filter === 'archived') {
+                filteredArticles = filteredArticles.filter((article) => {
+                    const action = userActionsMap[article.id];
+                    return action && action.is_archived === true;
+                });
+            } else {
+                filteredArticles = filteredArticles.filter((article) => {
+                    const action = userActionsMap[article.id];
+                    return !action || action.is_archived !== true;
+                });
+            }
+
+            return filteredArticles.map((article) => {
+                const action = userActionsMap[article.id] || {};
+                const summary = article.newsfeed_article_summaries?.[0];
+                const source = article.newsfeed_sources;
+
+                return {
+                    id: article.id,
+                    title: article.title,
+                    url: article.url,
+                    publish_time: article.publish_time,
+                    description: article.description || null,
+                    image_url: article.image_url || null,
+                    topic_ids: article.topic_ids,
+                    source: {
+                        id: source?.id,
+                        name: source?.name,
+                        display_name: source?.display_name,
+                    },
+                    summary: summary
+                        ? {
+                              paragraphs_1: summary.summary_1_paragraph,
+                              paragraphs_2: summary.summary_2_paragraphs,
+                              paragraphs_3: summary.summary_3_paragraphs,
+                              paragraphs_4: summary.summary_4_paragraphs,
+                              paragraphs_5: summary.summary_5_paragraphs,
+                              why_it_matters: summary.why_it_matters,
+                          }
+                        : null,
+                    user_action: {
+                        is_saved: action.is_saved || false,
+                        is_archived: action.is_archived || false,
+                        preferred_summary_length: action.preferred_summary_length || 1,
+                    },
+                };
+            });
+        };
+
+        let usedFallback = false;
+        let activeRange = primaryRange;
+        let transformedArticles = await loadArticlesForRange(activeRange.startDate, activeRange.endDate);
+
+        if (transformedArticles.length === 0 && canUseFallback) {
+            activeRange = buildFallbackDateRange();
+            transformedArticles = await loadArticlesForRange(activeRange.startDate, activeRange.endDate);
+            usedFallback = transformedArticles.length > 0;
         }
 
-        // Apply saved/archived filter
-        const beforeActionFilterCount = filteredArticles.length;
-        if (filter === 'saved') {
-            filteredArticles = filteredArticles.filter((article: any) => {
-                const action = userActionsMap[article.id];
-                return action && action.is_saved === true;
-            });
-        } else if (filter === 'archived') {
-            filteredArticles = filteredArticles.filter((article: any) => {
-                const action = userActionsMap[article.id];
-                return action && action.is_archived === true;
-            });
-        } else {
-            // feed: exclude archived items
-            filteredArticles = filteredArticles.filter((article: any) => {
-                const action = userActionsMap[article.id];
-                return !action || action.is_archived !== true;
-            });
-        }
-        const afterActionFilterCount = filteredArticles.length;
-        console.log(`Articles after action filter (${filter}): ${beforeActionFilterCount} → ${afterActionFilterCount}`);
-
-        const articles = filteredArticles;
-        console.log(`Final articles to return: ${articles.length}`);
-
-        // Transform data for frontend
-        const transformedArticles = (articles || []).map((article: any) => {
-            const action = userActionsMap[article.id] || {};
-            const summary = article.newsfeed_article_summaries?.[0];
-            const source = article.newsfeed_sources;
-
-            return {
-                id: article.id,
-                title: article.title,
-                url: article.url,
-                publish_time: article.publish_time,
-                description: article.description || null,
-                image_url: article.image_url || null,
-                topic_ids: article.topic_ids,
-                source: {
-                    id: source?.id,
-                    name: source?.name,
-                    display_name: source?.display_name,
-                },
-                summary: summary ? {
-                    paragraphs_1: summary.summary_1_paragraph,
-                    paragraphs_2: summary.summary_2_paragraphs,
-                    paragraphs_3: summary.summary_3_paragraphs,
-                    paragraphs_4: summary.summary_4_paragraphs,
-                    paragraphs_5: summary.summary_5_paragraphs,
-                    why_it_matters: summary.why_it_matters,
-                } : null,
-                user_action: {
-                    is_saved: action.is_saved || false,
-                    is_archived: action.is_archived || false,
-                    preferred_summary_length: action.preferred_summary_length || 1,
-                },
-            };
-        });
-
-        // Apply intelligence-layer ranking if analysis exists.
         if (transformedArticles.length > 0) {
-            const transformedIds = transformedArticles.map((article: any) => article.id);
+            const transformedIds = transformedArticles.map((article) => article.id);
             const { data: rankingRows, error: rankingError } = await supabase
                 .from('newsfeed_top_story_rankings')
                 .select('article_id, rank_position, final_score')
@@ -349,7 +293,7 @@ export async function GET(request: NextRequest) {
                 ])
             );
 
-            transformedArticles.sort((a: any, b: any) => {
+            transformedArticles.sort((a, b) => {
                 const rankA = rankingMap.get(a.id);
                 const rankB = rankingMap.get(b.id);
                 if (rankA && rankB) {
@@ -364,15 +308,16 @@ export async function GET(request: NextRequest) {
             });
         }
 
-        console.log('Returning articles to client:', {
-            count: transformedArticles.length,
-            dateRange: `${startDate.toISOString()} to ${endDate.toISOString()}`,
-            filter,
-            selectedSources: selectedSourceIds.length,
-            selectedTopics: selectedTopicIds.length,
+        return NextResponse.json({
+            articles: transformedArticles,
+            meta: {
+                usedFallback,
+                dateRange: {
+                    start: activeRange.startDate.toISOString(),
+                    end: activeRange.endDate.toISOString(),
+                },
+            },
         });
-
-        return NextResponse.json({ articles: transformedArticles });
     } catch (error) {
         console.error('Error fetching articles:', error);
         return NextResponse.json(
@@ -381,4 +326,3 @@ export async function GET(request: NextRequest) {
         );
     }
 }
-

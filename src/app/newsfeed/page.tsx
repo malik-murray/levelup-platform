@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
+import { formatLocalDate } from '@/lib/newsfeed/dateRange';
 import { rankArticlesForBriefing } from '@/lib/newsfeed/topStoriesRanking';
 
 type Source = {
@@ -84,12 +85,33 @@ export default function NewsfeedPage() {
     const [selectedSourceFilter, setSelectedSourceFilter] = useState<string | null>(null);
     const [selectedTopicFilter, setSelectedTopicFilter] = useState<string | null>(null);
     const [activeCategory, setActiveCategory] = useState<CategoryKey>('for-you');
+    const [ingestTriggered, setIngestTriggered] = useState(false);
 
     useEffect(() => {
         checkPreferences();
         loadSources();
         loadTopics();
     }, []);
+
+    const triggerIngestion = useCallback(async () => {
+        try {
+            await fetch('/api/newsfeed/ingest', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({}),
+            });
+            setIngestTriggered(true);
+        } catch (error) {
+            console.error('Error triggering newsfeed ingestion:', error);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (hasPreferences) {
+            void triggerIngestion();
+        }
+    }, [hasPreferences, triggerIngestion]);
 
     const checkPreferences = async () => {
         try {
@@ -133,7 +155,7 @@ export default function NewsfeedPage() {
     const loadArticles = useCallback(async () => {
         try {
             setLoading(true);
-            const dateStr = currentDate.toISOString().split('T')[0];
+            const dateStr = formatLocalDate(currentDate);
             let url = `/api/newsfeed/articles?date=${dateStr}&filter=${filter}`;
             if (selectedSourceFilter) {
                 url += `&sourceId=${selectedSourceFilter}`;
@@ -164,27 +186,18 @@ export default function NewsfeedPage() {
         loadArticles();
     }, [loadArticles]);
 
-    const updateArticleTopics = async () => {
+    const refreshFeed = async () => {
         try {
             setLoading(true);
-            const response = await fetch('/api/newsfeed/update-topics', {
+            await fetch('/api/newsfeed/ingest', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ force: true }),
             });
-            const data = await response.json();
-            console.log('Topic update result:', data);
-            
-            // Reload articles after update
             await loadArticles();
-            
-            if (data.success) {
-                alert(`Successfully updated topics for ${data.updated} articles!`);
-            } else {
-                alert(`Error: ${data.error || 'Failed to update topics'}`);
-            }
         } catch (error) {
-            console.error('Error updating topics:', error);
-            alert('Failed to update topics. Please try again.');
+            console.error('Error refreshing feed:', error);
         } finally {
             setLoading(false);
         }
@@ -546,12 +559,25 @@ export default function NewsfeedPage() {
                         ))}
                     </div>
 
+                    {ingestTriggered && filteredArticles.length === 0 && !loading ? (
+                        <div className="rounded-2xl border border-violet-500/20 bg-violet-500/10 px-4 py-3 text-center text-sm text-violet-200">
+                            Fetching the latest articles. This may take a minute — try Refresh shortly.
+                        </div>
+                    ) : null}
+
                     {loading ? (
                         <div className="py-10 text-center text-sm text-slate-400">Loading articles...</div>
                     ) : filteredArticles.length === 0 ? (
                         <div className="rounded-2xl border border-white/10 bg-[#12172A] px-4 py-8 text-center text-sm text-slate-400">
                             <p>No articles found for this view.</p>
-                            <Link href="/newsfeed/settings" className="mt-4 inline-block text-violet-300 hover:text-violet-200">
+                            <button
+                                type="button"
+                                onClick={refreshFeed}
+                                className="mt-4 inline-block text-violet-300 hover:text-violet-200"
+                            >
+                                Refresh feed
+                            </button>
+                            <Link href="/newsfeed/settings" className="mt-2 block text-violet-300 hover:text-violet-200">
                                 Update preferences
                             </Link>
                         </div>
@@ -562,7 +588,7 @@ export default function NewsfeedPage() {
                                     <div className="mb-2 flex items-center justify-between">
                                         <h2 className="text-base font-semibold text-slate-100">{feedTitle}</h2>
                                         <button
-                                            onClick={updateArticleTopics}
+                                            onClick={refreshFeed}
                                             disabled={loading}
                                             className="rounded-md border border-white/15 px-2 py-1 text-[11px] text-slate-300"
                                         >
