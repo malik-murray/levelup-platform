@@ -7,6 +7,21 @@ import { triggerNewsfeedIngestionIfStale } from '@/lib/newsfeed/runIngestionIfSt
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
+type SourceRef = {
+    id: string;
+    name: string;
+    display_name: string;
+};
+
+type ArticleSummaryRef = {
+    summary_1_paragraph: string | null;
+    summary_2_paragraphs: string | null;
+    summary_3_paragraphs: string | null;
+    summary_4_paragraphs: string | null;
+    summary_5_paragraphs: string | null;
+    why_it_matters: string | null;
+};
+
 type RawArticle = {
     id: string;
     title: string;
@@ -16,20 +31,16 @@ type RawArticle = {
     image_url: string | null;
     topic_ids: string[];
     source_id: string;
-    newsfeed_sources: {
-        id: string;
-        name: string;
-        display_name: string;
-    } | null;
-    newsfeed_article_summaries: Array<{
-        summary_1_paragraph: string | null;
-        summary_2_paragraphs: string | null;
-        summary_3_paragraphs: string | null;
-        summary_4_paragraphs: string | null;
-        summary_5_paragraphs: string | null;
-        why_it_matters: string | null;
-    }>;
+    newsfeed_sources: SourceRef | SourceRef[] | null;
+    newsfeed_article_summaries: ArticleSummaryRef | ArticleSummaryRef[] | null;
 };
+
+function firstRelation<T>(value: T | T[] | null | undefined): T | null {
+    if (Array.isArray(value)) {
+        return value[0] ?? null;
+    }
+    return value ?? null;
+}
 
 /**
  * GET /api/newsfeed/articles
@@ -227,8 +238,8 @@ export async function GET(request: NextRequest) {
 
             return filteredArticles.map((article) => {
                 const action = userActionsMap[article.id] || {};
-                const summary = article.newsfeed_article_summaries?.[0];
-                const source = article.newsfeed_sources;
+                const summary = firstRelation(article.newsfeed_article_summaries);
+                const source = firstRelation(article.newsfeed_sources);
 
                 return {
                     id: article.id,
