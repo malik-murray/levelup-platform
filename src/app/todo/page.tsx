@@ -172,14 +172,10 @@ export default function TodoPage() {
       }
 
       dedupedRows.sort((a, b) =>
-        compareByQuadrant(
-          { is_important: a.is_important ?? null, is_urgent: a.is_urgent ?? null },
-          { is_important: b.is_important ?? null, is_urgent: b.is_urgent ?? null },
-          (x, y) => {
-            if (x.date !== y.date) return y.date.localeCompare(x.date);
-            return (y.created_at ?? '').localeCompare(x.created_at ?? '');
-          }
-        )
+        compareByQuadrant(a, b, (x, y) => {
+          if (x.date !== y.date) return y.date.localeCompare(x.date);
+          return (y.created_at ?? '').localeCompare(x.created_at ?? '');
+        })
       );
       setTodos(dedupedRows);
 
@@ -345,14 +341,10 @@ export default function TodoPage() {
         prev
           .map((item) => (item.id === todo.id ? { ...item, ...fields } : item))
           .sort((a, b) =>
-            compareByQuadrant(
-              { is_important: a.is_important ?? null, is_urgent: a.is_urgent ?? null },
-              { is_important: b.is_important ?? null, is_urgent: b.is_urgent ?? null },
-              (x, y) => {
-                if (x.date !== y.date) return y.date.localeCompare(x.date);
-                return (y.created_at ?? '').localeCompare(x.created_at ?? '');
-              }
-            )
+            compareByQuadrant(a, b, (x, y) => {
+              if (x.date !== y.date) return y.date.localeCompare(x.date);
+              return (y.created_at ?? '').localeCompare(x.created_at ?? '');
+            })
           )
       );
     } catch (err) {
