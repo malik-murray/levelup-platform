@@ -797,7 +797,7 @@ export default function HabitDailyEntrySection({
             <div className="min-w-0 space-y-6 overflow-hidden px-4 pb-4">
             <p className="text-xs text-slate-400">
                 Mark tasks <span className="text-emerald-300">Imp</span> (important) or{' '}
-                <span className="text-red-300">Urg</span> (urgent) to sort by Covey&apos;s matrix — Q1 first, then Q2.{' '}
+                <span className="text-red-300">Urg</span> (urgent) to sort by the Eisenhower matrix — Q1 first, then Q2.{' '}
                 <Link href="/todo" className="text-[#ffe066] underline-offset-2 hover:underline">
                     Triage backlog
                 </Link>

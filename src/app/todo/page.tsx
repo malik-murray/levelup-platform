@@ -7,7 +7,7 @@ import { supabase } from '@auth/supabaseClient';
 import AppSidebar from '@/app/dashboard/components/AppSidebar';
 import { neon } from '@/app/dashboard/neonTheme';
 import { formatDate } from '@/lib/habitHelpers';
-import { compareByQuadrant, getQuadrant, QUADRANT_META, type EisenhowerQuadrant } from '@/lib/habit/eisenhower';
+import { compareByQuadrant, getQuadrant, QUADRANT_META, quadrantBadgeClasses, type EisenhowerQuadrant } from '@/lib/habit/eisenhower';
 import { EisenhowerToggles, QuadrantBadge } from '@/components/habit/EisenhowerToggles';
 import { updateTodoEisenhower } from '@/lib/habitBacklog';
 
@@ -518,7 +518,7 @@ export default function TodoPage() {
                 Task Backlog
               </h1>
               <p className="mt-2 text-center text-sm text-slate-300">
-                Triage with Covey&apos;s matrix — mark Important and Urgent, then assign Q1/Q2 items to your daily plan.
+                Triage with the Eisenhower matrix — mark Important and Urgent, then assign Q1/Q2 items to your daily plan.
               </p>
               <div className="mt-4 flex items-center justify-center gap-2">
                 <button
@@ -556,13 +556,19 @@ export default function TodoPage() {
                       {(['q1', 'q2', 'q3', 'q4'] as const).map((q) => (
                         <div
                           key={q}
-                          className="rounded-md border border-[#ff9d00]/20 bg-black/25 px-2 py-1.5 text-center"
+                          className={`rounded-md border px-2 py-2 text-center ${quadrantBadgeClasses(q)}`}
                           title={QUADRANT_META[q].description}
                         >
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                          <p className="text-[11px] font-bold uppercase tracking-wide">
                             {QUADRANT_META[q].shortLabel}
                           </p>
-                          <p className="text-sm font-bold text-white">{quadrantCounts[q]}</p>
+                          <p className="mt-0.5 text-[9px] font-semibold leading-tight sm:text-[10px]">
+                            {QUADRANT_META[q].label}
+                          </p>
+                          <p className="mt-1.5 text-lg font-bold tabular-nums text-white">{quadrantCounts[q]}</p>
+                          <p className="mt-0.5 text-[8px] leading-tight text-slate-400 sm:text-[9px]">
+                            {QUADRANT_META[q].description}
+                          </p>
                         </div>
                       ))}
                     </div>
