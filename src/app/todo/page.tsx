@@ -7,6 +7,9 @@ import { supabase } from '@auth/supabaseClient';
 import AppSidebar from '@/app/dashboard/components/AppSidebar';
 import { neon } from '@/app/dashboard/neonTheme';
 import { formatDate } from '@/lib/habitHelpers';
+import { compareByQuadrant, getQuadrant, QUADRANT_META, type EisenhowerQuadrant } from '@/lib/habit/eisenhower';
+import { EisenhowerToggles, QuadrantBadge } from '@/components/habit/EisenhowerToggles';
+import { updateTodoEisenhower } from '@/lib/habitBacklog';
 
 const outfit = Outfit({ subsets: ['latin'], weight: ['400', '600', '700', '800'] });
 const LOGO_SRC = '/brand/levelup-logo.png';
@@ -17,6 +20,9 @@ type TodoItem = {
   is_done: boolean;
   date: string;
   created_at: string | null;
+  is_important: boolean | null;
+  is_urgent: boolean | null;
+  backlog_task_id?: string | null;
 };
 
 type DoneCategory = 'habit' | 'priority' | 'to-do';
@@ -82,6 +88,7 @@ export default function TodoPage() {
   const [doneCategoryFilter, setDoneCategoryFilter] = useState<'' | 'all' | DoneCategory>('');
   const [doneDateFilter, setDoneDateFilter] = useState<DoneDateFilter>('');
   const [doneSort, setDoneSort] = useState<DoneSort>('');
+  const [quadrantFilter, setQuadrantFilter] = useState<'' | 'all' | EisenhowerQuadrant>('');
 
   const todayString = useMemo(() => formatDate(new Date()), []);
 
@@ -116,7 +123,7 @@ export default function TodoPage() {
     try {
       const { data, error } = await supabase
         .from('habit_daily_todos')
-        .select('id, title, is_done, date, created_at')
+        .select('id, title, is_done, date, created_at, is_important, is_urgent, backlog_task_id')
         .eq('user_id', activeUserId)
         .eq('is_done', false)
         .order('date', { ascending: false })
@@ -164,10 +171,16 @@ export default function TodoPage() {
         }
       }
 
-      dedupedRows.sort((a, b) => {
-        if (a.date !== b.date) return b.date.localeCompare(a.date);
-        return (b.created_at ?? '').localeCompare(a.created_at ?? '');
-      });
+      dedupedRows.sort((a, b) =>
+        compareByQuadrant(
+          { is_important: a.is_important ?? null, is_urgent: a.is_urgent ?? null },
+          { is_important: b.is_important ?? null, is_urgent: b.is_urgent ?? null },
+          (x, y) => {
+            if (x.date !== y.date) return y.date.localeCompare(x.date);
+            return (y.created_at ?? '').localeCompare(x.created_at ?? '');
+          }
+        )
+      );
       setTodos(dedupedRows);
 
       const nextAssignDates: Record<string, string> = {};
@@ -324,6 +337,53 @@ export default function TodoPage() {
     }
   };
 
+  const handleTodoEisenhowerChange = async (todo: TodoItem, fields: { is_important: boolean | null; is_urgent: boolean | null }) => {
+    if (!userId) return;
+    try {
+      await updateTodoEisenhower(todo.id, userId, fields, todo.backlog_task_id);
+      setTodos((prev) =>
+        prev
+          .map((item) => (item.id === todo.id ? { ...item, ...fields } : item))
+          .sort((a, b) =>
+            compareByQuadrant(
+              { is_important: a.is_important ?? null, is_urgent: a.is_urgent ?? null },
+              { is_important: b.is_important ?? null, is_urgent: b.is_urgent ?? null },
+              (x, y) => {
+                if (x.date !== y.date) return y.date.localeCompare(x.date);
+                return (y.created_at ?? '').localeCompare(x.created_at ?? '');
+              }
+            )
+          )
+      );
+    } catch (err) {
+      console.error('Error updating task classification:', err);
+    }
+  };
+
+  const filteredTodos = useMemo(() => {
+    if (quadrantFilter === '' || quadrantFilter === 'all') return todos;
+    return todos.filter(
+      (todo) =>
+        getQuadrant({ is_important: todo.is_important ?? null, is_urgent: todo.is_urgent ?? null }) ===
+        quadrantFilter
+    );
+  }, [todos, quadrantFilter]);
+
+  const quadrantCounts = useMemo(() => {
+    const counts: Record<EisenhowerQuadrant, number> = {
+      q1: 0,
+      q2: 0,
+      q3: 0,
+      q4: 0,
+      unclassified: 0,
+    };
+    todos.forEach((todo) => {
+      const q = getQuadrant({ is_important: todo.is_important ?? null, is_urgent: todo.is_urgent ?? null });
+      counts[q] += 1;
+    });
+    return counts;
+  }, [todos]);
+
   const filteredDoneItems = useMemo(() => {
     const todayStart = startOfDay(new Date());
     const weekStart = new Date(todayStart);
@@ -431,10 +491,10 @@ export default function TodoPage() {
                 className="text-center text-2xl font-extrabold tracking-tight text-[#ffe066] sm:text-3xl"
                 style={{ textShadow: '0 0 16px rgba(255,157,0,0.35)' }}
               >
-                To-Do Backlog
+                Task Backlog
               </h1>
               <p className="mt-2 text-center text-sm text-slate-300">
-                Keep every unfinished task in one place, then assign each item to a specific day when you are ready.
+                Triage with Covey&apos;s matrix — mark Important and Urgent, then assign Q1/Q2 items to your daily plan.
               </p>
               <div className="mt-4 flex items-center justify-center gap-2">
                 <button
@@ -468,6 +528,39 @@ export default function TodoPage() {
               <section className={`${neon.panel} p-2.5`}>
                 {activeTab === 'todo' ? (
                   <>
+                    <div className="mb-3 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                      {(['q1', 'q2', 'q3', 'q4'] as const).map((q) => (
+                        <div
+                          key={q}
+                          className="rounded-md border border-[#ff9d00]/20 bg-black/25 px-2 py-1.5 text-center"
+                          title={QUADRANT_META[q].description}
+                        >
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                            {QUADRANT_META[q].shortLabel}
+                          </p>
+                          <p className="text-sm font-bold text-white">{quadrantCounts[q]}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Filter:</span>
+                      {(['all', 'q1', 'q2', 'q3', 'q4', 'unclassified'] as const).map((q) => (
+                        <button
+                          key={q}
+                          type="button"
+                          onClick={() => setQuadrantFilter(q === 'all' ? 'all' : q)}
+                          className={`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition ${
+                            quadrantFilter === q || (q === 'all' && (quadrantFilter === '' || quadrantFilter === 'all'))
+                              ? 'border-[#ff9d00]/70 bg-[#ff9d00]/20 text-[#ffe066]'
+                              : 'border-[#ff9d00]/30 bg-black/20 text-slate-400 hover:bg-[#ff9d00]/10'
+                          }`}
+                        >
+                          {q === 'all' ? 'All' : QUADRANT_META[q].shortLabel}
+                        </button>
+                      ))}
+                    </div>
+
                     <div className="mb-2 flex items-start gap-1.5">
                       <textarea
                         value={newTodoTitle}
@@ -491,37 +584,58 @@ export default function TodoPage() {
                       </button>
                     </div>
 
-                    {todos.length === 0 ? (
+                    {filteredTodos.length === 0 ? (
                       <p className="rounded-lg border border-dashed border-[#ff9d00]/35 bg-black/20 px-4 py-6 text-center text-sm text-slate-300">
-                        Nothing pending right now. Add new items above to keep your task brain clear.
+                        {todos.length === 0
+                          ? 'Nothing pending right now. Add new items above to keep your task brain clear.'
+                          : 'No tasks match this quadrant filter.'}
                       </p>
                     ) : (
                       <ol className="space-y-1 min-w-0">
-                        {todos.map((todo, index) => (
+                        {filteredTodos.map((todo, index) => (
                           <li key={todo.id} className="space-y-1 rounded-md border border-[#ff9d00]/20 bg-[#03060f]/70 p-1.5">
-                            <div className="flex min-w-0 items-center gap-1">
-                              <span className="shrink-0 text-[11px] font-semibold text-slate-300">{index + 1}.</span>
+                            <div className="flex min-w-0 items-start gap-1">
+                              <span className="mt-1 shrink-0 text-[11px] font-semibold text-slate-300">{index + 1}.</span>
                               <input
                                 type="checkbox"
                                 checked={todo.is_done}
                                 onChange={() => void handleToggleTodo(todo)}
-                                className="h-3.5 w-3.5 shrink-0 rounded border-[#ff9d00]/50 text-[#ff9d00] focus:ring-[#ff9d00]/40"
+                                className="mt-1 h-3.5 w-3.5 shrink-0 rounded border-[#ff9d00]/50 text-[#ff9d00] focus:ring-[#ff9d00]/40"
                               />
-                              <textarea
-                                value={todo.title}
-                                onChange={(e) => {
-                                  const nextTitle = e.target.value;
-                                  setTodos((prev) => prev.map((item) => (item.id === todo.id ? { ...item, title: nextTitle } : item)));
-                                }}
-                                onBlur={(e) => void handleTitleBlur(todo.id, e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
-                                rows={1}
-                                className="min-h-[1.8rem] flex-1 resize-none break-words overflow-y-auto rounded-md border border-[#ff9d00]/25 bg-[#03060f]/90 px-2 py-1 text-[11px] text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
-                              />
+                              <div className="min-w-0 flex-1 space-y-1">
+                                <textarea
+                                  value={todo.title}
+                                  onChange={(e) => {
+                                    const nextTitle = e.target.value;
+                                    setTodos((prev) => prev.map((item) => (item.id === todo.id ? { ...item, title: nextTitle } : item)));
+                                  }}
+                                  onBlur={(e) => void handleTitleBlur(todo.id, e.target.value)}
+                                  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
+                                  rows={1}
+                                  className="min-h-[1.8rem] w-full resize-none break-words overflow-y-auto rounded-md border border-[#ff9d00]/25 bg-[#03060f]/90 px-2 py-1 text-[11px] text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
+                                />
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <EisenhowerToggles
+                                    compact
+                                    value={{
+                                      is_important: todo.is_important ?? null,
+                                      is_urgent: todo.is_urgent ?? null,
+                                    }}
+                                    onChange={(fields) => void handleTodoEisenhowerChange(todo, fields)}
+                                  />
+                                  <QuadrantBadge
+                                    value={{
+                                      is_important: todo.is_important ?? null,
+                                      is_urgent: todo.is_urgent ?? null,
+                                    }}
+                                  />
+                                  <span className="text-[9px] text-slate-500">Due: {todo.date}</span>
+                                </div>
+                              </div>
                               <button
                                 type="button"
                                 onClick={() => setAssignOpenById((prev) => ({ ...prev, [todo.id]: !prev[todo.id] }))}
-                                className="rounded-md border border-[#ff9d00]/45 bg-black/30 px-1.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-[#ffe066] transition hover:bg-[#ff9d00]/15"
+                                className="shrink-0 rounded-md border border-[#ff9d00]/45 bg-black/30 px-1.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-[#ffe066] transition hover:bg-[#ff9d00]/15"
                               >
                                 Assign
                               </button>

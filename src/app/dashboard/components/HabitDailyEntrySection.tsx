@@ -5,7 +5,9 @@ import Link from 'next/link';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate, type Category, type TimeOfDay, type HabitStatus } from '@/lib/habitHelpers';
 import { computeDailyScoreSnapshot } from '@/lib/habit/computeDailyScores';
-import { syncBacklogCompletion, syncBacklogTitle } from '@/lib/habitBacklog';
+import { syncBacklogCompletion, syncBacklogTitle, updatePriorityEisenhower, updateTodoEisenhower } from '@/lib/habitBacklog';
+import { compareByQuadrant, type EisenhowerFields } from '@/lib/habit/eisenhower';
+import { EisenhowerToggles } from '@/components/habit/EisenhowerToggles';
 import { neon } from '../neonTheme';
 import CollapsiblePanel from './CollapsiblePanel';
 
@@ -37,6 +39,8 @@ type Priority = {
     completed_at: string | null;
     sort_order: number | null;
     backlog_task_id?: string | null;
+    is_important?: boolean | null;
+    is_urgent?: boolean | null;
 };
 
 type Todo = {
@@ -52,6 +56,8 @@ type Todo = {
     start_time?: string | null;
     end_time?: string | null;
     backlog_task_id?: string | null;
+    is_important?: boolean | null;
+    is_urgent?: boolean | null;
 };
 
 type DailyScore = {
@@ -135,8 +141,12 @@ export default function HabitDailyEntrySection({
 
     const sortedPrioritiesForSlots = useMemo(
         () =>
-            [...priorities].sort(
-                (a, b) => (a.sort_order ?? 999) - (b.sort_order ?? 999)
+            [...priorities].sort((a, b) =>
+                compareByQuadrant(
+                    { is_important: a.is_important ?? null, is_urgent: a.is_urgent ?? null },
+                    { is_important: b.is_important ?? null, is_urgent: b.is_urgent ?? null },
+                    () => (a.sort_order ?? 999) - (b.sort_order ?? 999)
+                )
             ),
         [priorities]
     );
@@ -258,6 +268,12 @@ export default function HabitDailyEntrySection({
                 return (t as { start_time?: string }).start_time ?? '';
             };
             const sortedTodos = [...(todosData || [])].sort((a, b) => {
+                const quadrantCompare = compareByQuadrant(
+                    { is_important: a.is_important ?? null, is_urgent: a.is_urgent ?? null },
+                    { is_important: b.is_important ?? null, is_urgent: b.is_urgent ?? null },
+                    () => 0
+                );
+                if (quadrantCompare !== 0) return quadrantCompare;
                 const aTime = getTodoSortTime(a);
                 const bTime = getTodoSortTime(b);
                 if (aTime && bTime) return aTime.localeCompare(bTime);
@@ -582,6 +598,30 @@ export default function HabitDailyEntrySection({
         }
     };
 
+    const handlePriorityEisenhowerChange = async (priority: Priority, fields: EisenhowerFields) => {
+        if (!userId) return;
+        try {
+            await updatePriorityEisenhower(priority.id, userId, fields, priority.backlog_task_id);
+            setPriorities((prev) =>
+                prev.map((p) => (p.id === priority.id ? { ...p, ...fields } : p))
+            );
+        } catch (error) {
+            console.error('Error updating priority classification:', error);
+        }
+    };
+
+    const handleTodoEisenhowerChange = async (todo: Todo, fields: EisenhowerFields) => {
+        if (!userId) return;
+        try {
+            await updateTodoEisenhower(todo.id, userId, fields, todo.backlog_task_id);
+            setTodos((prev) =>
+                prev.map((t) => (t.id === todo.id ? { ...t, ...fields } : t))
+            );
+        } catch (error) {
+            console.error('Error updating todo classification:', error);
+        }
+    };
+
     const handleToggleTodo = async (id: string, isDone: boolean) => {
         if (!userId) return;
 
@@ -751,6 +791,13 @@ export default function HabitDailyEntrySection({
             </button>
             <CollapsiblePanel open={dailyPlanOpen}>
             <div className="min-w-0 space-y-6 overflow-hidden px-4 pb-4">
+            <p className="text-xs text-slate-400">
+                Mark tasks <span className="text-emerald-300">Imp</span> (important) or{' '}
+                <span className="text-red-300">Urg</span> (urgent) to sort by Covey&apos;s matrix — Q1 first, then Q2.{' '}
+                <Link href="/todo" className="text-[#ffe066] underline-offset-2 hover:underline">
+                    Triage backlog
+                </Link>
+            </p>
             {/* Priorities - collapsible */}
             <div className={`relative min-w-0 overflow-hidden ${neon.section}`}>
                 <button
@@ -788,21 +835,32 @@ export default function HabitDailyEntrySection({
                                 ) : (
                                     <span className="w-5 shrink-0 mt-2.5" aria-hidden />
                                 )}
-                                <textarea
-                                    value={draftPriorities[slotIndex] ?? ''}
-                                    onChange={(e) =>
-                                        setDraftPriorities((prev) => {
-                                            const next = [...prev];
-                                            next[slotIndex] = e.target.value;
-                                            return next;
-                                        })
-                                    }
-                                    onBlur={(e) => handlePrioritySlotBlur(slotIndex, e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
-                                    placeholder={isAddRow ? 'Add priority' : `Priority ${slotIndex + 1}`}
-                                    rows={2}
-                                    className={`min-h-[2.5rem] flex-1 resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${priority?.completed ? 'text-slate-500 line-through' : ''}`}
-                                />
+                                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                                    <textarea
+                                        value={draftPriorities[slotIndex] ?? ''}
+                                        onChange={(e) =>
+                                            setDraftPriorities((prev) => {
+                                                const next = [...prev];
+                                                next[slotIndex] = e.target.value;
+                                                return next;
+                                            })
+                                        }
+                                        onBlur={(e) => handlePrioritySlotBlur(slotIndex, e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
+                                        placeholder={isAddRow ? 'Add priority' : `Priority ${slotIndex + 1}`}
+                                        rows={2}
+                                        className={`min-h-[2.5rem] w-full resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${priority?.completed ? 'text-slate-500 line-through' : ''}`}
+                                    />
+                                    {priority ? (
+                                        <EisenhowerToggles
+                                            value={{
+                                                is_important: priority.is_important ?? null,
+                                                is_urgent: priority.is_urgent ?? null,
+                                            }}
+                                            onChange={(fields) => void handlePriorityEisenhowerChange(priority, fields)}
+                                        />
+                                    ) : null}
+                                </div>
                             </li>
                         );
                     })}
@@ -848,21 +906,32 @@ export default function HabitDailyEntrySection({
                                 ) : (
                                     <span className="w-5 shrink-0 mt-2.5" aria-hidden />
                                 )}
-                                <textarea
-                                    value={draftTodos[slotIndex] ?? ''}
-                                    onChange={(e) =>
-                                        setDraftTodos((prev) => {
-                                            const next = [...prev];
-                                            next[slotIndex] = e.target.value;
-                                            return next;
-                                        })
-                                    }
-                                    onBlur={(e) => handleTodoSlotBlur(slotIndex, e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
-                                    placeholder={isAddRow ? 'Add to-do' : `To-do ${slotIndex + 1}`}
-                                    rows={2}
-                                    className={`min-h-[2.5rem] flex-1 resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${todo?.is_done ? 'text-slate-500 line-through' : ''}`}
-                                />
+                                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                                    <textarea
+                                        value={draftTodos[slotIndex] ?? ''}
+                                        onChange={(e) =>
+                                            setDraftTodos((prev) => {
+                                                const next = [...prev];
+                                                next[slotIndex] = e.target.value;
+                                                return next;
+                                            })
+                                        }
+                                        onBlur={(e) => handleTodoSlotBlur(slotIndex, e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
+                                        placeholder={isAddRow ? 'Add to-do' : `To-do ${slotIndex + 1}`}
+                                        rows={2}
+                                        className={`min-h-[2.5rem] w-full resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${todo?.is_done ? 'text-slate-500 line-through' : ''}`}
+                                    />
+                                    {todo ? (
+                                        <EisenhowerToggles
+                                            value={{
+                                                is_important: todo.is_important ?? null,
+                                                is_urgent: todo.is_urgent ?? null,
+                                            }}
+                                            onChange={(fields) => void handleTodoEisenhowerChange(todo, fields)}
+                                        />
+                                    ) : null}
+                                </div>
                             </li>
                         );
                     })}
