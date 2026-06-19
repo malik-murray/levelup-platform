@@ -480,6 +480,8 @@ export default function HabitDailyEntrySection({
                         text: value.trim(),
                         completed: false,
                         sort_order: slotIndex,
+                        is_important: false,
+                        is_urgent: false,
                     });
                 }
             } else if (priority) {
@@ -532,6 +534,8 @@ export default function HabitDailyEntrySection({
                         start_time,
                         end_time,
                         is_done: false,
+                        is_important: false,
+                        is_urgent: false,
                     });
                 }
             } else if (todo) {

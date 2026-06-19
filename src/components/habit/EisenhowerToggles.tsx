@@ -1,7 +1,12 @@
 'use client';
 
 import type { EisenhowerFields } from '@/lib/habit/eisenhower';
-import { getQuadrant, quadrantBadgeClasses, QUADRANT_META } from '@/lib/habit/eisenhower';
+import {
+    getQuadrant,
+    normalizeEisenhowerFields,
+    quadrantBadgeClasses,
+    QUADRANT_META,
+} from '@/lib/habit/eisenhower';
 
 type EisenhowerTogglesProps = {
     value: EisenhowerFields;
@@ -11,22 +16,23 @@ type EisenhowerTogglesProps = {
 };
 
 export function EisenhowerToggles({ value, onChange, compact = false, disabled = false }: EisenhowerTogglesProps) {
+    const normalized = normalizeEisenhowerFields(value);
     const quadrant = getQuadrant(value);
     const meta = QUADRANT_META[quadrant];
 
     const toggleImportant = () => {
         if (disabled) return;
         onChange({
-            ...value,
-            is_important: value.is_important === true ? false : true,
+            is_important: !normalized.is_important,
+            is_urgent: normalized.is_urgent,
         });
     };
 
     const toggleUrgent = () => {
         if (disabled) return;
         onChange({
-            ...value,
-            is_urgent: value.is_urgent === true ? false : true,
+            is_important: normalized.is_important,
+            is_urgent: !normalized.is_urgent,
         });
     };
 
@@ -44,9 +50,9 @@ export function EisenhowerToggles({ value, onChange, compact = false, disabled =
                 type="button"
                 onClick={toggleImportant}
                 disabled={disabled}
-                aria-pressed={value.is_important === true}
+                aria-pressed={normalized.is_important}
                 title="Important — moves toward Q1 or Q2"
-                className={`${chipBase} ${chipSize} ${value.is_important === true ? activeImportant : idleImportant}`}
+                className={`${chipBase} ${chipSize} ${normalized.is_important ? activeImportant : idleImportant}`}
             >
                 Imp
             </button>
@@ -54,9 +60,9 @@ export function EisenhowerToggles({ value, onChange, compact = false, disabled =
                 type="button"
                 onClick={toggleUrgent}
                 disabled={disabled}
-                aria-pressed={value.is_urgent === true}
+                aria-pressed={normalized.is_urgent}
                 title="Urgent — moves toward Q1 or Q3"
-                className={`${chipBase} ${chipSize} ${value.is_urgent === true ? activeUrgent : idleUrgent}`}
+                className={`${chipBase} ${chipSize} ${normalized.is_urgent ? activeUrgent : idleUrgent}`}
             >
                 Urg
             </button>

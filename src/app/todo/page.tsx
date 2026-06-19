@@ -274,6 +274,8 @@ export default function TodoPage() {
           title: trimmed,
           date: todayString,
           is_done: false,
+          is_important: false,
+          is_urgent: false,
         })
         .select('id, title, is_done, date, created_at, is_important, is_urgent, backlog_task_id')
         .single();
@@ -567,7 +569,7 @@ export default function TodoPage() {
 
                     <div className="mb-2 flex flex-wrap items-center gap-1.5">
                       <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Filter:</span>
-                      {(['all', 'q1', 'q2', 'q3', 'q4', 'unclassified'] as const).map((q) => (
+                      {(['all', 'q1', 'q2', 'q3', 'q4'] as const).map((q) => (
                         <button
                           key={q}
                           type="button"

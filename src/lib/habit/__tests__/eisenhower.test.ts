@@ -11,15 +11,16 @@ describe('eisenhower', () => {
         expect(getQuadrant({ is_important: true, is_urgent: false })).toBe('q2');
         expect(getQuadrant({ is_important: false, is_urgent: true })).toBe('q3');
         expect(getQuadrant({ is_important: false, is_urgent: false })).toBe('q4');
-        expect(getQuadrant({ is_important: null, is_urgent: true })).toBe('unclassified');
+        expect(getQuadrant({ is_important: null, is_urgent: null })).toBe('q4');
+        expect(getQuadrant({ is_important: null, is_urgent: true })).toBe('q3');
     });
 
-    it('sorts Q1 before Q2 before unclassified', () => {
+    it('sorts Q1 before Q2 before Q4', () => {
         const q1 = { is_important: true, is_urgent: true };
         const q2 = { is_important: true, is_urgent: false };
-        const unknown = { is_important: null, is_urgent: null };
+        const q4 = { is_important: null, is_urgent: null };
         expect(getQuadrantSortOrder(q1)).toBeLessThan(getQuadrantSortOrder(q2));
-        expect(getQuadrantSortOrder(q2)).toBeLessThan(getQuadrantSortOrder(unknown));
+        expect(getQuadrantSortOrder(q2)).toBeLessThan(getQuadrantSortOrder(q4));
     });
 
     it('compareByQuadrant uses secondary sort when quadrants match', () => {
@@ -45,6 +46,6 @@ describe('eisenhower', () => {
                 due_date: '2026-06-25',
                 today: '2026-06-19',
             })
-        ).toEqual({ is_important: null, is_urgent: false });
+        ).toEqual({ is_important: false, is_urgent: false });
     });
 });

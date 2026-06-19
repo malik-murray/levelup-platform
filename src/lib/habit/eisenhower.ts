@@ -41,9 +41,18 @@ export const QUADRANT_META: Record<
     },
 };
 
+export function normalizeEisenhowerFields(fields: EisenhowerFields): {
+    is_important: boolean;
+    is_urgent: boolean;
+} {
+    return {
+        is_important: fields.is_important ?? false,
+        is_urgent: fields.is_urgent ?? false,
+    };
+}
+
 export function getQuadrant(fields: EisenhowerFields): EisenhowerQuadrant {
-    const { is_important, is_urgent } = fields;
-    if (is_important === null || is_urgent === null) return 'unclassified';
+    const { is_important, is_urgent } = normalizeEisenhowerFields(fields);
     if (is_important && is_urgent) return 'q1';
     if (is_important && !is_urgent) return 'q2';
     if (!is_important && is_urgent) return 'q3';
@@ -75,8 +84,8 @@ export function suggestClassification(input: {
     const dueOrAssigned = input.due_date ?? input.assigned_date;
     const isUrgent = dueOrAssigned ? dueOrAssigned <= today : false;
     return {
-        is_important: isImportant ? true : null,
-        is_urgent: isUrgent ? true : dueOrAssigned ? false : null,
+        is_important: isImportant,
+        is_urgent: isUrgent,
     };
 }
 
