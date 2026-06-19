@@ -40,6 +40,14 @@ type DoneItem = {
 
 const normalizeTodoTitle = (title: string) => title.trim().replace(/\s+/g, ' ').toLowerCase();
 
+const sortTodoItems = (items: TodoItem[]) =>
+  [...items].sort((a, b) =>
+    compareByQuadrant(a, b, (x, y) => {
+      if (x.date !== y.date) return y.date.localeCompare(x.date);
+      return (y.created_at ?? '').localeCompare(x.created_at ?? '');
+    })
+  );
+
 const startOfDay = (value: Date) => {
   const next = new Date(value);
   next.setHours(0, 0, 0, 0);
@@ -119,7 +127,6 @@ export default function TodoPage() {
   }, [userId]);
 
   const loadData = async (activeUserId: string) => {
-    setLoading(true);
     try {
       const { data, error } = await supabase
         .from('habit_daily_todos')
@@ -171,13 +178,7 @@ export default function TodoPage() {
         }
       }
 
-      dedupedRows.sort((a, b) =>
-        compareByQuadrant(a, b, (x, y) => {
-          if (x.date !== y.date) return y.date.localeCompare(x.date);
-          return (y.created_at ?? '').localeCompare(x.created_at ?? '');
-        })
-      );
-      setTodos(dedupedRows);
+      setTodos(sortTodoItems(dedupedRows));
 
       const nextAssignDates: Record<string, string> = {};
       dedupedRows.forEach((todo) => {
@@ -266,15 +267,22 @@ export default function TodoPage() {
     }
 
     try {
-      const { error } = await supabase.from('habit_daily_todos').insert({
-        user_id: userId,
-        title: trimmed,
-        date: todayString,
-        is_done: false,
-      });
+      const { data, error } = await supabase
+        .from('habit_daily_todos')
+        .insert({
+          user_id: userId,
+          title: trimmed,
+          date: todayString,
+          is_done: false,
+        })
+        .select('id, title, is_done, date, created_at, is_important, is_urgent, backlog_task_id')
+        .single();
       if (error) throw error;
+      if (data) {
+        setTodos((prev) => [...prev, data]);
+        setAssignDateById((prev) => ({ ...prev, [data.id]: data.date }));
+      }
       setNewTodoTitle('');
-      await loadData(userId);
     } catch (err) {
       console.error('Error adding to-do:', err);
     }
@@ -290,7 +298,17 @@ export default function TodoPage() {
         .eq('id', todo.id)
         .eq('user_id', userId);
       if (error) throw error;
-      await loadData(userId);
+      setTodos((prev) => prev.filter((item) => item.id !== todo.id));
+      setDoneItems((prev) => [
+        {
+          id: `todo-${todo.id}`,
+          title: todo.title,
+          category: 'to-do',
+          date: todo.date,
+          completed_at: completedAt,
+        },
+        ...prev,
+      ]);
     } catch (err) {
       console.error('Error marking to-do complete:', err);
     }
@@ -314,7 +332,7 @@ export default function TodoPage() {
           .eq('id', todoId)
           .eq('user_id', userId);
         if (error) throw error;
-        await loadData(userId);
+        setTodos((prev) => prev.filter((item) => item.id !== todoId));
       } catch (err) {
         console.error('Error removing duplicate after rename:', err);
       }
@@ -333,22 +351,34 @@ export default function TodoPage() {
     }
   };
 
-  const handleTodoEisenhowerChange = async (todo: TodoItem, fields: { is_important: boolean | null; is_urgent: boolean | null }) => {
+  const handleTodoEisenhowerChange = async (
+    todoId: string,
+    fields: { is_important: boolean | null; is_urgent: boolean | null }
+  ) => {
     if (!userId) return;
+
+    const previous = todos.find((item) => item.id === todoId);
+    if (!previous) return;
+
+    setTodos((prev) =>
+      prev.map((item) => (item.id === todoId ? { ...item, ...fields } : item))
+    );
+
     try {
-      await updateTodoEisenhower(todo.id, userId, fields, todo.backlog_task_id);
-      setTodos((prev) =>
-        prev
-          .map((item) => (item.id === todo.id ? { ...item, ...fields } : item))
-          .sort((a, b) =>
-            compareByQuadrant(a, b, (x, y) => {
-              if (x.date !== y.date) return y.date.localeCompare(x.date);
-              return (y.created_at ?? '').localeCompare(x.created_at ?? '');
-            })
-          )
-      );
+      await updateTodoEisenhower(todoId, userId, fields, previous.backlog_task_id);
     } catch (err) {
       console.error('Error updating task classification:', err);
+      setTodos((prev) =>
+        prev.map((item) =>
+          item.id === todoId
+            ? {
+                ...item,
+                is_important: previous.is_important,
+                is_urgent: previous.is_urgent,
+              }
+            : item
+        )
+      );
     }
   };
 
@@ -613,7 +643,7 @@ export default function TodoPage() {
                                       is_important: todo.is_important ?? null,
                                       is_urgent: todo.is_urgent ?? null,
                                     }}
-                                    onChange={(fields) => void handleTodoEisenhowerChange(todo, fields)}
+                                    onChange={(fields) => void handleTodoEisenhowerChange(todo.id, fields)}
                                   />
                                   <QuadrantBadge
                                     value={{
