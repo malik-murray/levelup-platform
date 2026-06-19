@@ -234,7 +234,7 @@ export default function HabitDailyEntrySection({
             // Load todos (including weekly links and optional time)
             const { data: todosData } = await supabase
                 .from('habit_daily_todos')
-                .select('id, title, category, is_done, date, completed_at, weekly_item_day_id, weekly_event_id, created_at, start_time, end_time, backlog_task_id')
+                .select('id, title, category, is_done, date, completed_at, weekly_item_day_id, weekly_event_id, created_at, start_time, end_time, backlog_task_id, is_important, is_urgent')
                 .eq('user_id', userId)
                 .eq('date', dateStr)
                 .order('created_at');
