@@ -1,5 +1,61 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from '@auth/supabaseClient';
 import type { EisenhowerFields } from '@/lib/habit/eisenhower';
+import { formatDate } from '@/lib/habitHelpers';
+
+type OrphanedBacklogTask = {
+    id: string;
+    title: string;
+    assigned_date: string | null;
+    is_important: boolean | null;
+    is_urgent: boolean | null;
+};
+
+export async function repairOrphanedBacklogTasks(
+    client: SupabaseClient,
+    userId: string,
+    tasks: OrphanedBacklogTask[]
+) {
+    if (tasks.length === 0) return;
+
+    const today = formatDate(new Date());
+
+    for (const task of tasks) {
+        const { data: todo, error: insertError } = await client
+            .from('habit_daily_todos')
+            .insert({
+                user_id: userId,
+                title: task.title,
+                date: task.assigned_date ?? today,
+                is_done: false,
+                is_important: task.is_important ?? false,
+                is_urgent: task.is_urgent ?? false,
+                backlog_task_id: task.id,
+            })
+            .select('id')
+            .single();
+        if (insertError) throw insertError;
+
+        const { data: backlogTags, error: tagsError } = await client
+            .from('habit_backlog_task_categories')
+            .select('category_id')
+            .eq('user_id', userId)
+            .eq('backlog_task_id', task.id);
+        if (tagsError) throw tagsError;
+
+        const categoryIds = (backlogTags ?? []).map((row) => row.category_id);
+        if (categoryIds.length > 0 && todo?.id) {
+            const { error: linkError } = await client.from('habit_daily_todo_categories').insert(
+                categoryIds.map((categoryId) => ({
+                    user_id: userId,
+                    todo_id: todo.id,
+                    category_id: categoryId,
+                }))
+            );
+            if (linkError) throw linkError;
+        }
+    }
+}
 
 export async function syncBacklogCompletion(backlogTaskId: string, completed: boolean) {
     const completedAt = completed ? new Date().toISOString() : null;

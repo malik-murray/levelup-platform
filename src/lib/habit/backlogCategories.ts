@@ -35,6 +35,29 @@ export async function loadBacklogCategories(
     return [...(inserted ?? [])].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+export async function loadBacklogTaskCategoryIdsByTaskId(
+    supabase: SupabaseClient,
+    userId: string,
+    backlogTaskIds: string[]
+): Promise<Record<string, string[]>> {
+    if (backlogTaskIds.length === 0) return {};
+
+    const { data, error } = await supabase
+        .from('habit_backlog_task_categories')
+        .select('backlog_task_id, category_id')
+        .eq('user_id', userId)
+        .in('backlog_task_id', backlogTaskIds);
+
+    if (error) throw error;
+
+    const map: Record<string, string[]> = {};
+    (data ?? []).forEach((row) => {
+        if (!map[row.backlog_task_id]) map[row.backlog_task_id] = [];
+        map[row.backlog_task_id].push(row.category_id);
+    });
+    return map;
+}
+
 export async function loadTodoCategoryIdsByTodoId(
     supabase: SupabaseClient,
     userId: string,

@@ -9,7 +9,7 @@ import { neon } from '@/app/dashboard/neonTheme';
 import { formatDate } from '@/lib/habitHelpers';
 import { compareByQuadrant, getQuadrant, QUADRANT_META, quadrantBadgeClasses, type EisenhowerQuadrant } from '@/lib/habit/eisenhower';
 import { EisenhowerToggles, QuadrantBadge } from '@/components/habit/EisenhowerToggles';
-import { setTodoCategories, updateTodoEisenhower } from '@/lib/habitBacklog';
+import { repairOrphanedBacklogTasks, setTodoCategories, updateTodoEisenhower } from '@/lib/habitBacklog';
 import { loadBacklogCategories, loadTodoCategoryIdsByTodoId, type BacklogCategory } from '@/lib/habit/backlogCategories';
 import { BacklogCategoryPicker } from '@/components/habit/BacklogCategoryPicker';
 
@@ -42,6 +42,32 @@ type DoneItem = {
 };
 
 const normalizeTodoTitle = (title: string) => title.trim().replace(/\s+/g, ' ').toLowerCase();
+
+const dedupeOpenTodos = (rows: TodoItem[]): TodoItem[] => {
+  const byBacklogTaskId = new Map<string, TodoItem>();
+  const withoutBacklog: TodoItem[] = [];
+
+  rows.forEach((todo) => {
+    if (!todo.backlog_task_id) {
+      withoutBacklog.push(todo);
+      return;
+    }
+
+    const existing = byBacklogTaskId.get(todo.backlog_task_id);
+    if (!existing) {
+      byBacklogTaskId.set(todo.backlog_task_id, todo);
+      return;
+    }
+
+    const existingCreated = existing.created_at ?? '';
+    const nextCreated = todo.created_at ?? '';
+    if (nextCreated.localeCompare(existingCreated) > 0) {
+      byBacklogTaskId.set(todo.backlog_task_id, todo);
+    }
+  });
+
+  return [...withoutBacklog, ...byBacklogTaskId.values()];
+};
 
 const sortTodoItems = (items: TodoItem[]) =>
   [...items].sort((a, b) =>
@@ -136,7 +162,7 @@ export default function TodoPage() {
 
   const loadData = async (activeUserId: string) => {
     try {
-      const [categoriesResult, todosResult] = await Promise.all([
+      const [categoriesResult, todosResult, backlogResult] = await Promise.all([
         loadBacklogCategories(supabase, activeUserId),
         supabase
           .from('habit_daily_todos')
@@ -145,53 +171,41 @@ export default function TodoPage() {
           .eq('is_done', false)
           .order('date', { ascending: false })
           .order('created_at', { ascending: false }),
+        supabase
+          .from('habit_backlog_tasks')
+          .select('id, title, assigned_date, created_at, is_important, is_urgent')
+          .eq('user_id', activeUserId)
+          .is('completed_at', null)
+          .or('daily_item_type.eq.todo,daily_item_type.is.null'),
       ]);
 
       setCategories(categoriesResult);
 
-      const { data, error } = todosResult;
+      if (todosResult.error) throw todosResult.error;
+      if (backlogResult.error) throw backlogResult.error;
 
-      if (error) {
-        throw error;
-      }
+      let rows = todosResult.data ?? [];
+      const backlogTasks = backlogResult.data ?? [];
+      const linkedBacklogIds = new Set(
+        rows.map((todo) => todo.backlog_task_id).filter((id): id is string => Boolean(id))
+      );
+      const orphanedBacklogTasks = backlogTasks.filter((task) => !linkedBacklogIds.has(task.id));
 
-      const rows = data ?? [];
+      if (orphanedBacklogTasks.length > 0) {
+        await repairOrphanedBacklogTasks(supabase, activeUserId, orphanedBacklogTasks);
 
-      // Keep one unfinished row per normalized title, remove accidental duplicates.
-      const groupedByTitle = new Map<string, TodoItem[]>();
-      rows.forEach((todo) => {
-        const key = normalizeTodoTitle(todo.title);
-        if (!groupedByTitle.has(key)) groupedByTitle.set(key, []);
-        groupedByTitle.get(key)!.push(todo);
-      });
-
-      const dedupedRows: TodoItem[] = [];
-      const duplicateIdsToDelete: string[] = [];
-
-      groupedByTitle.forEach((group) => {
-        const sortedGroup = [...group].sort((a, b) => {
-          const aCreated = a.created_at ?? '';
-          const bCreated = b.created_at ?? '';
-          if (aCreated !== bCreated) return aCreated.localeCompare(bCreated);
-          if (a.date !== b.date) return a.date.localeCompare(b.date);
-          return a.id.localeCompare(b.id);
-        });
-
-        const canonical = sortedGroup[0];
-        dedupedRows.push({ ...canonical, category_ids: [] });
-        sortedGroup.slice(1).forEach((dupe) => duplicateIdsToDelete.push(dupe.id));
-      });
-
-      if (duplicateIdsToDelete.length > 0) {
-        const { error: deleteError } = await supabase
+        const { data: repairedRows, error: repairedError } = await supabase
           .from('habit_daily_todos')
-          .delete()
+          .select('id, title, is_done, date, created_at, is_important, is_urgent, backlog_task_id')
           .eq('user_id', activeUserId)
-          .in('id', duplicateIdsToDelete);
-        if (deleteError) {
-          console.error('Error deleting duplicate to-dos:', deleteError);
-        }
+          .eq('is_done', false)
+          .order('date', { ascending: false })
+          .order('created_at', { ascending: false });
+        if (repairedError) throw repairedError;
+        rows = repairedRows ?? [];
       }
+
+      const dedupedRows = dedupeOpenTodos(rows.map((todo) => ({ ...todo, category_ids: [] })));
 
       const categoryIdsByTodoId = await loadTodoCategoryIdsByTodoId(
         supabase,
@@ -359,17 +373,6 @@ export default function TodoPage() {
     const normalized = normalizeTodoTitle(trimmed);
     const duplicate = todos.find((todo) => todo.id !== todoId && normalizeTodoTitle(todo.title) === normalized);
     if (duplicate) {
-      try {
-        const { error } = await supabase
-          .from('habit_daily_todos')
-          .delete()
-          .eq('id', todoId)
-          .eq('user_id', userId);
-        if (error) throw error;
-        setTodos((prev) => prev.filter((item) => item.id !== todoId));
-      } catch (err) {
-        console.error('Error removing duplicate after rename:', err);
-      }
       return;
     }
 
