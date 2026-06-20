@@ -281,7 +281,7 @@ export default function TodoPage() {
         .single();
       if (error) throw error;
       if (data) {
-        setTodos((prev) => [...prev, data]);
+        setTodos((prev) => [data, ...prev]);
         setAssignDateById((prev) => ({ ...prev, [data.id]: data.date }));
       }
       setNewTodoTitle('');
