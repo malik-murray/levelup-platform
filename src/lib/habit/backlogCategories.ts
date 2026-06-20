@@ -35,10 +35,31 @@ export async function loadBacklogCategories(
     return [...(inserted ?? [])].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function getCategoryName(
-    categories: BacklogCategory[],
-    categoryId: string | null | undefined
-): string | null {
-    if (!categoryId) return null;
-    return categories.find((category) => category.id === categoryId)?.name ?? null;
+export async function loadTodoCategoryIdsByTodoId(
+    supabase: SupabaseClient,
+    userId: string,
+    todoIds: string[]
+): Promise<Record<string, string[]>> {
+    if (todoIds.length === 0) return {};
+
+    const { data, error } = await supabase
+        .from('habit_daily_todo_categories')
+        .select('todo_id, category_id')
+        .eq('user_id', userId)
+        .in('todo_id', todoIds);
+
+    if (error) throw error;
+
+    const map: Record<string, string[]> = {};
+    (data ?? []).forEach((row) => {
+        if (!map[row.todo_id]) map[row.todo_id] = [];
+        map[row.todo_id].push(row.category_id);
+    });
+    return map;
+}
+
+export function getCategoryNames(categories: BacklogCategory[], categoryIds: string[]): string[] {
+    return categoryIds
+        .map((id) => categories.find((category) => category.id === id)?.name)
+        .filter(Boolean) as string[];
 }
