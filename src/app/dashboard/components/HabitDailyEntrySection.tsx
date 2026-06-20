@@ -8,6 +8,7 @@ import { computeDailyScoreSnapshot } from '@/lib/habit/computeDailyScores';
 import { syncBacklogCompletion, syncBacklogTitle, updatePriorityEisenhower, updateTodoEisenhower } from '@/lib/habitBacklog';
 import { compareByQuadrant, type EisenhowerFields } from '@/lib/habit/eisenhower';
 import { EisenhowerToggles } from '@/components/habit/EisenhowerToggles';
+import { SwipeToDeleteRow } from '@/components/SwipeToDeleteRow';
 import { neon } from '../neonTheme';
 import CollapsiblePanel from './CollapsiblePanel';
 
@@ -503,6 +504,21 @@ export default function HabitDailyEntrySection({
         return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:00`;
     };
 
+    const handleDeleteTodo = async (todo: Todo) => {
+        if (!userId) return;
+
+        const previousTodos = todos;
+        setTodos((prev) => prev.filter((t) => t.id !== todo.id));
+
+        try {
+            await supabase.from('habit_daily_todos').delete().eq('id', todo.id).eq('user_id', userId);
+            loadData(true);
+        } catch (error) {
+            console.error('Error deleting todo:', error);
+            setTodos(previousTodos);
+        }
+    };
+
     const handleTodoSlotBlur = async (slotIndex: number, value: string) => {
         if (!userId) return;
         const dateStr = formatDate(selectedDate);
@@ -898,8 +914,9 @@ export default function HabitDailyEntrySection({
                     {Array.from({ length: todos.length + 1 }, (_, slotIndex) => {
                         const todo = todos[slotIndex];
                         const isAddRow = slotIndex === todos.length;
-                        return (
-                            <li key={todo?.id ?? `todo-slot-${slotIndex}`} className="flex items-start gap-2 min-w-0">
+
+                        const rowBody = (
+                            <>
                                 {todo ? (
                                     <input
                                         type="checkbox"
@@ -936,6 +953,21 @@ export default function HabitDailyEntrySection({
                                         />
                                     ) : null}
                                 </div>
+                            </>
+                        );
+
+                        return (
+                            <li key={todo?.id ?? `todo-slot-${slotIndex}`} className="min-w-0">
+                                {todo ? (
+                                    <SwipeToDeleteRow
+                                        className="rounded-lg bg-[#03060f]/70"
+                                        onDelete={() => void handleDeleteTodo(todo)}
+                                    >
+                                        <div className="flex items-start gap-2 min-w-0 py-0.5">{rowBody}</div>
+                                    </SwipeToDeleteRow>
+                                ) : (
+                                    <div className="flex items-start gap-2 min-w-0">{rowBody}</div>
+                                )}
                             </li>
                         );
                     })}
