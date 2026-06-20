@@ -149,6 +149,28 @@ async function syncBacklogTaskCategories(
     if (insertError) throw insertError;
 }
 
+export async function deleteBacklogTodo(
+    userId: string,
+    todoId: string,
+    backlogTaskId?: string | null
+) {
+    const { error: todoError } = await supabase
+        .from('habit_daily_todos')
+        .delete()
+        .eq('id', todoId)
+        .eq('user_id', userId);
+    if (todoError) throw todoError;
+
+    if (backlogTaskId) {
+        const { error: backlogError } = await supabase
+            .from('habit_backlog_tasks')
+            .delete()
+            .eq('id', backlogTaskId)
+            .eq('user_id', userId);
+        if (backlogError) throw backlogError;
+    }
+}
+
 export async function setTodoCategories(
     todoId: string,
     userId: string,

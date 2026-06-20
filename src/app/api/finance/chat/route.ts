@@ -4,6 +4,7 @@ import {
     answerFinanceQuestion,
     type FinanceChatMessage,
 } from '@/lib/finance/financeChatService';
+import { isOpenAIUnavailableError } from '@/lib/finance/financeChatLocal';
 
 type ChatRequestBody = {
     message?: string;
@@ -40,6 +41,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
             reply: result.reply,
             matchedCount: result.matchedCount,
+            usedLocalFallback: result.usedLocalFallback,
             stats: {
                 total: result.stats.total,
                 monthlyAverage: result.stats.monthlyAverage,
@@ -49,6 +51,15 @@ export async function POST(request: NextRequest) {
         });
     } catch (error) {
         console.error('Finance chat error:', error);
+        if (isOpenAIUnavailableError(error)) {
+            return NextResponse.json(
+                {
+                    error:
+                        'AI assistant is temporarily unavailable. Your OpenAI account may be out of quota — add billing at platform.openai.com or try again later.',
+                },
+                { status: 503 }
+            );
+        }
         const message =
             error instanceof Error ? error.message : 'Failed to answer finance question';
         const status = message.includes('OpenAI API key') ? 503 : 500;

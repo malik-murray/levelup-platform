@@ -1,9 +1,10 @@
 import {
     computeSpendingStats,
     filterTransactions,
-    normalizeQueryPlan,
+    type FinanceChatContext,
     type FinanceTransaction,
 } from '../financeChatService';
+import { normalizeQueryPlan } from '../financeChatPlan';
 
 const sampleTransactions: FinanceTransaction[] = [
     {

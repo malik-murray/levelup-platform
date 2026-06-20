@@ -1,20 +1,15 @@
 import OpenAI from 'openai';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+    generateFinanceAnswerLocally,
+    isOpenAIUnavailableError,
+    parseFinanceQueryPlanLocally,
+} from './financeChatLocal';
+import { DEFAULT_QUERY_PLAN, normalizeQueryPlan, type FinanceQueryPlan } from './financeChatPlan';
 
 export type FinanceChatMessage = {
     role: 'user' | 'assistant';
     content: string;
-};
-
-export type FinanceQueryPlan = {
-    intent: 'spending' | 'income' | 'comparison' | 'general';
-    category_names: string[];
-    merchant_keywords: string[];
-    exclude_category_names: string[];
-    exclude_merchant_keywords: string[];
-    months_back: number;
-    aggregation: 'monthly_average' | 'total' | 'by_month' | 'count' | 'top_merchants';
-    direction: 'expense' | 'income';
 };
 
 export type FinanceTransaction = {
@@ -49,18 +44,10 @@ export type FinanceChatResult = {
     plan: FinanceQueryPlan;
     stats: FinanceSpendingStats;
     matchedCount: number;
+    usedLocalFallback: boolean;
 };
 
-const DEFAULT_PLAN: FinanceQueryPlan = {
-    intent: 'general',
-    category_names: [],
-    merchant_keywords: [],
-    exclude_category_names: [],
-    exclude_merchant_keywords: [],
-    months_back: 12,
-    aggregation: 'monthly_average',
-    direction: 'expense',
-};
+const DEFAULT_PLAN = DEFAULT_QUERY_PLAN;
 
 function getOpenAIClient(): OpenAI {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -190,54 +177,8 @@ function parseJsonResponse<T>(text: string): T {
     return JSON.parse(cleaned) as T;
 }
 
-function clampMonths(value: unknown): number {
-    const parsed = typeof value === 'number' ? value : Number(value);
-    if (!Number.isFinite(parsed)) return 12;
-    return Math.min(36, Math.max(1, Math.round(parsed)));
-}
 
-function sanitizeStringArray(value: unknown): string[] {
-    if (!Array.isArray(value)) return [];
-    return value
-        .filter((item): item is string => typeof item === 'string')
-        .map(item => item.trim())
-        .filter(Boolean)
-        .slice(0, 20);
-}
-
-export function normalizeQueryPlan(raw: Partial<FinanceQueryPlan>): FinanceQueryPlan {
-    const aggregationValues: FinanceQueryPlan['aggregation'][] = [
-        'monthly_average',
-        'total',
-        'by_month',
-        'count',
-        'top_merchants',
-    ];
-    const intentValues: FinanceQueryPlan['intent'][] = [
-        'spending',
-        'income',
-        'comparison',
-        'general',
-    ];
-    const directionValues: FinanceQueryPlan['direction'][] = ['expense', 'income'];
-
-    return {
-        intent: intentValues.includes(raw.intent as FinanceQueryPlan['intent'])
-            ? (raw.intent as FinanceQueryPlan['intent'])
-            : DEFAULT_PLAN.intent,
-        category_names: sanitizeStringArray(raw.category_names),
-        merchant_keywords: sanitizeStringArray(raw.merchant_keywords),
-        exclude_category_names: sanitizeStringArray(raw.exclude_category_names),
-        exclude_merchant_keywords: sanitizeStringArray(raw.exclude_merchant_keywords),
-        months_back: clampMonths(raw.months_back),
-        aggregation: aggregationValues.includes(raw.aggregation as FinanceQueryPlan['aggregation'])
-            ? (raw.aggregation as FinanceQueryPlan['aggregation'])
-            : DEFAULT_PLAN.aggregation,
-        direction: directionValues.includes(raw.direction as FinanceQueryPlan['direction'])
-            ? (raw.direction as FinanceQueryPlan['direction'])
-            : DEFAULT_PLAN.direction,
-    };
-}
+export { normalizeQueryPlan } from './financeChatPlan';
 
 export async function loadFinanceChatContext(
     supabase: SupabaseClient,
@@ -473,6 +414,48 @@ ${dataContext}`,
     );
 }
 
+function openAIEnabled(): boolean {
+    return process.env.FINANCE_CHAT_USE_OPENAI !== 'false';
+}
+
+async function resolveQueryPlan(
+    question: string,
+    context: FinanceChatContext
+): Promise<{ plan: FinanceQueryPlan; usedLocalFallback: boolean }> {
+    if (!openAIEnabled()) {
+        return { plan: parseFinanceQueryPlanLocally(question, context), usedLocalFallback: true };
+    }
+
+    try {
+        return { plan: await parseFinanceQueryPlan(question, context), usedLocalFallback: false };
+    } catch (error) {
+        if (!isOpenAIUnavailableError(error)) throw error;
+        console.warn('Finance chat: OpenAI unavailable for query plan, using local fallback.', error);
+        return { plan: parseFinanceQueryPlanLocally(question, context), usedLocalFallback: true };
+    }
+}
+
+async function resolveAnswer(
+    question: string,
+    history: FinanceChatMessage[],
+    plan: FinanceQueryPlan,
+    stats: FinanceSpendingStats,
+    matched: FinanceTransaction[],
+    usedLocalFallback: boolean
+): Promise<string> {
+    if (usedLocalFallback || !openAIEnabled()) {
+        return generateFinanceAnswerLocally(question, plan, stats);
+    }
+
+    try {
+        return await generateFinanceAnswer(question, history, plan, stats, matched);
+    } catch (error) {
+        if (!isOpenAIUnavailableError(error)) throw error;
+        console.warn('Finance chat: OpenAI unavailable for answer, using local fallback.', error);
+        return generateFinanceAnswerLocally(question, plan, stats);
+    }
+}
+
 export async function answerFinanceQuestion(
     supabase: SupabaseClient,
     userId: string,
@@ -485,16 +468,24 @@ export async function answerFinanceQuestion(
     }
 
     const context = await loadFinanceChatContext(supabase, userId);
-    const plan = await parseFinanceQueryPlan(trimmed, context);
+    const { plan, usedLocalFallback: planUsedFallback } = await resolveQueryPlan(trimmed, context);
     const transactions = await fetchTransactionsForRange(supabase, userId, plan.months_back);
     const matched = filterTransactions(transactions, plan);
     const stats = computeSpendingStats(matched, plan.months_back, plan.direction);
-    const reply = await generateFinanceAnswer(trimmed, history, plan, stats, matched);
+    const reply = await resolveAnswer(
+        trimmed,
+        history,
+        plan,
+        stats,
+        matched,
+        planUsedFallback
+    );
 
     return {
         reply,
         plan,
         stats,
         matchedCount: matched.length,
+        usedLocalFallback: planUsedFallback,
     };
 }

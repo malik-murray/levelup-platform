@@ -9,7 +9,8 @@ import { neon } from '@/app/dashboard/neonTheme';
 import { formatDate } from '@/lib/habitHelpers';
 import { compareByQuadrant, getQuadrant, QUADRANT_META, quadrantBadgeClasses, type EisenhowerQuadrant } from '@/lib/habit/eisenhower';
 import { EisenhowerToggles, QuadrantBadge } from '@/components/habit/EisenhowerToggles';
-import { repairOrphanedBacklogTasks, setTodoCategories, updateTodoEisenhower } from '@/lib/habitBacklog';
+import { deleteBacklogTodo, repairOrphanedBacklogTasks, setTodoCategories, updateTodoEisenhower } from '@/lib/habitBacklog';
+import { SwipeToDeleteRow } from '@/components/SwipeToDeleteRow';
 import { loadBacklogCategories, loadTodoCategoryIdsByTodoId, type BacklogCategory } from '@/lib/habit/backlogCategories';
 import { BacklogCategoryPicker } from '@/components/habit/BacklogCategoryPicker';
 
@@ -333,6 +334,30 @@ export default function TodoPage() {
       setNewTodoCategoryIds([]);
     } catch (err) {
       console.error('Error adding to-do:', err);
+    }
+  };
+
+  const handleDeleteTodo = async (todo: TodoItem) => {
+    if (!userId) return;
+
+    const previousTodos = todos;
+    setTodos((prev) => prev.filter((item) => item.id !== todo.id));
+    setAssignOpenById((prev) => {
+      const next = { ...prev };
+      delete next[todo.id];
+      return next;
+    });
+    setAssignDateById((prev) => {
+      const next = { ...prev };
+      delete next[todo.id];
+      return next;
+    });
+
+    try {
+      await deleteBacklogTodo(userId, todo.id, todo.backlog_task_id);
+    } catch (err) {
+      console.error('Error deleting to-do:', err);
+      setTodos(previousTodos);
     }
   };
 
@@ -713,7 +738,12 @@ export default function TodoPage() {
                     ) : (
                       <ol className="space-y-1 min-w-0">
                         {filteredTodos.map((todo, index) => (
-                          <li key={todo.id} className="space-y-1 rounded-md border border-[#ff9d00]/20 bg-[#03060f]/70 p-1.5">
+                          <li key={todo.id}>
+                            <SwipeToDeleteRow
+                              className="border border-[#ff9d00]/20 bg-[#03060f]/70"
+                              onDelete={() => void handleDeleteTodo(todo)}
+                            >
+                            <div className="space-y-1 p-1.5">
                             <div className="flex min-w-0 items-start gap-1">
                               <span className="mt-1 shrink-0 text-[11px] font-semibold text-slate-300">{index + 1}.</span>
                               <input
@@ -786,6 +816,8 @@ export default function TodoPage() {
                                 </button>
                               </div>
                             ) : null}
+                            </div>
+                            </SwipeToDeleteRow>
                           </li>
                         ))}
                       </ol>
