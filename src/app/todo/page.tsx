@@ -9,7 +9,8 @@ import { neon } from '@/app/dashboard/neonTheme';
 import { formatDate } from '@/lib/habitHelpers';
 import { compareByQuadrant, getQuadrant, QUADRANT_META, quadrantBadgeClasses, type EisenhowerQuadrant } from '@/lib/habit/eisenhower';
 import { EisenhowerToggles, QuadrantBadge } from '@/components/habit/EisenhowerToggles';
-import { updateTodoEisenhower } from '@/lib/habitBacklog';
+import { updateTodoCategory, updateTodoEisenhower } from '@/lib/habitBacklog';
+import { loadBacklogCategories, type BacklogCategory } from '@/lib/habit/backlogCategories';
 
 const outfit = Outfit({ subsets: ['latin'], weight: ['400', '600', '700', '800'] });
 const LOGO_SRC = '/brand/levelup-logo.png';
@@ -23,6 +24,7 @@ type TodoItem = {
   is_important: boolean | null;
   is_urgent: boolean | null;
   backlog_task_id?: string | null;
+  category_id?: string | null;
 };
 
 type DoneCategory = 'habit' | 'priority' | 'to-do';
@@ -83,6 +85,8 @@ function IconMenu() {
   );
 }
 
+type GroupFilter = '' | 'all' | 'uncategorized' | string;
+
 export default function TodoPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,6 +101,9 @@ export default function TodoPage() {
   const [doneDateFilter, setDoneDateFilter] = useState<DoneDateFilter>('');
   const [doneSort, setDoneSort] = useState<DoneSort>('');
   const [quadrantFilter, setQuadrantFilter] = useState<'' | 'all' | EisenhowerQuadrant>('');
+  const [groupFilter, setGroupFilter] = useState<GroupFilter>('');
+  const [categories, setCategories] = useState<BacklogCategory[]>([]);
+  const [newTodoCategoryId, setNewTodoCategoryId] = useState('');
 
   const todayString = useMemo(() => formatDate(new Date()), []);
 
@@ -128,13 +135,20 @@ export default function TodoPage() {
 
   const loadData = async (activeUserId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('habit_daily_todos')
-        .select('id, title, is_done, date, created_at, is_important, is_urgent, backlog_task_id')
-        .eq('user_id', activeUserId)
-        .eq('is_done', false)
-        .order('date', { ascending: false })
-        .order('created_at', { ascending: false });
+      const [categoriesResult, todosResult] = await Promise.all([
+        loadBacklogCategories(supabase, activeUserId),
+        supabase
+          .from('habit_daily_todos')
+          .select('id, title, is_done, date, created_at, is_important, is_urgent, backlog_task_id, category_id')
+          .eq('user_id', activeUserId)
+          .eq('is_done', false)
+          .order('date', { ascending: false })
+          .order('created_at', { ascending: false }),
+      ]);
+
+      setCategories(categoriesResult);
+
+      const { data, error } = todosResult;
 
       if (error) {
         throw error;
@@ -276,8 +290,9 @@ export default function TodoPage() {
           is_done: false,
           is_important: false,
           is_urgent: false,
+          category_id: newTodoCategoryId || null,
         })
-        .select('id, title, is_done, date, created_at, is_important, is_urgent, backlog_task_id')
+        .select('id, title, is_done, date, created_at, is_important, is_urgent, backlog_task_id, category_id')
         .single();
       if (error) throw error;
       if (data) {
@@ -384,14 +399,49 @@ export default function TodoPage() {
     }
   };
 
-  const filteredTodos = useMemo(() => {
-    if (quadrantFilter === '' || quadrantFilter === 'all') return todos;
-    return todos.filter(
-      (todo) =>
-        getQuadrant({ is_important: todo.is_important ?? null, is_urgent: todo.is_urgent ?? null }) ===
-        quadrantFilter
+  const handleTodoCategoryChange = async (todoId: string, categoryId: string | null) => {
+    if (!userId) return;
+
+    const previous = todos.find((item) => item.id === todoId);
+    if (!previous) return;
+
+    setTodos((prev) =>
+      prev.map((item) => (item.id === todoId ? { ...item, category_id: categoryId } : item))
     );
-  }, [todos, quadrantFilter]);
+
+    try {
+      await updateTodoCategory(todoId, userId, categoryId, previous.backlog_task_id);
+    } catch (err) {
+      console.error('Error updating task group:', err);
+      setTodos((prev) =>
+        prev.map((item) =>
+          item.id === todoId ? { ...item, category_id: previous.category_id ?? null } : item
+        )
+      );
+    }
+  };
+
+  const filteredTodos = useMemo(() => {
+    let items = todos;
+
+    if (quadrantFilter !== '' && quadrantFilter !== 'all') {
+      items = items.filter(
+        (todo) =>
+          getQuadrant({ is_important: todo.is_important ?? null, is_urgent: todo.is_urgent ?? null }) ===
+          quadrantFilter
+      );
+    }
+
+    if (groupFilter !== '' && groupFilter !== 'all') {
+      if (groupFilter === 'uncategorized') {
+        items = items.filter((todo) => !todo.category_id);
+      } else {
+        items = items.filter((todo) => todo.category_id === groupFilter);
+      }
+    }
+
+    return items;
+  }, [todos, quadrantFilter, groupFilter]);
 
   const quadrantCounts = useMemo(() => {
     const counts: Record<EisenhowerQuadrant, number> = {
@@ -574,7 +624,47 @@ export default function TodoPage() {
                     </div>
 
                     <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Filter:</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Group:</span>
+                      <button
+                        type="button"
+                        onClick={() => setGroupFilter('all')}
+                        className={`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition ${
+                          groupFilter === '' || groupFilter === 'all'
+                            ? 'border-[#ff9d00]/70 bg-[#ff9d00]/20 text-[#ffe066]'
+                            : 'border-[#ff9d00]/30 bg-black/20 text-slate-400 hover:bg-[#ff9d00]/10'
+                        }`}
+                      >
+                        All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setGroupFilter('uncategorized')}
+                        className={`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition ${
+                          groupFilter === 'uncategorized'
+                            ? 'border-[#ff9d00]/70 bg-[#ff9d00]/20 text-[#ffe066]'
+                            : 'border-[#ff9d00]/30 bg-black/20 text-slate-400 hover:bg-[#ff9d00]/10'
+                        }`}
+                      >
+                        None
+                      </button>
+                      {categories.map((category) => (
+                        <button
+                          key={category.id}
+                          type="button"
+                          onClick={() => setGroupFilter(category.id)}
+                          className={`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition ${
+                            groupFilter === category.id
+                              ? 'border-[#ff9d00]/70 bg-[#ff9d00]/20 text-[#ffe066]'
+                              : 'border-[#ff9d00]/30 bg-black/20 text-slate-400 hover:bg-[#ff9d00]/10'
+                          }`}
+                        >
+                          {category.name}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Quadrant:</span>
                       {(['all', 'q1', 'q2', 'q3', 'q4'] as const).map((q) => (
                         <button
                           key={q}
@@ -591,7 +681,7 @@ export default function TodoPage() {
                       ))}
                     </div>
 
-                    <div className="mb-2 flex items-start gap-1.5">
+                    <div className="mb-2 flex flex-wrap items-start gap-1.5">
                       <textarea
                         value={newTodoTitle}
                         onChange={(e) => setNewTodoTitle(e.target.value)}
@@ -603,8 +693,21 @@ export default function TodoPage() {
                         }}
                         placeholder="Add something to your backlog..."
                         rows={1}
-                        className="min-h-[1.8rem] flex-1 resize-none break-words overflow-y-auto rounded-md border border-[#ff9d00]/25 bg-[#03060f]/90 px-2 py-1 text-[11px] text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
+                        className="min-h-[1.8rem] min-w-0 flex-1 resize-none break-words overflow-y-auto rounded-md border border-[#ff9d00]/25 bg-[#03060f]/90 px-2 py-1 text-[11px] text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
                       />
+                      <select
+                        value={newTodoCategoryId}
+                        onChange={(e) => setNewTodoCategoryId(e.target.value)}
+                        aria-label="Group for new task"
+                        className="max-w-[7.5rem] shrink-0 rounded-md border border-[#ff9d00]/35 bg-[#03060f]/90 px-1.5 py-1 text-[10px] text-white focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
+                      >
+                        <option value="">No group</option>
+                        {categories.map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.name}
+                          </option>
+                        ))}
+                      </select>
                       <button
                         type="button"
                         onClick={() => void handleAddTodo()}
@@ -618,7 +721,7 @@ export default function TodoPage() {
                       <p className="rounded-lg border border-dashed border-[#ff9d00]/35 bg-black/20 px-4 py-6 text-center text-sm text-slate-300">
                         {todos.length === 0
                           ? 'Nothing pending right now. Add new items above to keep your task brain clear.'
-                          : 'No tasks match this quadrant filter.'}
+                          : 'No tasks match the current filters.'}
                       </p>
                     ) : (
                       <ol className="space-y-1 min-w-0">
@@ -645,6 +748,21 @@ export default function TodoPage() {
                                   className="min-h-[1.8rem] w-full resize-none break-words overflow-y-auto rounded-md border border-[#ff9d00]/25 bg-[#03060f]/90 px-2 py-1 text-[11px] text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
                                 />
                                 <div className="flex flex-wrap items-center gap-1.5">
+                                  <select
+                                    value={todo.category_id ?? ''}
+                                    onChange={(e) =>
+                                      void handleTodoCategoryChange(todo.id, e.target.value || null)
+                                    }
+                                    aria-label="Task group"
+                                    className="max-w-[7.5rem] rounded-md border border-[#ff9d00]/35 bg-[#03060f]/90 px-1.5 py-0.5 text-[10px] text-white focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
+                                  >
+                                    <option value="">No group</option>
+                                    {categories.map((category) => (
+                                      <option key={category.id} value={category.id}>
+                                        {category.name}
+                                      </option>
+                                    ))}
+                                  </select>
                                   <EisenhowerToggles
                                     compact
                                     value={{

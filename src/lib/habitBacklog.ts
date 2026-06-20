@@ -68,3 +68,28 @@ export async function updateTodoEisenhower(
         await syncBacklogEisenhower(backlogTaskId, fields);
     }
 }
+
+export async function syncBacklogCategory(backlogTaskId: string, categoryId: string | null) {
+    const { error } = await supabase
+        .from('habit_backlog_tasks')
+        .update({ category_id: categoryId })
+        .eq('id', backlogTaskId);
+    if (error) throw error;
+}
+
+export async function updateTodoCategory(
+    todoId: string,
+    userId: string,
+    categoryId: string | null,
+    backlogTaskId?: string | null
+) {
+    const { error } = await supabase
+        .from('habit_daily_todos')
+        .update({ category_id: categoryId })
+        .eq('id', todoId)
+        .eq('user_id', userId);
+    if (error) throw error;
+    if (backlogTaskId) {
+        await syncBacklogCategory(backlogTaskId, categoryId);
+    }
+}
