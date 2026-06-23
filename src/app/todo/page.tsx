@@ -9,9 +9,25 @@ import { neon } from '@/app/dashboard/neonTheme';
 import { formatDate } from '@/lib/habitHelpers';
 import { compareByQuadrant, getQuadrant, QUADRANT_META, quadrantBadgeClasses, type EisenhowerQuadrant } from '@/lib/habit/eisenhower';
 import { EisenhowerToggles, QuadrantBadge } from '@/components/habit/EisenhowerToggles';
-import { deleteBacklogTodo, repairOrphanedBacklogTasks, setTodoCategories, updateTodoEisenhower } from '@/lib/habitBacklog';
-import { SwipeToDeleteRow } from '@/components/SwipeToDeleteRow';
-import { loadBacklogCategories, loadTodoCategoryIdsByTodoId, type BacklogCategory } from '@/lib/habit/backlogCategories';
+import {
+  assignBacklogTodoToDate,
+  deleteBacklogTask,
+  deleteBacklogTodo,
+  repairOrphanedBacklogTasks,
+  setBacklogTaskCategories,
+  setTodoCategories,
+  syncBacklogCompletion,
+  syncBacklogEisenhower,
+  syncBacklogTitle,
+  updateTodoEisenhower,
+} from '@/lib/habitBacklog';
+import { TodoDeleteButton } from '@/components/TodoDeleteButton';
+import {
+  loadBacklogCategories,
+  loadBacklogTaskCategoryIdsByTaskId,
+  loadTodoCategoryIdsByTodoId,
+  type BacklogCategory,
+} from '@/lib/habit/backlogCategories';
 import { BacklogCategoryPicker } from '@/components/habit/BacklogCategoryPicker';
 
 const outfit = Outfit({ subsets: ['latin'], weight: ['400', '600', '700', '800'] });
@@ -21,13 +37,16 @@ type TodoItem = {
   id: string;
   title: string;
   is_done: boolean;
-  date: string;
+  date: string | null;
   created_at: string | null;
   is_important: boolean | null;
   is_urgent: boolean | null;
-  backlog_task_id?: string | null;
+  backlog_task_id: string | null;
+  daily_todo_id: string | null;
   category_ids: string[];
 };
+
+const isBacklogOnly = (todo: TodoItem) => todo.daily_todo_id === null;
 
 type DoneCategory = 'habit' | 'priority' | 'to-do';
 
@@ -73,7 +92,13 @@ const dedupeOpenTodos = (rows: TodoItem[]): TodoItem[] => {
 const sortTodoItems = (items: TodoItem[]) =>
   [...items].sort((a, b) =>
     compareByQuadrant(a, b, (x, y) => {
-      if (x.date !== y.date) return y.date.localeCompare(x.date);
+      const xDate = x.date ?? '';
+      const yDate = y.date ?? '';
+      if (xDate !== yDate) {
+        if (!xDate) return -1;
+        if (!yDate) return 1;
+        return yDate.localeCompare(xDate);
+      }
       return (y.created_at ?? '').localeCompare(x.created_at ?? '');
     })
   );
@@ -190,10 +215,12 @@ export default function TodoPage() {
       const linkedBacklogIds = new Set(
         rows.map((todo) => todo.backlog_task_id).filter((id): id is string => Boolean(id))
       );
-      const orphanedBacklogTasks = backlogTasks.filter((task) => !linkedBacklogIds.has(task.id));
+      const assignedOrphanedBacklogTasks = backlogTasks.filter(
+        (task) => task.assigned_date && !linkedBacklogIds.has(task.id)
+      );
 
-      if (orphanedBacklogTasks.length > 0) {
-        await repairOrphanedBacklogTasks(supabase, activeUserId, orphanedBacklogTasks);
+      if (assignedOrphanedBacklogTasks.length > 0) {
+        await repairOrphanedBacklogTasks(supabase, activeUserId, assignedOrphanedBacklogTasks);
 
         const { data: repairedRows, error: repairedError } = await supabase
           .from('habit_daily_todos')
@@ -206,25 +233,65 @@ export default function TodoPage() {
         rows = repairedRows ?? [];
       }
 
-      const dedupedRows = dedupeOpenTodos(rows.map((todo) => ({ ...todo, category_ids: [] })));
+      const dedupedRows = dedupeOpenTodos(
+        rows.map((todo) => ({
+          ...todo,
+          daily_todo_id: todo.id,
+          backlog_task_id: todo.backlog_task_id,
+          category_ids: [] as string[],
+        }))
+      );
 
-      const categoryIdsByTodoId = await loadTodoCategoryIdsByTodoId(
-        supabase,
-        activeUserId,
-        dedupedRows.map((todo) => todo.id)
+      const linkedAfterRepair = new Set(
+        dedupedRows.map((todo) => todo.backlog_task_id).filter((id): id is string => Boolean(id))
       );
-      setTodos(
-        sortTodoItems(
-          dedupedRows.map((todo) => ({
-            ...todo,
-            category_ids: categoryIdsByTodoId[todo.id] ?? [],
-          }))
-        )
-      );
+      const unassignedBacklogTasks = backlogTasks.filter((task) => !linkedAfterRepair.has(task.id));
+
+      const [categoryIdsByTodoId, categoryIdsByBacklogTaskId] = await Promise.all([
+        loadTodoCategoryIdsByTodoId(
+          supabase,
+          activeUserId,
+          dedupedRows.map((todo) => todo.daily_todo_id).filter((id): id is string => Boolean(id))
+        ),
+        loadBacklogTaskCategoryIdsByTaskId(
+          supabase,
+          activeUserId,
+          unassignedBacklogTasks.map((task) => task.id)
+        ),
+      ]);
+
+      const assignedItems: TodoItem[] = dedupedRows.map((todo) => ({
+        id: todo.daily_todo_id ?? todo.id,
+        daily_todo_id: todo.daily_todo_id,
+        backlog_task_id: todo.backlog_task_id,
+        title: todo.title,
+        is_done: todo.is_done,
+        date: todo.date,
+        created_at: todo.created_at,
+        is_important: todo.is_important,
+        is_urgent: todo.is_urgent,
+        category_ids: categoryIdsByTodoId[todo.daily_todo_id ?? ''] ?? [],
+      }));
+
+      const unassignedItems: TodoItem[] = unassignedBacklogTasks.map((task) => ({
+        id: task.id,
+        daily_todo_id: null,
+        backlog_task_id: task.id,
+        title: task.title,
+        is_done: false,
+        date: null,
+        created_at: task.created_at,
+        is_important: task.is_important,
+        is_urgent: task.is_urgent,
+        category_ids: categoryIdsByBacklogTaskId[task.id] ?? [],
+      }));
+
+      const mergedTodos = sortTodoItems([...assignedItems, ...unassignedItems]);
+      setTodos(mergedTodos);
 
       const nextAssignDates: Record<string, string> = {};
-      dedupedRows.forEach((todo) => {
-        nextAssignDates[todo.id] = todo.date;
+      mergedTodos.forEach((todo) => {
+        nextAssignDates[todo.id] = todo.date ?? todayString;
       });
       setAssignDateById(nextAssignDates);
 
@@ -310,25 +377,34 @@ export default function TodoPage() {
 
     try {
       const { data, error } = await supabase
-        .from('habit_daily_todos')
+        .from('habit_backlog_tasks')
         .insert({
           user_id: userId,
           title: trimmed,
-          date: todayString,
-          is_done: false,
           is_important: false,
           is_urgent: false,
         })
-        .select('id, title, is_done, date, created_at, is_important, is_urgent, backlog_task_id')
+        .select('id, title, created_at, is_important, is_urgent')
         .single();
       if (error) throw error;
       if (data) {
         if (newTodoCategoryIds.length > 0) {
-          await setTodoCategories(data.id, userId, newTodoCategoryIds, data.backlog_task_id);
+          await setBacklogTaskCategories(userId, data.id, newTodoCategoryIds);
         }
-        const item: TodoItem = { ...data, category_ids: [...newTodoCategoryIds] };
-        setTodos((prev) => [item, ...prev]);
-        setAssignDateById((prev) => ({ ...prev, [data.id]: data.date }));
+        const item: TodoItem = {
+          id: data.id,
+          daily_todo_id: null,
+          backlog_task_id: data.id,
+          title: data.title,
+          is_done: false,
+          date: null,
+          created_at: data.created_at,
+          is_important: data.is_important,
+          is_urgent: data.is_urgent,
+          category_ids: [...newTodoCategoryIds],
+        };
+        setTodos((prev) => sortTodoItems([item, ...prev]));
+        setAssignDateById((prev) => ({ ...prev, [data.id]: todayString }));
       }
       setNewTodoTitle('');
       setNewTodoCategoryIds([]);
@@ -354,7 +430,11 @@ export default function TodoPage() {
     });
 
     try {
-      await deleteBacklogTodo(userId, todo.id, todo.backlog_task_id);
+      if (isBacklogOnly(todo) && todo.backlog_task_id) {
+        await deleteBacklogTask(userId, todo.backlog_task_id);
+      } else if (todo.daily_todo_id) {
+        await deleteBacklogTodo(userId, todo.daily_todo_id, todo.backlog_task_id);
+      }
     } catch (err) {
       console.error('Error deleting to-do:', err);
       setTodos(previousTodos);
@@ -365,19 +445,23 @@ export default function TodoPage() {
     if (!userId) return;
     const completedAt = new Date().toISOString();
     try {
-      const { error } = await supabase
-        .from('habit_daily_todos')
-        .update({ is_done: true, completed_at: completedAt })
-        .eq('id', todo.id)
-        .eq('user_id', userId);
-      if (error) throw error;
+      if (isBacklogOnly(todo) && todo.backlog_task_id) {
+        await syncBacklogCompletion(todo.backlog_task_id, true);
+      } else if (todo.daily_todo_id) {
+        const { error } = await supabase
+          .from('habit_daily_todos')
+          .update({ is_done: true, completed_at: completedAt })
+          .eq('id', todo.daily_todo_id)
+          .eq('user_id', userId);
+        if (error) throw error;
+      }
       setTodos((prev) => prev.filter((item) => item.id !== todo.id));
       setDoneItems((prev) => [
         {
-          id: `todo-${todo.id}`,
+          id: `todo-${todo.daily_todo_id ?? todo.backlog_task_id}`,
           title: todo.title,
           category: 'to-do',
-          date: todo.date,
+          date: todo.date ?? todayString,
           completed_at: completedAt,
         },
         ...prev,
@@ -401,13 +485,20 @@ export default function TodoPage() {
       return;
     }
 
+    const todo = todos.find((item) => item.id === todoId);
+    if (!todo) return;
+
     try {
-      const { error } = await supabase
-        .from('habit_daily_todos')
-        .update({ title: trimmed })
-        .eq('id', todoId)
-        .eq('user_id', userId);
-      if (error) throw error;
+      if (isBacklogOnly(todo) && todo.backlog_task_id) {
+        await syncBacklogTitle(todo.backlog_task_id, trimmed);
+      } else if (todo.daily_todo_id) {
+        const { error } = await supabase
+          .from('habit_daily_todos')
+          .update({ title: trimmed })
+          .eq('id', todo.daily_todo_id)
+          .eq('user_id', userId);
+        if (error) throw error;
+      }
     } catch (err) {
       console.error('Error renaming to-do item:', err);
     }
@@ -427,7 +518,11 @@ export default function TodoPage() {
     );
 
     try {
-      await updateTodoEisenhower(todoId, userId, fields, previous.backlog_task_id);
+      if (isBacklogOnly(previous) && previous.backlog_task_id) {
+        await syncBacklogEisenhower(previous.backlog_task_id, fields);
+      } else if (previous.daily_todo_id) {
+        await updateTodoEisenhower(previous.daily_todo_id, userId, fields, previous.backlog_task_id);
+      }
     } catch (err) {
       console.error('Error updating task classification:', err);
       setTodos((prev) =>
@@ -455,7 +550,11 @@ export default function TodoPage() {
     );
 
     try {
-      await setTodoCategories(todoId, userId, categoryIds, previous.backlog_task_id);
+      if (isBacklogOnly(previous) && previous.backlog_task_id) {
+        await setBacklogTaskCategories(userId, previous.backlog_task_id, categoryIds);
+      } else if (previous.daily_todo_id) {
+        await setTodoCategories(previous.daily_todo_id, userId, categoryIds, previous.backlog_task_id);
+      }
     } catch (err) {
       console.error('Error updating task tags:', err);
       setTodos((prev) =>
@@ -532,14 +631,50 @@ export default function TodoPage() {
     if (!userId) return;
     const selectedDate = assignDateById[todoId];
     if (!selectedDate) return;
+
+    const todo = todos.find((item) => item.id === todoId);
+    if (!todo) return;
+
     try {
-      const { error } = await supabase
-        .from('habit_daily_todos')
-        .update({ date: selectedDate })
-        .eq('id', todoId)
-        .eq('user_id', userId);
-      if (error) throw error;
-      setTodos((prev) => prev.map((item) => (item.id === todoId ? { ...item, date: selectedDate } : item)));
+      if (isBacklogOnly(todo) && todo.backlog_task_id) {
+        const created = await assignBacklogTodoToDate(
+          userId,
+          todo.backlog_task_id,
+          todo.title,
+          selectedDate,
+          {
+            is_important: todo.is_important ?? false,
+            is_urgent: todo.is_urgent ?? false,
+          },
+          todo.category_ids
+        );
+        if (!created) return;
+
+        const assigned: TodoItem = {
+          id: created.id,
+          daily_todo_id: created.id,
+          backlog_task_id: created.backlog_task_id ?? todo.backlog_task_id,
+          title: created.title,
+          is_done: created.is_done,
+          date: created.date,
+          created_at: created.created_at,
+          is_important: created.is_important,
+          is_urgent: created.is_urgent,
+          category_ids: todo.category_ids,
+        };
+        setTodos((prev) => prev.map((item) => (item.id === todoId ? assigned : item)));
+        setAssignDateById((prev) => ({ ...prev, [assigned.id]: selectedDate }));
+      } else if (todo.daily_todo_id) {
+        const { error } = await supabase
+          .from('habit_daily_todos')
+          .update({ date: selectedDate })
+          .eq('id', todo.daily_todo_id)
+          .eq('user_id', userId);
+        if (error) throw error;
+        setTodos((prev) =>
+          prev.map((item) => (item.id === todoId ? { ...item, date: selectedDate } : item))
+        );
+      }
       setAssignOpenById((prev) => ({ ...prev, [todoId]: false }));
     } catch (err) {
       console.error('Error assigning to-do date:', err);
@@ -738,12 +873,7 @@ export default function TodoPage() {
                     ) : (
                       <ol className="space-y-1 min-w-0">
                         {filteredTodos.map((todo, index) => (
-                          <li key={todo.id}>
-                            <SwipeToDeleteRow
-                              className="border border-[#ff9d00]/20 bg-[#03060f]/70"
-                              onDelete={() => void handleDeleteTodo(todo)}
-                            >
-                            <div className="space-y-1 p-1.5">
+                          <li key={todo.id} className="space-y-1 rounded-md border border-[#ff9d00]/20 bg-[#03060f]/70 p-1.5">
                             <div className="flex min-w-0 items-start gap-1">
                               <span className="mt-1 shrink-0 text-[11px] font-semibold text-slate-300">{index + 1}.</span>
                               <input
@@ -787,23 +917,33 @@ export default function TodoPage() {
                                       is_urgent: todo.is_urgent ?? null,
                                     }}
                                   />
-                                  <span className="text-[9px] text-slate-500">Due: {todo.date}</span>
+                                  <span className="text-[9px] text-slate-500">
+                                    {todo.date ? `Due: ${todo.date}` : 'Unassigned'}
+                                  </span>
                                 </div>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => setAssignOpenById((prev) => ({ ...prev, [todo.id]: !prev[todo.id] }))}
-                                className="shrink-0 rounded-md border border-[#ff9d00]/45 bg-black/30 px-1.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-[#ffe066] transition hover:bg-[#ff9d00]/15"
-                              >
-                                Assign
-                              </button>
+                              <div className="flex shrink-0 flex-col items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setAssignOpenById((prev) => ({ ...prev, [todo.id]: !prev[todo.id] }))}
+                                  className="rounded-md border border-[#ff9d00]/45 bg-black/30 px-1.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-[#ffe066] transition hover:bg-[#ff9d00]/15"
+                                >
+                                  Assign
+                                </button>
+                                <TodoDeleteButton
+                                  compact
+                                  itemLabel={todo.title}
+                                  confirmMessage={`Delete "${todo.title}"? This removes it from your task backlog permanently.`}
+                                  onConfirm={() => void handleDeleteTodo(todo)}
+                                />
+                              </div>
                             </div>
 
                             {assignOpenById[todo.id] ? (
                               <div className="flex flex-wrap items-center gap-1 pl-4.5 pt-0.5">
                                 <input
                                   type="date"
-                                  value={assignDateById[todo.id] ?? todo.date}
+                                  value={assignDateById[todo.id] ?? todo.date ?? todayString}
                                   onChange={(e) => setAssignDateById((prev) => ({ ...prev, [todo.id]: e.target.value }))}
                                   className="rounded-md border border-[#ff9d00]/35 bg-[#03060f]/90 px-1.5 py-0.5 text-[11px] text-white focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
                                 />
@@ -816,8 +956,6 @@ export default function TodoPage() {
                                 </button>
                               </div>
                             ) : null}
-                            </div>
-                            </SwipeToDeleteRow>
                           </li>
                         ))}
                       </ol>

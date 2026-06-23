@@ -5,10 +5,9 @@ import Link from 'next/link';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate, type Category, type TimeOfDay, type HabitStatus } from '@/lib/habitHelpers';
 import { computeDailyScoreSnapshot } from '@/lib/habit/computeDailyScores';
-import { syncBacklogCompletion, syncBacklogTitle, updatePriorityEisenhower, updateTodoEisenhower } from '@/lib/habitBacklog';
-import { compareByQuadrant, type EisenhowerFields } from '@/lib/habit/eisenhower';
-import { EisenhowerToggles } from '@/components/habit/EisenhowerToggles';
-import { SwipeToDeleteRow } from '@/components/SwipeToDeleteRow';
+import { syncBacklogCompletion, syncBacklogTitle } from '@/lib/habitBacklog';
+import { compareByQuadrant } from '@/lib/habit/eisenhower';
+import { TodoDeleteButton } from '@/components/TodoDeleteButton';
 import { neon } from '../neonTheme';
 import CollapsiblePanel from './CollapsiblePanel';
 
@@ -504,6 +503,25 @@ export default function HabitDailyEntrySection({
         return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:00`;
     };
 
+    const handleDeletePriority = async (priority: Priority) => {
+        if (!userId) return;
+
+        const previousPriorities = priorities;
+        setPriorities((prev) => prev.filter((p) => p.id !== priority.id));
+
+        try {
+            await supabase
+                .from('habit_daily_priorities')
+                .delete()
+                .eq('id', priority.id)
+                .eq('user_id', userId);
+            loadData(true);
+        } catch (error) {
+            console.error('Error deleting priority:', error);
+            setPriorities(previousPriorities);
+        }
+    };
+
     const handleDeleteTodo = async (todo: Todo) => {
         if (!userId) return;
 
@@ -615,30 +633,6 @@ export default function HabitDailyEntrySection({
             loadData(true);
         } catch (error) {
             console.error('Error updating priority:', error);
-        }
-    };
-
-    const handlePriorityEisenhowerChange = async (priority: Priority, fields: EisenhowerFields) => {
-        if (!userId) return;
-        try {
-            await updatePriorityEisenhower(priority.id, userId, fields, priority.backlog_task_id);
-            setPriorities((prev) =>
-                prev.map((p) => (p.id === priority.id ? { ...p, ...fields } : p))
-            );
-        } catch (error) {
-            console.error('Error updating priority classification:', error);
-        }
-    };
-
-    const handleTodoEisenhowerChange = async (todo: Todo, fields: EisenhowerFields) => {
-        if (!userId) return;
-        try {
-            await updateTodoEisenhower(todo.id, userId, fields, todo.backlog_task_id);
-            setTodos((prev) =>
-                prev.map((t) => (t.id === todo.id ? { ...t, ...fields } : t))
-            );
-        } catch (error) {
-            console.error('Error updating todo classification:', error);
         }
     };
 
@@ -812,10 +806,9 @@ export default function HabitDailyEntrySection({
             <CollapsiblePanel open={dailyPlanOpen}>
             <div className="min-w-0 space-y-6 overflow-hidden px-4 pb-4">
             <p className="text-xs text-slate-400">
-                Mark tasks <span className="text-emerald-300">Imp</span> (important) or{' '}
-                <span className="text-red-300">Urg</span> (urgent) to sort by the Eisenhower matrix — Q1 first, then Q2.{' '}
+                Priorities and to-dos stay linked with your task backlog.{' '}
                 <Link href="/todo" className="text-[#ffe066] underline-offset-2 hover:underline">
-                    Triage backlog
+                    Triage on To-Do page
                 </Link>
             </p>
             {/* Priorities - collapsible */}
@@ -871,16 +864,14 @@ export default function HabitDailyEntrySection({
                                         rows={2}
                                         className={`min-h-[2.5rem] w-full resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${priority?.completed ? 'text-slate-500 line-through' : ''}`}
                                     />
-                                    {priority ? (
-                                        <EisenhowerToggles
-                                            value={{
-                                                is_important: priority.is_important ?? null,
-                                                is_urgent: priority.is_urgent ?? null,
-                                            }}
-                                            onChange={(fields) => void handlePriorityEisenhowerChange(priority, fields)}
-                                        />
-                                    ) : null}
                                 </div>
+                                {priority ? (
+                                    <TodoDeleteButton
+                                        itemLabel={priority.text}
+                                        confirmMessage={`Delete "${priority.text}"? This removes it from today's priorities.`}
+                                        onConfirm={() => void handleDeletePriority(priority)}
+                                    />
+                                ) : null}
                             </li>
                         );
                     })}
@@ -914,9 +905,8 @@ export default function HabitDailyEntrySection({
                     {Array.from({ length: todos.length + 1 }, (_, slotIndex) => {
                         const todo = todos[slotIndex];
                         const isAddRow = slotIndex === todos.length;
-
-                        const rowBody = (
-                            <>
+                        return (
+                            <li key={todo?.id ?? `todo-slot-${slotIndex}`} className="flex items-start gap-2 min-w-0">
                                 {todo ? (
                                     <input
                                         type="checkbox"
@@ -943,31 +933,14 @@ export default function HabitDailyEntrySection({
                                         rows={2}
                                         className={`min-h-[2.5rem] w-full resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${todo?.is_done ? 'text-slate-500 line-through' : ''}`}
                                     />
-                                    {todo ? (
-                                        <EisenhowerToggles
-                                            value={{
-                                                is_important: todo.is_important ?? null,
-                                                is_urgent: todo.is_urgent ?? null,
-                                            }}
-                                            onChange={(fields) => void handleTodoEisenhowerChange(todo, fields)}
-                                        />
-                                    ) : null}
                                 </div>
-                            </>
-                        );
-
-                        return (
-                            <li key={todo?.id ?? `todo-slot-${slotIndex}`} className="min-w-0">
                                 {todo ? (
-                                    <SwipeToDeleteRow
-                                        className="rounded-lg bg-[#03060f]/70"
-                                        onDelete={() => void handleDeleteTodo(todo)}
-                                    >
-                                        <div className="flex items-start gap-2 min-w-0 py-0.5">{rowBody}</div>
-                                    </SwipeToDeleteRow>
-                                ) : (
-                                    <div className="flex items-start gap-2 min-w-0">{rowBody}</div>
-                                )}
+                                    <TodoDeleteButton
+                                        itemLabel={todo.title}
+                                        confirmMessage={`Delete "${todo.title}"? This removes it from today's to-do list.`}
+                                        onConfirm={() => void handleDeleteTodo(todo)}
+                                    />
+                                ) : null}
                             </li>
                         );
                     })}

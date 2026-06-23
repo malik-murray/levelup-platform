@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from '@auth/supabaseClient';
 import type { EisenhowerFields } from '@/lib/habit/eisenhower';
-import { formatDate } from '@/lib/habitHelpers';
 
 type OrphanedBacklogTask = {
     id: string;
@@ -18,15 +17,15 @@ export async function repairOrphanedBacklogTasks(
 ) {
     if (tasks.length === 0) return;
 
-    const today = formatDate(new Date());
-
     for (const task of tasks) {
+        if (!task.assigned_date) continue;
+
         const { data: todo, error: insertError } = await client
             .from('habit_daily_todos')
             .insert({
                 user_id: userId,
                 title: task.title,
-                date: task.assigned_date ?? today,
+                date: task.assigned_date,
                 is_done: false,
                 is_important: task.is_important ?? false,
                 is_urgent: task.is_urgent ?? false,
@@ -125,6 +124,14 @@ export async function updateTodoEisenhower(
     }
 }
 
+export async function setBacklogTaskCategories(
+    userId: string,
+    backlogTaskId: string,
+    categoryIds: string[]
+) {
+    await syncBacklogTaskCategories(userId, backlogTaskId, categoryIds);
+}
+
 async function syncBacklogTaskCategories(
     userId: string,
     backlogTaskId: string,
@@ -149,6 +156,15 @@ async function syncBacklogTaskCategories(
     if (insertError) throw insertError;
 }
 
+export async function deleteBacklogTask(userId: string, backlogTaskId: string) {
+    const { error } = await supabase
+        .from('habit_backlog_tasks')
+        .delete()
+        .eq('id', backlogTaskId)
+        .eq('user_id', userId);
+    if (error) throw error;
+}
+
 export async function deleteBacklogTodo(
     userId: string,
     todoId: string,
@@ -169,6 +185,36 @@ export async function deleteBacklogTodo(
             .eq('user_id', userId);
         if (backlogError) throw backlogError;
     }
+}
+
+export async function assignBacklogTodoToDate(
+    userId: string,
+    backlogTaskId: string,
+    title: string,
+    date: string,
+    fields: EisenhowerFields,
+    categoryIds: string[]
+) {
+    const { data: todo, error: insertError } = await supabase
+        .from('habit_daily_todos')
+        .insert({
+            user_id: userId,
+            title,
+            date,
+            is_done: false,
+            is_important: fields.is_important ?? false,
+            is_urgent: fields.is_urgent ?? false,
+            backlog_task_id: backlogTaskId,
+        })
+        .select('id, title, is_done, date, created_at, is_important, is_urgent, backlog_task_id')
+        .single();
+    if (insertError) throw insertError;
+
+    if (categoryIds.length > 0 && todo?.id) {
+        await setTodoCategories(todo.id, userId, categoryIds, backlogTaskId);
+    }
+
+    return todo;
 }
 
 export async function setTodoCategories(
