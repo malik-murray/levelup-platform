@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { formatLocalDate, isSameLocalCalendarDay } from '@/lib/newsfeed/dateRange';
-import { getSummaryParagraph } from '@/lib/newsfeed/articlePresentation';
+import { getSummaryParagraph, type ArticleSummaryView } from '@/lib/newsfeed/articlePresentation';
 import { neon } from '../neonTheme';
 
 const POLL_INTERVAL_MS = 30_000;
@@ -36,13 +36,7 @@ type Article = {
     source?: {
         display_name?: string;
     };
-    summary: {
-        paragraphs_1?: string | null;
-        paragraphs_2?: string | null;
-        paragraphs_3?: string | null;
-        why_it_matters?: string | null;
-        action_suggestion?: string | null;
-    } | null;
+    summary: ArticleSummaryView | null;
     user_action: {
         is_saved: boolean;
         is_archived: boolean;

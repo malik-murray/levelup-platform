@@ -1,5 +1,6 @@
 import type { UserFeedContext } from '@/lib/newsfeed/userFeedContext';
 import { getPersonalRelevanceScore } from '@/lib/newsfeed/userFeedContext';
+import type { ArticleSummaryView } from '@/lib/newsfeed/articlePresentation';
 
 type TopicNameMap = Map<string, string>;
 
@@ -9,15 +10,6 @@ type SourceLike = {
     display_name: string;
 };
 
-type SummaryLike = {
-    paragraphs_1?: string;
-    paragraphs_2?: string;
-    paragraphs_3?: string;
-    paragraphs_4?: string;
-    paragraphs_5?: string;
-    why_it_matters?: string;
-} | null;
-
 export type RankableArticle = {
     id: string;
     title: string;
@@ -25,7 +17,7 @@ export type RankableArticle = {
     publish_time: string;
     topic_ids: string[];
     source: SourceLike;
-    summary: SummaryLike;
+    summary: ArticleSummaryView | null;
     user_action: {
         preferred_summary_length: number;
     };
@@ -151,7 +143,7 @@ export function getSourceReliabilityScore(sourceName: string, config: RankingCon
 export function getSummaryQualityScore(article: RankableArticle): number {
     const preferredLength = article.user_action.preferred_summary_length || 1;
     const summaryText =
-        (article.summary?.[`paragraphs_${preferredLength}` as keyof NonNullable<SummaryLike>] as string) ||
+        (article.summary?.[`paragraphs_${preferredLength}` as keyof ArticleSummaryView] as string | null) ||
         article.summary?.paragraphs_1 ||
         article.description ||
         '';

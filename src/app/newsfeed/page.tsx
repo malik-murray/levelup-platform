@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { formatLocalDate } from '@/lib/newsfeed/dateRange';
 import { rankArticlesForBriefing } from '@/lib/newsfeed/topStoriesRanking';
-import { getSummaryParagraph } from '@/lib/newsfeed/articlePresentation';
+import { getSummaryParagraph, type ArticleSummaryView } from '@/lib/newsfeed/articlePresentation';
 import { normalizeUserFeedContext, type UserFeedContext } from '@/lib/newsfeed/userFeedContext';
 
 type Source = {
@@ -20,16 +20,6 @@ type Topic = {
     description?: string | null;
 };
 
-type ArticleSummary = {
-    paragraphs_1?: string | null;
-    paragraphs_2?: string | null;
-    paragraphs_3?: string | null;
-    paragraphs_4?: string | null;
-    paragraphs_5?: string | null;
-    why_it_matters?: string | null;
-    action_suggestion?: string | null;
-};
-
 type Article = {
     id: string;
     title: string;
@@ -39,7 +29,7 @@ type Article = {
     image_url: string | null;
     topic_ids: string[];
     source: Source;
-    summary: ArticleSummary | null;
+    summary: ArticleSummaryView | null;
     user_action: {
         is_saved: boolean;
         is_archived: boolean;
@@ -268,7 +258,7 @@ export default function NewsfeedPage() {
         updateArticleAction(article.id, { is_archived: !article.user_action.is_archived });
     };
 
-    const getSummaryText = (summary: ArticleSummary | null, length: number, description?: string | null): string => {
+    const getSummaryText = (summary: ArticleSummaryView | null, length: number, description?: string | null): string => {
         return getSummaryParagraph(summary, length, description);
     };
 

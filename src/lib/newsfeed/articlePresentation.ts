@@ -16,13 +16,13 @@ export type StoredArticleAnalysis = {
 };
 
 export type ArticleSummaryView = {
-    paragraphs_1: string | null;
-    paragraphs_2: string | null;
-    paragraphs_3: string | null;
-    paragraphs_4: string | null;
-    paragraphs_5: string | null;
-    why_it_matters: string | null;
-    action_suggestion: string | null;
+    paragraphs_1?: string | null;
+    paragraphs_2?: string | null;
+    paragraphs_3?: string | null;
+    paragraphs_4?: string | null;
+    paragraphs_5?: string | null;
+    why_it_matters?: string | null;
+    action_suggestion?: string | null;
 };
 
 function nonEmpty(value: string | null | undefined): string | null {
