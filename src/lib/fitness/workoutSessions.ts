@@ -49,13 +49,32 @@ export type WorkoutSessionItem = {
     updated_at: string;
 };
 
+export type WorkoutSetLog = {
+    id: string;
+    session_item_id: string;
+    set_number: number;
+    reps: number | null;
+    weight_kg: number | null;
+    rpe: number | null;
+    duration_seconds: number | null;
+    is_warmup: boolean;
+    notes: string | null;
+    completed_at: string | null;
+    created_at: string;
+    updated_at: string;
+};
+
+export type WorkoutSessionItemWithSetLogs = WorkoutSessionItem & {
+    set_logs: WorkoutSetLog[];
+};
+
 export type PreviousWorkoutPerformanceItem = WorkoutSessionItem & {
     session_started_at: string;
     session_ended_at: string | null;
 };
 
 export type WorkoutSessionWithItems = WorkoutSession & {
-    items: WorkoutSessionItem[];
+    items: WorkoutSessionItemWithSetLogs[];
 };
 
 export async function createSessionFromPlan(
@@ -125,7 +144,7 @@ export async function createSessionFromPlan(
 
     return {
         ...session,
-        items: sessionItems,
+        items: sessionItems.map((item) => ({ ...item, set_logs: [] })),
     };
 }
 
@@ -197,7 +216,10 @@ export async function createSessionFromPlanDay(
     }
 
     const sessionItems = (itemsData ?? []) as WorkoutSessionItem[];
-    return { ...session, items: sessionItems };
+    return {
+        ...session,
+        items: sessionItems.map((item) => ({ ...item, set_logs: [] })),
+    };
 }
 
 export async function getSessionWithItems(
@@ -234,10 +256,227 @@ export async function getSessionWithItems(
     }
 
     const items = (itemsData ?? []) as WorkoutSessionItem[];
+    const setLogsByItem = await listSetLogsForSessionItemIds(
+        items.map((item) => item.id),
+        client
+    );
 
     return {
         ...session,
-        items,
+        items: items.map((item) => ({
+            ...item,
+            set_logs: setLogsByItem[item.id] ?? [],
+        })),
+    };
+}
+
+async function listSetLogsForSessionItemIds(
+    sessionItemIds: string[],
+    client: SupabaseClient
+): Promise<Record<string, WorkoutSetLog[]>> {
+    if (sessionItemIds.length === 0) return {};
+
+    const { data, error } = await client
+        .from('fitness_workout_set_logs')
+        .select('*')
+        .in('session_item_id', sessionItemIds)
+        .order('set_number', { ascending: true });
+
+    if (error) {
+        // Table may not exist until migration 082 is applied.
+        if (error.code === 'PGRST205' || error.code === '42P01') {
+            return {};
+        }
+        console.error('listSetLogsForSessionItemIds:', error);
+        throw error;
+    }
+
+    const grouped: Record<string, WorkoutSetLog[]> = {};
+    for (const row of data ?? []) {
+        const log = row as WorkoutSetLog;
+        if (!grouped[log.session_item_id]) grouped[log.session_item_id] = [];
+        grouped[log.session_item_id].push(log);
+    }
+    return grouped;
+}
+
+function isSetLogCompleted(log: Pick<WorkoutSetLog, 'reps' | 'weight_kg' | 'completed_at'>): boolean {
+    if (log.completed_at) return true;
+    if (log.reps != null && log.reps > 0) return true;
+    if (log.weight_kg != null && log.weight_kg > 0) return true;
+    return false;
+}
+
+function computeRollupsFromSetLogs(
+    logs: WorkoutSetLog[]
+): Pick<WorkoutSessionItem, 'actual_sets_completed' | 'actual_avg_reps_per_set'> {
+    const completed = logs.filter(isSetLogCompleted);
+    const repsValues = completed
+        .map((log) => log.reps)
+        .filter((reps): reps is number => reps != null && reps > 0);
+    return {
+        actual_sets_completed: completed.length > 0 ? completed.length : null,
+        actual_avg_reps_per_set:
+            repsValues.length > 0
+                ? repsValues.reduce((sum, reps) => sum + reps, 0) / repsValues.length
+                : null,
+    };
+}
+
+async function rollupSessionItemActualsFromSetLogs(
+    sessionItemId: string,
+    client: SupabaseClient
+): Promise<WorkoutSessionItem> {
+    const logsByItem = await listSetLogsForSessionItemIds([sessionItemId], client);
+    const logs = logsByItem[sessionItemId] ?? [];
+    const rollups = computeRollupsFromSetLogs(logs);
+
+    const { data, error } = await client
+        .from('fitness_workout_session_items')
+        .update({
+            actual_sets_completed: rollups.actual_sets_completed,
+            actual_avg_reps_per_set: rollups.actual_avg_reps_per_set,
+        })
+        .eq('id', sessionItemId)
+        .select('*')
+        .single();
+
+    if (error) {
+        console.error('rollupSessionItemActualsFromSetLogs:', error);
+        throw error;
+    }
+
+    return data as WorkoutSessionItem;
+}
+
+async function assertSessionItemEditable(
+    sessionItemId: string,
+    client: SupabaseClient
+): Promise<WorkoutSessionItem> {
+    const { data: item, error: itemError } = await client
+        .from('fitness_workout_session_items')
+        .select('*')
+        .eq('id', sessionItemId)
+        .maybeSingle();
+
+    if (itemError) {
+        console.error('assertSessionItemEditable (load item):', itemError);
+        throw itemError;
+    }
+    if (!item) {
+        throw new Error('Session item not found.');
+    }
+
+    const { data: session, error: sessionError } = await client
+        .from('fitness_workout_sessions')
+        .select('status')
+        .eq('id', item.session_id)
+        .maybeSingle();
+
+    if (sessionError) {
+        console.error('assertSessionItemEditable (load session):', sessionError);
+        throw sessionError;
+    }
+    if (!session) {
+        throw new Error('Parent session not found.');
+    }
+    if (session.status !== 'in_progress') {
+        throw new Error('Only in-progress sessions can be edited.');
+    }
+
+    return item as WorkoutSessionItem;
+}
+
+export async function upsertSetLog(
+    sessionItemId: string,
+    setNumber: number,
+    updates: {
+        reps?: number | null;
+        weight_kg?: number | null;
+        rpe?: number | null;
+        duration_seconds?: number | null;
+        is_warmup?: boolean;
+        notes?: string | null;
+        completed_at?: string | null;
+    },
+    supabase?: SupabaseClient
+): Promise<{ setLog: WorkoutSetLog; item: WorkoutSessionItemWithSetLogs }> {
+    const client = getClient(supabase);
+    if (!Number.isInteger(setNumber) || setNumber < 1) {
+        throw new Error('Set number must be a positive integer.');
+    }
+
+    await assertSessionItemEditable(sessionItemId, client);
+
+    const payload: Record<string, unknown> = {
+        session_item_id: sessionItemId,
+        set_number: setNumber,
+    };
+    if ('reps' in updates) payload.reps = updates.reps ?? null;
+    if ('weight_kg' in updates) payload.weight_kg = updates.weight_kg ?? null;
+    if ('rpe' in updates) payload.rpe = updates.rpe ?? null;
+    if ('duration_seconds' in updates) payload.duration_seconds = updates.duration_seconds ?? null;
+    if ('is_warmup' in updates) payload.is_warmup = updates.is_warmup ?? false;
+    if ('notes' in updates) payload.notes = updates.notes ?? null;
+    if ('completed_at' in updates) payload.completed_at = updates.completed_at ?? null;
+
+    const { data: setLog, error } = await client
+        .from('fitness_workout_set_logs')
+        .upsert(payload, { onConflict: 'session_item_id,set_number' })
+        .select('*')
+        .single();
+
+    if (error) {
+        console.error('upsertSetLog:', error);
+        throw error;
+    }
+
+    const item = await rollupSessionItemActualsFromSetLogs(sessionItemId, client);
+    const logsByItem = await listSetLogsForSessionItemIds([sessionItemId], client);
+
+    return {
+        setLog: setLog as WorkoutSetLog,
+        item: {
+            ...item,
+            set_logs: logsByItem[sessionItemId] ?? [],
+        },
+    };
+}
+
+export async function deleteSetLog(
+    setLogId: string,
+    supabase?: SupabaseClient
+): Promise<WorkoutSessionItemWithSetLogs> {
+    const client = getClient(supabase);
+
+    const { data: existing, error: loadError } = await client
+        .from('fitness_workout_set_logs')
+        .select('*')
+        .eq('id', setLogId)
+        .maybeSingle();
+
+    if (loadError) {
+        console.error('deleteSetLog (load):', loadError);
+        throw loadError;
+    }
+    if (!existing) {
+        throw new Error('Set log not found.');
+    }
+
+    const sessionItemId = (existing as WorkoutSetLog).session_item_id;
+    await assertSessionItemEditable(sessionItemId, client);
+
+    const { error } = await client.from('fitness_workout_set_logs').delete().eq('id', setLogId);
+    if (error) {
+        console.error('deleteSetLog:', error);
+        throw error;
+    }
+
+    const item = await rollupSessionItemActualsFromSetLogs(sessionItemId, client);
+    const logsByItem = await listSetLogsForSessionItemIds([sessionItemId], client);
+    return {
+        ...item,
+        set_logs: logsByItem[sessionItemId] ?? [],
     };
 }
 

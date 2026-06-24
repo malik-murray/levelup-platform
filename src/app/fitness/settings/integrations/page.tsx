@@ -120,7 +120,7 @@ export default function IntegrationsPage() {
     };
 
     return (
-        <section className="space-y-6 px-6 py-4">
+        <div className="max-w-2xl space-y-6">
             {notification && (
                 <div className={`rounded-lg border p-3 text-xs ${
                     notification.includes('Error') || notification.includes('Failed')
@@ -132,11 +132,9 @@ export default function IntegrationsPage() {
             )}
 
             {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h2 className="text-2xl font-bold text-white dark:text-white">Integrations</h2>
-                    <p className="text-xs text-slate-400 mt-1">Connect your fitness and nutrition apps</p>
-                </div>
+            <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Integrations</h2>
+                <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">Connect your fitness and nutrition apps</p>
             </div>
 
             {/* Integrations List */}
@@ -219,7 +217,7 @@ export default function IntegrationsPage() {
                     For now, integrations are in mock/testing mode. Real API connections will be added in future updates.
                 </p>
             </div>
-        </section>
+        </div>
     );
 }
 

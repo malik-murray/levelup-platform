@@ -19,7 +19,7 @@ const fitnessTabs = [
     { href: '/fitness/workouts', label: 'Workouts' },
     { href: '/fitness/meals', label: 'Meals' },
     { href: '/fitness/metrics', label: 'Metrics' },
-    { href: '/fitness/settings/integrations', label: 'Integrations' },
+    { href: '/fitness/settings', label: 'Settings' },
 ];
 
 export default function FitnessLayout({
@@ -73,7 +73,7 @@ export default function FitnessLayout({
                 <nav className="mx-auto max-w-6xl overflow-x-auto px-4 pb-3 sm:px-6 scrollbar-hide">
                     <div className="flex gap-2 min-w-max sm:min-w-0">
                         {fitnessTabs.map(tab => {
-                            const isActive = pathname === tab.href || (tab.href !== '/fitness' && pathname?.startsWith(tab.href));
+                            const isActive = pathname === tab.href || (tab.href !== '/fitness' && pathname?.startsWith(tab.href)) || (tab.href === '/fitness/settings' && pathname?.startsWith('/fitness/settings'));
 
                             return (
                                 <Link

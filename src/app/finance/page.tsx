@@ -6,10 +6,13 @@ import { supabase } from '@auth/supabaseClient';
 import { usePreview } from '@/lib/previewStore';
 import { learnMerchantMappingFromUserCategory } from '@/lib/financial-concierge/categoryEngine';
 import { FinanceDashboardShell } from '@/app/finance/components/FinanceDashboardShell';
+import {
+    getAccountBalanceDetails,
+    getAccountGroup,
+    type AccountType,
+} from '@/lib/finance/accountBalances';
 
 console.log('FINANCE PAGE LOADED, URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
-
-type AccountType = 'checking' | 'savings' | 'credit' | 'cash' | 'investment' | 'other';
 
 type Account = {
     id: string;
@@ -546,28 +549,16 @@ export default function FinancePage() {
         return map;
     }, [allTransactions]);
 
-    // Helper: compute signed current balance for an account (same as accounts page)
-    const getAccountBalance = (acc: Account) => {
-        const netChange = netChangeByAccountId.get(acc.id) ?? 0;
-        const starting = Number(acc.starting_balance ?? 0);
-        const rawBalance = starting + netChange;
+    const getAccountBalance = (acc: Account) =>
+        getAccountBalanceDetails(
+            acc.type,
+            acc.starting_balance,
+            netChangeByAccountId.get(acc.id) ?? 0
+        );
 
-        // Credit accounts are liabilities: flip sign so spending shows negative
-        const signedBalance = acc.type === 'credit' ? -rawBalance : rawBalance;
-
-        return {
-            starting,
-            netChange,
-            rawBalance,
-            signedBalance,
-        };
-    };
-
-    // Net worth = sum of signed balances across accounts (same as accounts page)
     const netWorth = useMemo(() => {
         return accounts.reduce((sum, acc) => {
-            const { signedBalance } = getAccountBalance(acc);
-            return sum + signedBalance;
+            return sum + getAccountBalance(acc).signedBalance;
         }, 0);
     }, [accounts, netChangeByAccountId]);
 
@@ -643,9 +634,11 @@ export default function FinancePage() {
         });
         return accounts.reduce((sum, acc) => {
             const netChange = byAccount.get(acc.id) ?? 0;
-            const raw = Number(acc.starting_balance ?? 0) + netChange;
-            const signed = acc.type === 'credit' ? -raw : raw;
-            return sum + signed;
+            return (
+                sum +
+                getAccountBalanceDetails(acc.type, acc.starting_balance, netChange)
+                    .signedBalance
+            );
         }, 0);
     }, [accounts, allTransactions, startOfMonthStr]);
 
@@ -693,9 +686,11 @@ export default function FinancePage() {
             });
             return accounts.reduce((sum, acc) => {
                 const netChange = byAccount.get(acc.id) ?? 0;
-                const raw = Number(acc.starting_balance ?? 0) + netChange;
-                const signed = acc.type === 'credit' ? -raw : raw;
-                return sum + signed;
+                return (
+                    sum +
+                    getAccountBalanceDetails(acc.type, acc.starting_balance, netChange)
+                        .signedBalance
+                );
             }, 0);
         });
     }, [monthsWindow, allTransactions, accounts]);
@@ -733,12 +728,18 @@ export default function FinancePage() {
     }, [budgets, categories, spendingByCategoryName]);
 
     const accountRows = useMemo(() => {
-        return accounts.map(acc => ({
-            name: acc.name,
-            type: acc.type ?? 'other',
-            balance: getAccountBalance(acc).signedBalance,
-            changePct: null as number | null,
-        }));
+        return accounts.map(acc => {
+            const details = getAccountBalance(acc);
+            return {
+                id: acc.id,
+                name: acc.name,
+                type: acc.type ?? 'other',
+                group: getAccountGroup(acc.type),
+                balance: details.displayBalance,
+                signedBalance: details.signedBalance,
+                changePct: null as number | null,
+            };
+        });
     }, [accounts, netChangeByAccountId]);
 
     const incomeStreams = useMemo(() => {

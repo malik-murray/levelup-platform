@@ -3,8 +3,13 @@
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { supabase } from '@auth/supabaseClient';
 import { learnMerchantMappingFromUserCategory } from '@/lib/financial-concierge/categoryEngine';
-
-type AccountType = 'checking' | 'savings' | 'credit' | 'cash' | 'investment' | 'other';
+import {
+    ACCOUNT_GROUP_LABELS,
+    ACCOUNT_GROUP_ORDER,
+    getAccountBalanceDetails,
+    getAccountGroup,
+    type AccountType,
+} from '@/lib/finance/accountBalances';
 
 type Account = {
     id: string;
@@ -193,28 +198,24 @@ export default function AccountsPage() {
         return map;
     }, [transactions]);
 
-    // Helper: compute signed current balance for an account
-    const getAccountBalance = (acc: Account) => {
-        const netChange = netChangeByAccountId.get(acc.id) ?? 0;
-        const starting = Number(acc.starting_balance ?? 0);
-        const rawBalance = starting + netChange; // balance this month
+    const getAccountBalance = (acc: Account) =>
+        getAccountBalanceDetails(
+            acc.type,
+            acc.starting_balance,
+            netChangeByAccountId.get(acc.id) ?? 0
+        );
 
-        // 🔹 Credit accounts are liabilities: flip sign so spending shows negative
-        const signedBalance = acc.type === 'credit' ? -rawBalance : rawBalance;
+    const accountsByGroup = useMemo(() => {
+        return ACCOUNT_GROUP_ORDER.map(group => ({
+            group,
+            label: ACCOUNT_GROUP_LABELS[group],
+            accounts: accounts.filter(a => getAccountGroup(a.type) === group),
+        })).filter(g => g.accounts.length > 0);
+    }, [accounts]);
 
-        return {
-            starting,
-            netChange,
-            rawBalance,
-            signedBalance,
-        };
-    };
-
-    // 🔹 Net worth = sum of signed balances across accounts
     const netWorth = useMemo(() => {
         return accounts.reduce((sum, acc) => {
-            const { signedBalance } = getAccountBalance(acc);
-            return sum + signedBalance;
+            return sum + getAccountBalance(acc).signedBalance;
         }, 0);
     }, [accounts, netChangeByAccountId]);
     
@@ -727,95 +728,144 @@ export default function AccountsPage() {
                         No accounts found. Add one below to get started.
                     </p>
                 ) : (
-                    <div className="space-y-1 max-h-[40vh] overflow-y-auto">
-                        {accounts.map(acc => {
-                            const { signedBalance } = getAccountBalance(acc);
-                            const isPositive = signedBalance >= 0;
-                            const isEditing = editingAccountId === acc.id;
-                            const isBusy = actionLoadingId === acc.id;
-                            const isSelected = selectedAccountId === acc.id;
+                    <div className="space-y-4 max-h-[40vh] overflow-y-auto">
+                        {accountsByGroup.map(({ group, label, accounts: groupAccounts }) => (
+                            <div key={group}>
+                                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                    {label}
+                                </p>
+                                <div className="space-y-1">
+                                    {groupAccounts.map(acc => {
+                                        const { displayBalance, signedBalance } =
+                                            getAccountBalance(acc);
+                                        const isCredit = group === 'credit';
+                                        const balanceToShow = isCredit
+                                            ? displayBalance
+                                            : signedBalance;
+                                        const isPositive = balanceToShow >= 0;
+                                        const isEditing = editingAccountId === acc.id;
+                                        const isBusy = actionLoadingId === acc.id;
+                                        const isSelected = selectedAccountId === acc.id;
 
-                            return (
-                                <div
-                                    key={acc.id}
-                                    className={`rounded-md border px-3 py-2 cursor-pointer transition-colors ${
-                                        isSelected
-                                            ? 'border-emerald-600 bg-emerald-950/50'
-                                            : 'border-slate-800 bg-slate-950 hover:bg-slate-800/50'
-                                    }`}
-                                >
-                                    {isEditing ? (
-                                        <form
-                                            onSubmit={e => handleSaveEdit(e, acc.id)}
-                                            onClick={e => e.stopPropagation()}
-                                            className="flex flex-col gap-2"
-                                        >
-                                            <input
-                                                value={editName}
-                                                onChange={e => setEditName(e.target.value)}
-                                                className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
-                                                placeholder="Account name"
-                                            />
-                                            <select
-                                                value={editType}
-                                                onChange={e => setEditType((e.target.value || '') as AccountType | '')}
-                                                className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                                        return (
+                                            <div
+                                                key={acc.id}
+                                                className={`rounded-md border px-3 py-2 cursor-pointer transition-colors ${
+                                                    isSelected
+                                                        ? 'border-emerald-600 bg-emerald-950/50'
+                                                        : 'border-slate-800 bg-slate-950 hover:bg-slate-800/50'
+                                                }`}
                                             >
-                                                {accountTypeOptions.map(t => (
-                                                    <option key={t} value={t}>{formatAccountType(t)}</option>
-                                                ))}
-                                            </select>
-                                            <input
-                                                value={editStartingBalance}
-                                                onChange={e => setEditStartingBalance(e.target.value)}
-                                                className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
-                                                placeholder="Starting balance"
-                                            />
-                                            <div className="flex gap-2">
-                                                <button type="submit" disabled={isBusy} className="flex-1 rounded-md border border-emerald-600 bg-emerald-900 px-2 py-1 text-[11px]">
-                                                    {isBusy ? 'Saving…' : 'Save'}
-                                                </button>
-                                                <button type="button" onClick={cancelEditing} className="flex-1 rounded-md border border-slate-700 px-2 py-1 text-[11px]">
-                                                    Cancel
-                                                </button>
+                                                {isEditing ? (
+                                                    <form
+                                                        onSubmit={e => handleSaveEdit(e, acc.id)}
+                                                        onClick={e => e.stopPropagation()}
+                                                        className="flex flex-col gap-2"
+                                                    >
+                                                        <input
+                                                            value={editName}
+                                                            onChange={e => setEditName(e.target.value)}
+                                                            className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                                                            placeholder="Account name"
+                                                        />
+                                                        <select
+                                                            value={editType}
+                                                            onChange={e =>
+                                                                setEditType(
+                                                                    (e.target.value || '') as
+                                                                        | AccountType
+                                                                        | ''
+                                                                )
+                                                            }
+                                                            className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                                                        >
+                                                            {accountTypeOptions.map(t => (
+                                                                <option key={t} value={t}>
+                                                                    {formatAccountType(t)}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                        <input
+                                                            value={editStartingBalance}
+                                                            onChange={e =>
+                                                                setEditStartingBalance(e.target.value)
+                                                            }
+                                                            className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                                                            placeholder="Starting balance"
+                                                        />
+                                                        <div className="flex gap-2">
+                                                            <button
+                                                                type="submit"
+                                                                disabled={isBusy}
+                                                                className="flex-1 rounded-md border border-emerald-600 bg-emerald-900 px-2 py-1 text-[11px]"
+                                                            >
+                                                                {isBusy ? 'Saving…' : 'Save'}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={cancelEditing}
+                                                                className="flex-1 rounded-md border border-slate-700 px-2 py-1 text-[11px]"
+                                                            >
+                                                                Cancel
+                                                            </button>
+                                                        </div>
+                                                    </form>
+                                                ) : (
+                                                    <div
+                                                        onClick={() => {
+                                                            setSelectedAccountId(acc.id);
+                                                            setTxAccountId(acc.id);
+                                                        }}
+                                                        className="flex items-center justify-between gap-2"
+                                                    >
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="font-medium text-slate-100 truncate">
+                                                                {acc.name}
+                                                            </div>
+                                                            <div
+                                                                className={`text-[10px] font-semibold ${
+                                                                    isCredit
+                                                                        ? balanceToShow < 0
+                                                                            ? 'text-red-400'
+                                                                            : 'text-slate-400'
+                                                                        : isPositive
+                                                                          ? 'text-emerald-400'
+                                                                          : 'text-red-400'
+                                                                }`}
+                                                            >
+                                                                {formatCurrency(balanceToShow)}
+                                                            </div>
+                                                        </div>
+                                                        <div
+                                                            className="flex gap-1 flex-shrink-0"
+                                                            onClick={e => e.stopPropagation()}
+                                                        >
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => startEditing(acc)}
+                                                                className="rounded px-1.5 py-0.5 text-[10px] text-slate-400 hover:bg-slate-700 hover:text-slate-200"
+                                                            >
+                                                                Edit
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    handleDeleteAccount(acc.id)
+                                                                }
+                                                                disabled={isBusy}
+                                                                className="rounded px-1.5 py-0.5 text-[10px] text-red-400 hover:bg-red-950 disabled:opacity-50"
+                                                            >
+                                                                Del
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
-                                        </form>
-                                    ) : (
-                                        <div
-                                            onClick={() => {
-                                                setSelectedAccountId(acc.id);
-                                                setTxAccountId(acc.id);
-                                            }}
-                                            className="flex items-center justify-between gap-2"
-                                        >
-                                            <div className="min-w-0 flex-1">
-                                                <div className="font-medium text-slate-100 truncate">{acc.name}</div>
-                                                <div className={`text-[10px] font-semibold ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
-                                                    {formatCurrency(signedBalance)}
-                                                </div>
-                                            </div>
-                                            <div className="flex gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => startEditing(acc)}
-                                                    className="rounded px-1.5 py-0.5 text-[10px] text-slate-400 hover:bg-slate-700 hover:text-slate-200"
-                                                >
-                                                    Edit
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleDeleteAccount(acc.id)}
-                                                    disabled={isBusy}
-                                                    className="rounded px-1.5 py-0.5 text-[10px] text-red-400 hover:bg-red-950 disabled:opacity-50"
-                                                >
-                                                    Del
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )}
+                                        );
+                                    })}
                                 </div>
-                            );
-                        })}
+                            </div>
+                        ))}
                     </div>
                 )}
 

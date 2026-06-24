@@ -17,6 +17,12 @@ import {
     YAxis,
 } from 'recharts';
 import { useMemo, type ReactNode } from 'react';
+import {
+    ACCOUNT_GROUP_LABELS,
+    ACCOUNT_GROUP_ORDER,
+    getAccountGroupIcon,
+    type AccountGroup,
+} from '@/lib/finance/accountBalances';
 
 const BG = '#0a0e14';
 const CARD_BORDER = '#1e293b';
@@ -148,7 +154,15 @@ function DonutGoal({ pct, color, label, sub, status }: DonutGoalProps) {
 export type SpendingSlice = { name: string; value: number; color: string };
 export type BudgetRow = { name: string; spent: number; budget: number; color: string };
 export type CashMonth = { label: string; income: number; expenses: number; net: number };
-export type AccountRow = { name: string; type: string; balance: number; changePct: number | null };
+export type AccountRow = {
+    id: string;
+    name: string;
+    type: string;
+    group: AccountGroup;
+    balance: number;
+    signedBalance: number;
+    changePct: number | null;
+};
 export type IncomeStreamRow = { name: string; thisMonth: number; lastMonth: number; goalPct: number };
 export type TxRow = {
     id: string;
@@ -241,6 +255,22 @@ export function FinanceDashboardShell({
         if (!last) return { income: 0, expenses: 0, net: 0 };
         return { income: last.income, expenses: last.expenses, net: last.net };
     }, [cashMonths]);
+
+    const accountsByGroup = useMemo(() => {
+        return ACCOUNT_GROUP_ORDER.map(group => ({
+            group,
+            label: ACCOUNT_GROUP_LABELS[group],
+            accounts: accountRows.filter(a => a.group === group),
+            subtotal: accountRows
+                .filter(a => a.group === group)
+                .reduce((s, a) => s + a.balance, 0),
+        })).filter(g => g.accounts.length > 0);
+    }, [accountRows]);
+
+    const accountsNetTotal = useMemo(
+        () => accountRows.reduce((s, a) => s + a.signedBalance, 0),
+        [accountRows]
+    );
 
     return (
         <div className="space-y-5 font-sans text-slate-200" style={{ backgroundColor: BG }}>
@@ -529,49 +559,81 @@ export function FinanceDashboardShell({
                     <div className="flex items-baseline justify-between gap-2">
                         <h2 className="text-sm font-semibold text-white">Accounts</h2>
                     </div>
-                    <p className="mt-1 text-2xl font-bold text-sky-400">{formatUsd(accountRows.reduce((s, a) => s + a.balance, 0))}</p>
-                    <p className="text-[11px] text-slate-500">Total balance</p>
-                    <ul className="mt-4 space-y-3">
+                    <p className="mt-1 text-2xl font-bold text-sky-400">{formatUsd(accountsNetTotal)}</p>
+                    <p className="text-[11px] text-slate-500">Net across accounts</p>
+                    <div className="mt-4 space-y-5">
                         {accountRows.length === 0 ? (
-                            <li className="text-sm text-slate-500">Add accounts to see balances.</li>
+                            <p className="text-sm text-slate-500">Add accounts to see balances.</p>
                         ) : (
-                            accountRows.map(acc => (
-                                <li
-                                    key={acc.name}
-                                    className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-3 last:border-0 last:pb-0"
-                                >
-                                    <div className="flex min-w-0 items-center gap-2">
-                                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-lg">
-                                            {acc.type === 'investment'
-                                                ? '📈'
-                                                : acc.type === 'savings'
-                                                  ? '🏦'
-                                                  : acc.type === 'credit'
-                                                    ? '💳'
-                                                    : '🏧'}
-                                        </span>
-                                        <div className="min-w-0">
-                                            <p className="truncate text-sm font-medium text-white">{acc.name}</p>
-                                            <p className="text-[11px] text-slate-500 capitalize">{acc.type}</p>
-                                        </div>
+                            accountsByGroup.map(({ group, label, accounts, subtotal }) => (
+                                <div key={group}>
+                                    <div className="mb-2 flex items-baseline justify-between gap-2">
+                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                            {label}
+                                        </p>
+                                        <p
+                                            className={`text-[11px] font-medium ${
+                                                group === 'credit'
+                                                    ? subtotal < 0
+                                                        ? 'text-red-400'
+                                                        : 'text-slate-400'
+                                                    : 'text-slate-300'
+                                            }`}
+                                        >
+                                            {formatUsd(subtotal)}
+                                        </p>
                                     </div>
-                                    <div className="shrink-0 text-right">
-                                        <p className="text-sm font-semibold text-white">{formatUsdFull(acc.balance)}</p>
-                                        {acc.changePct != null && (
-                                            <p
-                                                className={`text-[11px] ${
-                                                    acc.changePct >= 0 ? 'text-emerald-400' : 'text-red-400'
-                                                }`}
+                                    <ul className="space-y-3">
+                                        {accounts.map(acc => (
+                                            <li
+                                                key={acc.id}
+                                                className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-3 last:border-0 last:pb-0"
                                             >
-                                                {acc.changePct >= 0 ? '+' : ''}
-                                                {acc.changePct.toFixed(1)}%
-                                            </p>
-                                        )}
-                                    </div>
-                                </li>
+                                                <div className="flex min-w-0 items-center gap-2">
+                                                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-lg">
+                                                        {getAccountGroupIcon(group)}
+                                                    </span>
+                                                    <div className="min-w-0">
+                                                        <p className="truncate text-sm font-medium text-white">
+                                                            {acc.name}
+                                                        </p>
+                                                        <p className="text-[11px] text-slate-500 capitalize">
+                                                            {acc.type}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="shrink-0 text-right">
+                                                    <p
+                                                        className={`text-sm font-semibold ${
+                                                            group === 'credit'
+                                                                ? acc.balance < 0
+                                                                    ? 'text-red-400'
+                                                                    : 'text-slate-400'
+                                                                : 'text-white'
+                                                        }`}
+                                                    >
+                                                        {formatUsdFull(acc.balance)}
+                                                    </p>
+                                                    {acc.changePct != null && (
+                                                        <p
+                                                            className={`text-[11px] ${
+                                                                acc.changePct >= 0
+                                                                    ? 'text-emerald-400'
+                                                                    : 'text-red-400'
+                                                            }`}
+                                                        >
+                                                            {acc.changePct >= 0 ? '+' : ''}
+                                                            {acc.changePct.toFixed(1)}%
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
                             ))
                         )}
-                    </ul>
+                    </div>
                 </Card>
             </div>
 

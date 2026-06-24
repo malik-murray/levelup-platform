@@ -1,23 +1,30 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate } from '@/lib/habitHelpers';
-import { neon } from '../neonTheme';
+import { isSameLocalCalendarDay } from '@/lib/newsfeed/dateRange';
+import { getFitnessTodaySnapshot } from '@/lib/fitness/dailySnapshot';
+import type { FitnessTodaySnapshot } from '@/lib/fitness/dailySnapshot';
+import { listInProgressSessionsForUser } from '@/lib/fitness/workoutSessions';
+import { getCurrentProgramAssignmentForUser, getOrCreateScheduledSessionForAssignment } from '@/lib/fitness/programEngine';
+import FitnessTodayCard from '@/app/fitness/components/FitnessTodayCard';
+import DashboardCollapsibleSection from './DashboardCollapsibleSection';
 
-type Workout = {
-    id: string;
-    type: string;
-    duration_minutes: number;
-    calories_burned: number | null;
+type ProgramAssignment = {
+    scheduleEntryId: string;
+    planId: string;
+    dayIndex: number;
+    scheduledDate: string;
+    carryForward: boolean;
 };
 
-type Metric = {
-    weight_kg: number | null;
-    steps: number | null;
-    water_ml: number | null;
-    sleep_hours: number | null;
+type InProgressSession = {
+    id: string;
+    name: string | null;
+    started_at: string;
 };
 
 export default function FitnessWidget({
@@ -27,106 +34,134 @@ export default function FitnessWidget({
     selectedDate: Date;
     userId: string | null;
 }) {
-    const [workouts, setWorkouts] = useState<Workout[]>([]);
-    const [metrics, setMetrics] = useState<Metric | null>(null);
+    const router = useRouter();
+    const [open, setOpen] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [snapshot, setSnapshot] = useState<FitnessTodaySnapshot | null>(null);
+    const [programAssignment, setProgramAssignment] = useState<ProgramAssignment | null>(null);
+    const [inProgressSession, setInProgressSession] = useState<InProgressSession | null>(null);
+    const [startingScheduledWorkout, setStartingScheduledWorkout] = useState(false);
+    const [startError, setStartError] = useState<string | null>(null);
 
-    useEffect(() => {
-        if (userId) {
-            loadData();
+    const isToday = isSameLocalCalendarDay(selectedDate, new Date());
+
+    const loadData = useCallback(async () => {
+        if (!userId) {
+            setLoading(false);
+            return;
         }
-    }, [selectedDate, userId]);
 
-    const loadData = async () => {
-        if (!userId) return;
         setLoading(true);
+        setStartError(null);
+        const dateStr = formatDate(selectedDate);
+
         try {
-            const dateStr = formatDate(selectedDate);
+            const snapshotPromise = getFitnessTodaySnapshot(userId, supabase, dateStr);
 
-            // Load today's workouts
-            const { data: workoutsData } = await supabase
-                .from('fitness_workouts')
-                .select('id, type, duration_minutes, calories_burned')
-                .eq('user_id', userId)
-                .eq('date', dateStr)
-                .order('created_at', { ascending: false })
-                .limit(3);
+            const inProgressPromise = isToday
+                ? listInProgressSessionsForUser(userId, supabase).then((sessions) => {
+                      if (sessions.length === 0) return null;
+                      const s = sessions[0];
+                      return { id: s.id, name: s.name, started_at: s.started_at };
+                  })
+                : Promise.resolve(null);
 
-            // Load today's metrics
-            const { data: metricsData } = await supabase
-                .from('fitness_metrics')
-                .select('weight_kg, steps, water_ml, sleep_hours')
-                .eq('user_id', userId)
-                .eq('date', dateStr)
-                .single();
+            const assignmentPromise = isToday
+                ? getCurrentProgramAssignmentForUser(userId, supabase).then((assignment) => {
+                      if (!assignment) return null;
+                      return {
+                          scheduleEntryId: assignment.entry.id,
+                          planId: assignment.activeProgram.plan_id,
+                          dayIndex: assignment.entry.day_index,
+                          scheduledDate: assignment.entry.scheduled_date,
+                          carryForward: assignment.carryForward,
+                      };
+                  })
+                : Promise.resolve(null);
 
-            setWorkouts(workoutsData || []);
-            setMetrics(metricsData || null);
+            const [snapshotResult, inProgressResult, assignmentResult] = await Promise.all([
+                snapshotPromise,
+                inProgressPromise,
+                assignmentPromise,
+            ]);
+
+            setSnapshot(snapshotResult);
+            setInProgressSession(inProgressResult);
+            setProgramAssignment(assignmentResult);
         } catch (error) {
             console.error('Error loading fitness data:', error);
+            setSnapshot(null);
+            setInProgressSession(null);
+            setProgramAssignment(null);
         } finally {
             setLoading(false);
         }
+    }, [userId, selectedDate, isToday]);
+
+    useEffect(() => {
+        void loadData();
+    }, [loadData]);
+
+    const handleStartScheduledWorkout = async () => {
+        if (!programAssignment || !userId) return;
+        setStartingScheduledWorkout(true);
+        setStartError(null);
+        try {
+            const started = await getOrCreateScheduledSessionForAssignment({
+                userId,
+                planId: programAssignment.planId,
+                dayIndex: programAssignment.dayIndex,
+                scheduleEntryId: programAssignment.scheduleEntryId,
+                supabase,
+            });
+            router.push(`/fitness/sessions/${started.sessionId}`);
+        } catch (err) {
+            setStartError(
+                err instanceof Error ? err.message : "Failed to start today's scheduled workout"
+            );
+        } finally {
+            setStartingScheduledWorkout(false);
+        }
     };
 
-    if (loading) {
-        return (
-            <div className={`${neon.widget} p-4`}>
-                <div className="py-4 text-center text-sm text-slate-400">Loading...</div>
-            </div>
-        );
-    }
-
-    const totalCalories = workouts.reduce((sum, w) => sum + (w.calories_burned || 0), 0);
-    const totalDuration = workouts.reduce((sum, w) => sum + w.duration_minutes, 0);
+    if (!userId) return null;
 
     return (
-        <div className={`${neon.widget} space-y-3 p-4`}>
-            <div className="flex items-center justify-between">
-                <Link href="/fitness" className="transition-colors hover:text-[#ffe066]">
-                    <h3 className="text-lg font-semibold text-[#ffe066]">Fitness</h3>
-                </Link>
-            </div>
-
-            {/* Today's Stats */}
-            <div className="space-y-2">
-                {workouts.length > 0 && (
-                    <div className="text-sm">
-                        <div className="text-slate-400">Workouts: {workouts.length}</div>
-                        <div className="text-slate-400">Duration: {totalDuration} min</div>
-                        {totalCalories > 0 && (
-                            <div className="text-slate-400">Calories: {totalCalories}</div>
-                        )}
-                    </div>
+        <DashboardCollapsibleSection
+            title="Today's Workout"
+            open={open}
+            onToggle={() => setOpen((o) => !o)}
+            headingSize="md"
+        >
+            <div className="space-y-3 p-4">
+                {loading ? (
+                    <div className="py-4 text-center text-sm text-slate-400">Loading…</div>
+                ) : (
+                    <>
+                        <FitnessTodayCard
+                            embedded
+                            selectedDate={selectedDate}
+                            snapshot={snapshot}
+                            snapshotLoading={false}
+                            programAssignment={isToday ? programAssignment : null}
+                            inProgressSession={isToday ? inProgressSession : null}
+                            startingScheduledWorkout={startingScheduledWorkout}
+                            onStartScheduledWorkout={() => void handleStartScheduledWorkout()}
+                        />
+                        {startError ? (
+                            <p className="text-xs text-red-400">{startError}</p>
+                        ) : null}
+                    </>
                 )}
-
-                {metrics && (
-                    <div className="text-sm space-y-1">
-                        {metrics.steps && (
-                            <div className="text-slate-400">Steps: {metrics.steps.toLocaleString()}</div>
-                        )}
-                        {metrics.weight_kg && (
-                            <div className="text-slate-400">Weight: {metrics.weight_kg} kg</div>
-                        )}
-                        {metrics.water_ml && (
-                            <div className="text-slate-400">Water: {metrics.water_ml} ml</div>
-                        )}
-                    </div>
-                )}
-
-                {workouts.length === 0 && !metrics && (
-                    <p className="text-xs text-slate-500">No data for today</p>
-                )}
+                <div className="border-t border-slate-700/80 pt-2">
+                    <Link
+                        href="/fitness"
+                        className="text-xs font-semibold text-amber-400 transition-colors hover:text-amber-300"
+                    >
+                        Open Fitness →
+                    </Link>
+                </div>
             </div>
-
-            <div className="pt-2 border-t border-slate-700">
-                <Link
-                    href="/fitness"
-                    className="text-xs text-amber-400 hover:text-amber-300 transition-colors"
-                >
-                    View full Fitness Tracker →
-                </Link>
-            </div>
-        </div>
+        </DashboardCollapsibleSection>
     );
 }

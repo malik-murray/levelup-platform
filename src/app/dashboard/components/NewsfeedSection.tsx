@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { formatLocalDate, isSameLocalCalendarDay } from '@/lib/newsfeed/dateRange';
 import { getSummaryParagraph, type ArticleSummaryView } from '@/lib/newsfeed/articlePresentation';
-import { neon } from '../neonTheme';
+import DashboardCollapsibleSection from './DashboardCollapsibleSection';
 
 const POLL_INTERVAL_MS = 30_000;
 const POLL_DURATION_MS = 120_000;
@@ -158,6 +158,7 @@ export default function NewsfeedSection({
     const [globalArticles, setGlobalArticles] = useState<Article[]>([]);
     const [personalArticles, setPersonalArticles] = useState<Article[]>([]);
     const [loading, setLoading] = useState(true);
+    const [open, setOpen] = useState(false);
     const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
     const [refreshTick, setRefreshTick] = useState(0);
 
@@ -258,89 +259,84 @@ export default function NewsfeedSection({
         return null;
     }
 
-    if (loading) {
-        return (
-            <div className={`${neon.widget} p-6`}>
-                <div className="py-8 text-center text-slate-400">Loading news...</div>
-            </div>
-        );
-    }
-
     const globalTop = globalArticles.slice(0, 3);
     const personalTop = personalArticles.slice(0, 2);
     const updatedLabel = formatUpdatedAgo(lastUpdatedAt);
     void refreshTick;
 
     return (
-        <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-                <Link href="/newsfeed" className="transition-colors hover:text-[#ffe066]">
-                    <h2 className="text-xl font-bold text-[#ffe066]">Today&apos;s News</h2>
-                </Link>
-                {updatedLabel ? (
-                    <span className="text-xs text-slate-500">{updatedLabel}</span>
-                ) : null}
-            </div>
-
-            <div className={`${neon.widget} space-y-5 p-4`}>
-                <div>
-                    <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[#ffcc66]">
-                        Trending Globally
-                    </h3>
-                    {globalTop.length === 0 ? (
-                        <p className="py-2 text-center text-sm text-slate-400">No global stories for today</p>
-                    ) : (
-                        <div className="space-y-4">
-                            {globalTop.map((article) => (
-                                <ArticleCard
-                                    key={article.id}
-                                    article={article}
-                                    onSaveToggle={handleSaveToggle}
-                                    onArchiveToggle={handleArchiveToggle}
-                                />
-                            ))}
-                        </div>
-                    )}
-                </div>
-
-                {personalTop.length > 0 ? (
-                    <div className="border-t border-[#ff9d00]/20 pt-4">
-                        <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[#ffcc66]">
-                            For You
-                        </h3>
-                        <div className="space-y-4">
-                            {personalTop.map((article) => (
-                                <ArticleCard
-                                    key={article.id}
-                                    article={article}
-                                    onSaveToggle={handleSaveToggle}
-                                    onArchiveToggle={handleArchiveToggle}
-                                />
-                            ))}
-                        </div>
-                    </div>
+        <DashboardCollapsibleSection
+            title="Today's News"
+            open={open}
+            onToggle={() => setOpen((o) => !o)}
+            headingSize="md"
+            trailing={updatedLabel ? <span className="text-xs text-slate-500">{updatedLabel}</span> : undefined}
+        >
+            <div className="space-y-5 p-4">
+                {loading ? (
+                    <div className="py-8 text-center text-slate-400">Loading news...</div>
                 ) : (
-                    <div className="border-t border-[#ff9d00]/20 pt-4 text-center">
-                        <p className="text-sm text-slate-400">Set up sources and About Me for a personalized feed.</p>
-                        <Link
-                            href="/newsfeed/settings"
-                            className="mt-2 inline-block text-sm text-[#ffcc66] hover:text-[#ffe066]"
-                        >
-                            Configure For You →
-                        </Link>
-                    </div>
-                )}
-            </div>
+                    <>
+                        <div>
+                            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[#ffcc66]">
+                                Trending Globally
+                            </h3>
+                            {globalTop.length === 0 ? (
+                                <p className="py-2 text-center text-sm text-slate-400">No global stories for today</p>
+                            ) : (
+                                <div className="space-y-4">
+                                    {globalTop.map((article) => (
+                                        <ArticleCard
+                                            key={article.id}
+                                            article={article}
+                                            onSaveToggle={handleSaveToggle}
+                                            onArchiveToggle={handleArchiveToggle}
+                                        />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
 
-            <div className="text-center">
-                <Link
-                    href="/newsfeed"
-                    className="inline-flex items-center gap-2 text-[#ffcc66] transition-colors hover:text-[#ffe066]"
-                >
-                    <span>View full Newsfeed</span>
-                    <span>→</span>
-                </Link>
+                        {personalTop.length > 0 ? (
+                            <div className="border-t border-[#ff9d00]/20 pt-4">
+                                <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[#ffcc66]">
+                                    For You
+                                </h3>
+                                <div className="space-y-4">
+                                    {personalTop.map((article) => (
+                                        <ArticleCard
+                                            key={article.id}
+                                            article={article}
+                                            onSaveToggle={handleSaveToggle}
+                                            onArchiveToggle={handleArchiveToggle}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="border-t border-[#ff9d00]/20 pt-4 text-center">
+                                <p className="text-sm text-slate-400">Set up sources and About Me for a personalized feed.</p>
+                                <Link
+                                    href="/newsfeed/settings"
+                                    className="mt-2 inline-block text-sm text-[#ffcc66] hover:text-[#ffe066]"
+                                >
+                                    Configure For You →
+                                </Link>
+                            </div>
+                        )}
+                    </>
+                )}
+
+                <div className="border-t border-[#ff9d00]/20 pt-3 text-center">
+                    <Link
+                        href="/newsfeed"
+                        className="inline-flex items-center gap-2 text-[#ffcc66] transition-colors hover:text-[#ffe066]"
+                    >
+                        <span>View full Newsfeed</span>
+                        <span>→</span>
+                    </Link>
+                </div>
             </div>
-        </div>
+        </DashboardCollapsibleSection>
     );
 }

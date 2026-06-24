@@ -113,14 +113,8 @@ export async function getFitnessUserProfileForUser(
     return (data ?? null) as FitnessUserProfile | null;
 }
 
-export async function upsertFitnessUserProfileForUser(
-    userId: string,
-    input: UpsertFitnessUserProfileInput,
-    supabase?: SupabaseClient
-): Promise<FitnessUserProfile> {
-    const client = getClient(supabase);
-
-    const payload = {
+function buildProfilePayload(userId: string, input: UpsertFitnessUserProfileInput) {
+    return {
         user_id: userId,
         sex_identity: input.sex_identity,
         sex_identity_custom:
@@ -140,6 +134,18 @@ export async function upsertFitnessUserProfileForUser(
         motivation_style: input.motivation_style ?? 'short_cues',
         session_constraints: input.session_constraints ?? {},
         injury_confidence_map: input.injury_confidence_map ?? {},
+    };
+}
+
+export async function upsertFitnessUserProfileForUser(
+    userId: string,
+    input: UpsertFitnessUserProfileInput,
+    supabase?: SupabaseClient
+): Promise<FitnessUserProfile> {
+    const client = getClient(supabase);
+
+    const payload = {
+        ...buildProfilePayload(userId, input),
         is_onboarding_complete: true,
         completed_at: new Date().toISOString(),
     };
@@ -152,6 +158,32 @@ export async function upsertFitnessUserProfileForUser(
 
     if (error) {
         console.error('upsertFitnessUserProfileForUser:', error);
+        throw error;
+    }
+    return data as FitnessUserProfile;
+}
+
+export async function updateFitnessUserProfileForUser(
+    userId: string,
+    input: UpsertFitnessUserProfileInput,
+    supabase?: SupabaseClient
+): Promise<FitnessUserProfile> {
+    const client = getClient(supabase);
+
+    const payload = {
+        ...buildProfilePayload(userId, input),
+        updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await client
+        .from('fitness_user_profiles')
+        .update(payload)
+        .eq('user_id', userId)
+        .select('*')
+        .single();
+
+    if (error) {
+        console.error('updateFitnessUserProfileForUser:', error);
         throw error;
     }
     return data as FitnessUserProfile;

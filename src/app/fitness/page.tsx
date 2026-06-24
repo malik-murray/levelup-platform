@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
@@ -8,6 +8,9 @@ import { usePreview } from '@/lib/previewStore';
 import { listInProgressSessionsForUser, listSessionsForHomeFeed } from '@/lib/fitness/workoutSessions';
 import type { WorkoutSession } from '@/lib/fitness/workoutSessions';
 import FitnessShortsHome from './components/FitnessShortsHome';
+import FitnessTodayCard from './components/FitnessTodayCard';
+import { getFitnessTodaySnapshot } from '@/lib/fitness/dailySnapshot';
+import type { FitnessTodaySnapshot } from '@/lib/fitness/dailySnapshot';
 import { getFitnessUserProfileForUser } from '@/lib/fitness/profile';
 import type { FitnessUserProfile } from '@/lib/fitness/profile';
 import FitnessOnboardingWizard from './FitnessOnboardingWizard';
@@ -108,11 +111,8 @@ export default function FitnessPage() {
     const [starterPlanError, setStarterPlanError] = useState<string | null>(null);
     const [starterPlanId, setStarterPlanId] = useState<string | null>(null);
     const [feedSessions, setFeedSessions] = useState<WorkoutSession[]>([]);
-
-    const todayStr = useMemo(() => {
-        const date = new Date();
-        return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-    }, []);
+    const [todaySnapshot, setTodaySnapshot] = useState<FitnessTodaySnapshot | null>(null);
+    const [todaySnapshotLoading, setTodaySnapshotLoading] = useState(true);
 
     useEffect(() => {
         loadDashboardData();
@@ -126,6 +126,7 @@ export default function FitnessPage() {
         try {
             if (isPreview) {
                 setFeedSessions(PREVIEW_SESSION_FEED);
+                setTodaySnapshotLoading(false);
                 setLoading(false);
                 return;
             }
@@ -195,6 +196,16 @@ export default function FitnessPage() {
                 setFeedSessions(feed);
             } catch {
                 setFeedSessions([]);
+            }
+
+            setTodaySnapshotLoading(true);
+            try {
+                const snapshot = await getFitnessTodaySnapshot(user.id, supabase);
+                setTodaySnapshot(snapshot);
+            } catch {
+                setTodaySnapshot(null);
+            } finally {
+                setTodaySnapshotLoading(false);
             }
         } catch (error) {
             setFeedSessions([]);
@@ -447,109 +458,53 @@ export default function FitnessPage() {
                 </div>
             )}
 
+            {!loading && (
+                <FitnessTodayCard
+                    snapshot={todaySnapshot}
+                    snapshotLoading={todaySnapshotLoading}
+                    programAssignment={programAssignment}
+                    inProgressSession={latestInProgressSession}
+                    startingScheduledWorkout={startingScheduledWorkout}
+                    onStartScheduledWorkout={async () => {
+                        if (!programAssignment) return;
+                        setStartingScheduledWorkout(true);
+                        setNotification(null);
+                        try {
+                            const { data: { user } } = await supabase.auth.getUser();
+                            if (!user) {
+                                window.location.href = '/login';
+                                return;
+                            }
+                            const started = await getOrCreateScheduledSessionForAssignment({
+                                userId: user.id,
+                                planId: programAssignment.planId,
+                                dayIndex: programAssignment.dayIndex,
+                                scheduleEntryId: programAssignment.scheduleEntryId,
+                                supabase,
+                            });
+                            window.location.href = `/fitness/sessions/${started.sessionId}`;
+                        } catch (err) {
+                            setNotification(
+                                err instanceof Error
+                                    ? err.message
+                                    : 'Failed to start today\'s scheduled workout'
+                            );
+                        } finally {
+                            setStartingScheduledWorkout(false);
+                        }
+                    }}
+                />
+            )}
+
             <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-500">
-                <span className="font-medium text-zinc-400">{todayStr}</span>
-                <span aria-hidden className="text-zinc-600">·</span>
-                <Link href="/fitness/meals" className="text-amber-400/90 hover:text-amber-300">
-                    Meals
-                </Link>
-                <Link href="/fitness/metrics" className="text-amber-400/90 hover:text-amber-300">
-                    Metrics
-                </Link>
                 <Link href="/fitness/workouts" className="text-amber-400/90 hover:text-amber-300">
                     Workouts
                 </Link>
+                <span aria-hidden className="text-zinc-600">·</span>
                 <Link href="/fitness/progress" className="text-amber-400/90 hover:text-amber-300">
                     Progress
                 </Link>
             </div>
-
-            {/* Resume latest session */}
-            {latestInProgressSession && !loading && (
-                <div className="rounded-lg border-2 border-emerald-500 bg-emerald-950/40 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                            <p className="text-xs font-medium text-emerald-400">In progress</p>
-                            <p className="mt-0.5 text-sm font-semibold text-white">
-                                {latestInProgressSession.name || 'Workout Session'}
-                            </p>
-                            <p className="text-xs text-slate-400">
-                                Started {new Date(latestInProgressSession.started_at).toLocaleString('en-US', {
-                                    month: 'short',
-                                    day: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                })}
-                            </p>
-                        </div>
-                        <Link
-                            href={`/fitness/sessions/${latestInProgressSession.id}`}
-                            className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-black hover:bg-emerald-400"
-                        >
-                            Continue session
-                        </Link>
-                    </div>
-                </div>
-            )}
-
-            {programAssignment && !loading && (
-                <div className="rounded-lg border border-indigo-500/30 bg-indigo-950/20 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                            <h3 className="text-xs font-semibold text-indigo-300 mb-1">Today&apos;s scheduled workout</h3>
-                            <p className="text-sm font-medium text-white">
-                                Day {programAssignment.dayIndex}
-                                {programAssignment.carryForward ? ' (carry-forward)' : ''}
-                            </p>
-                            <p className="text-[11px] text-slate-400">
-                                Scheduled: {new Date(`${programAssignment.scheduledDate}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                            </p>
-                        </div>
-                        <div className="flex gap-2">
-                            <button
-                                type="button"
-                                disabled={startingScheduledWorkout}
-                                onClick={async () => {
-                                    setStartingScheduledWorkout(true);
-                                    setNotification(null);
-                                    try {
-                                        const { data: { user } } = await supabase.auth.getUser();
-                                        if (!user) {
-                                            window.location.href = '/login';
-                                            return;
-                                        }
-                                        const started = await getOrCreateScheduledSessionForAssignment({
-                                            userId: user.id,
-                                            planId: programAssignment.planId,
-                                            dayIndex: programAssignment.dayIndex,
-                                            scheduleEntryId: programAssignment.scheduleEntryId,
-                                            supabase,
-                                        });
-                                        window.location.href = `/fitness/sessions/${started.sessionId}`;
-                                    } catch (err) {
-                                        setNotification(
-                                            err instanceof Error
-                                                ? err.message
-                                                : 'Failed to start today\'s scheduled workout'
-                                        );
-                                    } finally {
-                                        setStartingScheduledWorkout(false);
-                                    }
-                                }}
-                                className="rounded-md bg-indigo-400 px-3 py-1.5 text-xs font-semibold text-black hover:bg-indigo-300 disabled:opacity-60"
-                            >
-                                {startingScheduledWorkout ? 'Starting…' : 'Start today\'s workout'}
-                            </button>
-                            <Link
-                                href={`/fitness/plans/${programAssignment.planId}`}
-                                className="rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
-                            >
-                                View plan
-                            </Link>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             </>
             }

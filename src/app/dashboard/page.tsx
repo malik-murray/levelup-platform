@@ -8,6 +8,7 @@ import HabitDailyEntrySection from './components/HabitDailyEntrySection';
 import DashboardNotesSection from './components/DashboardNotesSection';
 import NewsfeedSection from './components/NewsfeedSection';
 import FinanceWidget from './components/FinanceWidget';
+import FitnessWidget from './components/FitnessWidget';
 import AppSidebar from './components/AppSidebar';
 import DashboardScoreBars, { type DashboardScores } from './components/DashboardScoreBars';
 import DashboardCalendarOverview from './components/DashboardCalendarOverview';
@@ -454,6 +455,7 @@ export default function DashboardPage() {
                       </div>
                       <NewsfeedSection selectedDate={selectedDate} timeframe={timeframe} userId={userId} />
                       <FinanceWidget selectedDate={selectedDate} userId={userId} />
+                      <FitnessWidget selectedDate={selectedDate} userId={userId} />
                     </div>
                   )}
                 </div>

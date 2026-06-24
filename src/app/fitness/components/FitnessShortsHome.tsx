@@ -31,6 +31,15 @@ function IconDollar({ className }: { className?: string }) {
     );
 }
 
+function IconSettings({ className }: { className?: string }) {
+    return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" strokeLinecap="round" />
+        </svg>
+    );
+}
+
 function IconCompass({ className }: { className?: string }) {
     return (
         <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
@@ -147,6 +156,14 @@ export default function FitnessShortsHome({ sessions, sessionsLoading, alertSlot
                     <span className="truncate text-lg font-semibold tracking-tight text-white">LevelUpSolutions</span>
                 </Link>
                 <nav className="flex shrink-0 items-center gap-1 sm:gap-2" aria-label="App switcher">
+                    <Link
+                        href="/fitness/settings"
+                        title="Settings"
+                        className="flex h-10 w-10 items-center justify-center rounded-full text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-white"
+                    >
+                        <IconSettings className="h-5 w-5" />
+                        <span className="sr-only">Settings</span>
+                    </Link>
                     {topLinks.map(({ href, label, Icon }) => (
                         <Link
                             key={href}

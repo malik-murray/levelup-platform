@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { supabase } from '@auth/supabaseClient';
 import type {
     WorkoutSessionWithItems,
-    WorkoutSessionItem,
+    WorkoutSessionItemWithSetLogs,
     PreviousWorkoutPerformanceItem,
     SessionAdaptiveUpdate,
 } from '@/lib/fitness/workoutSessions';
@@ -21,6 +21,7 @@ import { getExerciseNamesBySlugs, formatSlugAsTitle } from '@/lib/fitness/exerci
 import { getWorkoutPlanName } from '@/lib/fitness/workoutPlans';
 import { getProgramScheduleEntryById } from '@/lib/fitness/programEngine';
 import CoachPanel from '@/components/fitness/CoachPanel';
+import ExerciseSetLogger from './ExerciseSetLogger';
 
 type SessionDetailClientProps = {
     id: string;
@@ -96,10 +97,21 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
     const saveItemActuals = async (
         itemId: string,
         edit: { actual_sets: string; actual_reps: string; actual_notes: string },
-        successMessage = 'Saved.'
+        successMessage = 'Saved.',
+        options?: { notesOnly?: boolean }
     ) => {
-        const actual_sets = parseNumberOrNull(edit.actual_sets);
-        const actual_reps = parseNumberOrNull(edit.actual_reps);
+        const updates: {
+            actual_sets?: number | null;
+            actual_reps?: number | null;
+            actual_notes?: string | null;
+        } = {
+            actual_notes: edit.actual_notes.trim() || null,
+        };
+
+        if (!options?.notesOnly) {
+            updates.actual_sets = parseNumberOrNull(edit.actual_sets);
+            updates.actual_reps = parseNumberOrNull(edit.actual_reps);
+        }
 
         setItemEdits((prev) => ({
             ...prev,
@@ -113,11 +125,7 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
         try {
             const updated = await updateWorkoutSessionItemActuals(
                 itemId,
-                {
-                    actual_sets,
-                    actual_reps,
-                    actual_notes: edit.actual_notes.trim() || null,
-                },
+                updates,
                 supabase
             );
             setSession((prev) => {
@@ -125,7 +133,9 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                 return {
                     ...prev,
                     items: prev.items.map((it) =>
-                        it.id === updated.id ? (updated as WorkoutSessionItem) : it
+                        it.id === updated.id
+                            ? { ...(updated as WorkoutSessionItemWithSetLogs), set_logs: it.set_logs }
+                            : it
                     ),
                 };
             });
@@ -392,10 +402,15 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
 
     const totalItems = itemCount;
     const itemsWithActuals = session.items.reduce((count, item) => {
-        const hasSets = item.actual_sets_completed != null;
-        const hasReps = item.actual_avg_reps_per_set != null;
+        const hasSets = item.actual_sets_completed != null && item.actual_sets_completed > 0;
+        const hasSetLogs = item.set_logs.some(
+            (log) =>
+                log.completed_at ||
+                (log.reps != null && log.reps > 0) ||
+                (log.weight_kg != null && log.weight_kg > 0)
+        );
         const hasNotes = !!item.actual_notes && item.actual_notes.trim().length > 0;
-        return count + (hasSets || hasReps || hasNotes ? 1 : 0);
+        return count + (hasSets || hasSetLogs || hasNotes ? 1 : 0);
     }, 0);
     const completionRate =
         totalItems === 0 ? 0 : Math.round((itemsWithActuals / totalItems) * 100);
@@ -749,139 +764,34 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                                             </p>
                                         )}
                                         <div className="mt-3 border-t border-slate-200 pt-2 text-[11px] text-slate-600 dark:border-slate-700 dark:text-slate-300">
-                                            <p className="mb-1 font-semibold">
-                                                Actual performance
-                                            </p>
-                                            {canEdit ? (
-                                                <>
-                                                    <div className="flex flex-wrap gap-2 mb-2">
-                                                        <div className="flex flex-col gap-0.5">
-                                                            <span className="text-slate-500 dark:text-slate-400">
-                                                                Set tracker
-                                                            </span>
-                                                            <div className="flex items-center gap-1">
-                                                                <button
-                                                                    type="button"
-                                                                    disabled={!!edit.saving}
-                                                                    onClick={() => {
-                                                                        const current = Number(
-                                                                            edit.actual_sets || '0'
-                                                                        );
-                                                                        const nextSets = Math.max(
-                                                                            0,
-                                                                            Number.isNaN(current)
-                                                                                ? 0
-                                                                                : current - 1
-                                                                        );
-                                                                        const nextEdit = {
-                                                                            ...edit,
-                                                                            actual_sets: String(nextSets),
-                                                                        };
-                                                                        setItemEdits((prev) => ({
-                                                                            ...prev,
-                                                                            [item.id]: {
-                                                                                ...nextEdit,
-                                                                                saveError: undefined,
-                                                                                saveSuccess: undefined,
-                                                                            },
-                                                                        }));
-                                                                        void saveItemActuals(
-                                                                            item.id,
-                                                                            nextEdit,
-                                                                            'Set count updated.'
-                                                                        );
-                                                                    }}
-                                                                    className="h-7 w-7 rounded border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-                                                                >
-                                                                    -
-                                                                </button>
-                                                                <span className="min-w-7 text-center text-xs font-semibold text-slate-700 dark:text-slate-200">
-                                                                    {edit.actual_sets.trim() === ''
-                                                                        ? '0'
-                                                                        : edit.actual_sets}
-                                                                </span>
-                                                                <button
-                                                                    type="button"
-                                                                    disabled={!!edit.saving}
-                                                                    onClick={() => {
-                                                                        const current = Number(
-                                                                            edit.actual_sets || '0'
-                                                                        );
-                                                                        const nextSets =
-                                                                            (Number.isNaN(current)
-                                                                                ? 0
-                                                                                : current) + 1;
-                                                                        const nextEdit = {
-                                                                            ...edit,
-                                                                            actual_sets: String(nextSets),
-                                                                        };
-                                                                        setItemEdits((prev) => ({
-                                                                            ...prev,
-                                                                            [item.id]: {
-                                                                                ...nextEdit,
-                                                                                saveError: undefined,
-                                                                                saveSuccess: undefined,
-                                                                            },
-                                                                        }));
-                                                                        void saveItemActuals(
-                                                                            item.id,
-                                                                            nextEdit,
-                                                                            'Set count updated.'
-                                                                        );
-                                                                        startRestTimer(
-                                                                            item.target_rest_seconds || 60,
-                                                                            item.id
-                                                                        );
-                                                                    }}
-                                                                    className="h-7 w-7 rounded border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-                                                                >
-                                                                    +
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                        <label className="flex flex-col gap-0.5">
-                                                            <span className="text-slate-500 dark:text-slate-400">Sets completed</span>
-                                                            <input
-                                                                type="number"
-                                                                min={0}
-                                                                value={edit.actual_sets}
-                                                                onChange={(e) =>
-                                                                    setItemEdits((prev) => ({
-                                                                        ...prev,
-                                                                        [item.id]: {
-                                                                            ...edit,
-                                                                            actual_sets: e.target.value,
-                                                                            saveError: undefined,
-                                                                            saveSuccess: undefined,
-                                                                        },
-                                                                    }))
-                                                                }
-                                                                className="w-20 rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                                                            />
-                                                        </label>
-                                                        <label className="flex flex-col gap-0.5">
-                                                            <span className="text-slate-500 dark:text-slate-400">Avg reps / set</span>
-                                                            <input
-                                                                type="number"
-                                                                min={0}
-                                                                value={edit.actual_reps}
-                                                                onChange={(e) =>
-                                                                    setItemEdits((prev) => ({
-                                                                        ...prev,
-                                                                        [item.id]: {
-                                                                            ...edit,
-                                                                            actual_reps: e.target.value,
-                                                                            saveError: undefined,
-                                                                            saveSuccess: undefined,
-                                                                        },
-                                                                    }))
-                                                                }
-                                                                className="w-24 rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                                                            />
-                                                        </label>
-                                                    </div>
-                                                    <label className="flex flex-col gap-0.5 mb-2">
-                                                        <span className="text-slate-500 dark:text-slate-400">Notes</span>
+                                            <p className="mb-2 font-semibold">Set log</p>
+                                            <ExerciseSetLogger
+                                                item={item}
+                                                canEdit={canEdit}
+                                                onItemUpdated={(updatedItem) => {
+                                                    setSession((prev) => {
+                                                        if (!prev) return prev;
+                                                        return {
+                                                            ...prev,
+                                                            items: prev.items.map((it) =>
+                                                                it.id === updatedItem.id
+                                                                    ? updatedItem
+                                                                    : it
+                                                            ),
+                                                        };
+                                                    });
+                                                }}
+                                                onSetCompleted={() =>
+                                                    startRestTimer(
+                                                        item.target_rest_seconds || 60,
+                                                        item.id
+                                                    )
+                                                }
+                                            />
+                                            <div className="mt-3">
+                                                <p className="mb-1 font-semibold">Exercise notes</p>
+                                                {canEdit ? (
+                                                    <>
                                                         <textarea
                                                             rows={2}
                                                             value={edit.actual_notes}
@@ -897,59 +807,42 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                                                                 }))
                                                             }
                                                             className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                                                            placeholder="Overall notes for this exercise…"
                                                         />
-                                                    </label>
-                                                    <button
-                                                        type="button"
-                                                        disabled={!!edit.saving}
-                                                        onClick={async () => {
-                                                            await saveItemActuals(item.id, edit, 'Saved.');
-                                                        }}
-                                                        className="inline-flex items-center rounded-md bg-slate-900 px-3 py-1 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
-                                                    >
-                                                        {edit.saving ? 'Saving…' : 'Save actuals'}
-                                                    </button>
-                                                    {edit.saveError && (
-                                                        <p className="mt-1 text-[11px] text-red-500 dark:text-red-400">
-                                                            {edit.saveError}
-                                                        </p>
-                                                    )}
-                                                    {edit.saveSuccess && (
-                                                        <p className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400">
-                                                            {edit.saveSuccess}
-                                                        </p>
-                                                    )}
-                                                </>
-                                            ) : (
-                                                <div className="space-y-1">
-                                                    <div className="flex flex-wrap gap-2">
-                                                        {item.actual_sets_completed != null && (
-                                                            <span>
-                                                                <span className="font-semibold">Sets completed:</span>{' '}
-                                                                {item.actual_sets_completed}
-                                                            </span>
-                                                        )}
-                                                        {item.actual_avg_reps_per_set != null && (
-                                                            <span>
-                                                                <span className="font-semibold">Avg reps / set:</span>{' '}
-                                                                {item.actual_avg_reps_per_set}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    {item.actual_notes && (
-                                                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                                                            Notes: {item.actual_notes}
-                                                        </p>
-                                                    )}
-                                                    {item.actual_sets_completed == null &&
-                                                        item.actual_avg_reps_per_set == null &&
-                                                        !item.actual_notes && (
-                                                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                                                                No actual performance recorded.
+                                                        <button
+                                                            type="button"
+                                                            disabled={!!edit.saving}
+                                                            onClick={async () => {
+                                                                await saveItemActuals(
+                                                                    item.id,
+                                                                    edit,
+                                                                    'Notes saved.',
+                                                                    { notesOnly: true }
+                                                                );
+                                                            }}
+                                                            className="mt-2 inline-flex items-center rounded-md border border-slate-300 bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                                                        >
+                                                            {edit.saving ? 'Saving…' : 'Save notes'}
+                                                        </button>
+                                                        {edit.saveError && (
+                                                            <p className="mt-1 text-[11px] text-red-500 dark:text-red-400">
+                                                                {edit.saveError}
                                                             </p>
                                                         )}
-                                                </div>
-                                            )}
+                                                        {edit.saveSuccess && (
+                                                            <p className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400">
+                                                                {edit.saveSuccess}
+                                                            </p>
+                                                        )}
+                                                    </>
+                                                ) : (
+                                                    item.actual_notes && (
+                                                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                                            {item.actual_notes}
+                                                        </p>
+                                                    )
+                                                )}
+                                            </div>
                                         </div>
                                         <div className="mt-2 border-t border-dashed border-slate-200 pt-2 text-[11px] text-slate-500 dark:border-slate-700 dark:text-slate-400">
                                             <p className="mb-1 font-semibold text-slate-600 dark:text-slate-300">
