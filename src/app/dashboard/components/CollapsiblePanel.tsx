@@ -19,7 +19,7 @@ export default function CollapsiblePanel({ open, children, className = '' }: Pro
         <div
             className={`grid overflow-hidden transition-[grid-template-rows] duration-300 ease-out motion-reduce:transition-none ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'} ${className}`.trim()}
         >
-            <div className="min-h-0 overflow-hidden" aria-hidden={!open}>
+            <div className={`min-h-0 ${open ? 'overflow-visible' : 'overflow-hidden'}`} aria-hidden={!open}>
                 {children}
             </div>
         </div>

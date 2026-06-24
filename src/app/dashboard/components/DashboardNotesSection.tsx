@@ -1,17 +1,12 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import type { Dispatch, KeyboardEvent, SetStateAction } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate } from '@/lib/habitHelpers';
+import { stripNoteImages } from '@/lib/dailyNoteImages';
+import DailyNoteField from '@/components/DailyNoteField';
 import { neon } from '../neonTheme';
 import CollapsiblePanel from './CollapsiblePanel';
-
-function adjustTextareaHeight(el: HTMLTextAreaElement | null) {
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.max(80, el.scrollHeight)}px`;
-}
 
 type DailyNotesContent = {
     notes: string | null;
@@ -20,42 +15,6 @@ type DailyNotesContent = {
     ideas: string | null;
     reflection: string | null;
 };
-
-function handleBulletListEnter(
-    e: KeyboardEvent<HTMLTextAreaElement>,
-    sectionKey: keyof DailyNotesContent,
-    setContent: Dispatch<SetStateAction<DailyNotesContent>>
-) {
-    if (e.key !== 'Enter' || e.shiftKey) return;
-
-    const textarea = e.currentTarget;
-    const { selectionStart, selectionEnd, value } = textarea;
-    if (selectionStart !== selectionEnd) return;
-
-    const lineStart = value.lastIndexOf('\n', selectionStart - 1) + 1;
-    const lineEndRaw = value.indexOf('\n', selectionStart);
-    const lineEnd = lineEndRaw === -1 ? value.length : lineEndRaw;
-    const currentLine = value.slice(lineStart, lineEnd);
-    const trimmedCurrentLine = currentLine.trim();
-    const isBulletLine = currentLine.startsWith('-');
-    if (!isBulletLine) return;
-
-    e.preventDefault();
-
-    // Pressing Enter on an empty bullet exits list mode.
-    const insertion = trimmedCurrentLine === '-' || trimmedCurrentLine === '- ' ? '\n' : '\n- ';
-    const nextValue = value.slice(0, selectionStart) + insertion + value.slice(selectionEnd);
-    const nextCaret = selectionStart + insertion.length;
-
-    setContent((prev) => ({ ...prev, [sectionKey]: nextValue }));
-
-    requestAnimationFrame(() => {
-        textarea.value = nextValue;
-        textarea.selectionStart = nextCaret;
-        textarea.selectionEnd = nextCaret;
-        adjustTextareaHeight(textarea);
-    });
-}
 
 const SECTIONS = [
     { key: 'notes' as const, title: 'Notes', placeholder: 'General notes...' },
@@ -82,7 +41,7 @@ export default function DashboardNotesSection({
         reflection: null,
     });
     const [loading, setLoading] = useState(true);
-    const textareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
+    const dateStr = formatDate(selectedDate);
 
     useEffect(() => {
         if (userId) {
@@ -90,17 +49,10 @@ export default function DashboardNotesSection({
         }
     }, [selectedDate, userId]);
 
-    useEffect(() => {
-        SECTIONS.forEach(({ key }) => {
-            if (expandedSections.has(key)) adjustTextareaHeight(textareaRefs.current[key]);
-        });
-    }, [content, expandedSections]);
-
     const loadContent = async () => {
         if (!userId) return;
         setLoading(true);
         try {
-            const dateStr = formatDate(selectedDate);
             const { data } = await supabase
                 .from('habit_daily_content')
                 .select('notes, lessons, feelings, ideas, reflection')
@@ -124,7 +76,6 @@ export default function DashboardNotesSection({
 
     const saveField = async (field: keyof DailyNotesContent, value: string | null) => {
         if (!userId) return;
-        const dateStr = formatDate(selectedDate);
         const updated = { ...content, [field]: value ?? null };
         try {
             const { data: existing } = await supabase
@@ -168,9 +119,19 @@ export default function DashboardNotesSection({
 
     const getSummary = (text: string | null | undefined): string | null => {
         if (!text || !text.trim()) return null;
-        const len = text.trim().length;
-        if (len < 60) return `${len} chars`;
-        return `${text.trim().split(/\s+/).filter(Boolean).length} words`;
+        const stripped = stripNoteImages(text);
+        const imageCount = (text.match(/!\[[^\]]*\]\([^)]+\)/g) ?? []).length;
+        if (!stripped && imageCount > 0) {
+            return imageCount === 1 ? '1 image' : `${imageCount} images`;
+        }
+        if (!stripped) return null;
+        const len = stripped.length;
+        if (len < 60) {
+            const suffix = imageCount > 0 ? `, ${imageCount} img` : '';
+            return `${len} chars${suffix}`;
+        }
+        const wordSuffix = imageCount > 0 ? `, ${imageCount} img` : '';
+        return `${stripped.split(/\s+/).filter(Boolean).length} words${wordSuffix}`;
     };
 
     if (!userId) return null;
@@ -233,26 +194,21 @@ export default function DashboardNotesSection({
                                             </svg>
                                         </span>
                                     </button>
-                                    {isExpanded && (
+                                    {isExpanded && userId ? (
                                         <div className="px-4 pb-3 pt-1">
-                                            <textarea
-                                                ref={(el) => {
-                                                    textareaRefs.current[section.key] = el;
-                                                    adjustTextareaHeight(el);
-                                                }}
+                                            <DailyNoteField
+                                                sectionKey={section.key}
                                                 value={value}
-                                                onChange={(e) => {
-                                                    setContent((prev) => ({ ...prev, [section.key]: e.target.value }));
-                                                    adjustTextareaHeight(e.target);
-                                                }}
-                                                onKeyDown={(e) => handleBulletListEnter(e, section.key, setContent)}
-                                                onBlur={(e) => saveField(section.key, e.target.value || null)}
                                                 placeholder={section.placeholder}
-                                                className="min-h-[80px] w-full resize-none overflow-hidden rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-[#ff9d00]/55 focus:outline-none"
-                                                rows={1}
+                                                userId={userId}
+                                                dateStr={dateStr}
+                                                onChange={(nextValue) =>
+                                                    setContent((prev) => ({ ...prev, [section.key]: nextValue }))
+                                                }
+                                                onSave={(nextValue) => void saveField(section.key, nextValue)}
                                             />
                                         </div>
-                                    )}
+                                    ) : null}
                                 </div>
                             );
                         })

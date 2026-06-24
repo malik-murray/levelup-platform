@@ -5,6 +5,7 @@ import { supabase } from '@auth/supabaseClient';
 import { formatDate } from '@/lib/habitHelpers';
 import WeeklyScoreBars, { type WeeklyScores } from './WeeklyScoreBars';
 import { neon } from '@/app/dashboard/neonTheme';
+import NoteContentDisplay from '@/components/NoteContentDisplay';
 
 type WeeklyPlan = {
     id: string;
@@ -609,7 +610,7 @@ export default function WeeklyPlanView() {
                                             {sections.map((s) => (
                                                 <div key={`${dateStr}-${s.label}`}>
                                                     <div className="text-xs font-medium text-slate-400">{s.label}</div>
-                                                    <p className="text-sm text-slate-300 whitespace-pre-wrap">{s.value}</p>
+                                                    <NoteContentDisplay value={s.value ?? ''} />
                                                 </div>
                                             ))}
                                         </div>

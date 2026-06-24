@@ -95,6 +95,109 @@ body {
     display: none;  /* Chrome, Safari and Opera */
 }
 
+/* Ruled notebook lines for daily notes textareas */
+.notes-lined {
+    --notes-line-height: 1.5rem;
+    line-height: var(--notes-line-height);
+    padding: 0.4375rem 0.75rem 0.5rem;
+    background-color: rgba(3, 6, 15, 0.9);
+    background-image: repeating-linear-gradient(
+        to bottom,
+        transparent,
+        transparent calc(var(--notes-line-height) - 1px),
+        rgba(255, 157, 0, 0.16) calc(var(--notes-line-height) - 1px),
+        rgba(255, 157, 0, 0.16) var(--notes-line-height)
+    );
+    background-attachment: local;
+}
+
+.notes-editor {
+    min-height: 80px;
+    height: auto;
+    overflow: visible;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    outline: none;
+}
+
+.notes-editor:empty::before {
+    content: attr(data-placeholder);
+    color: rgb(100 116 139);
+    pointer-events: none;
+}
+
+.inline-note-image-wrap {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    margin: 0.125rem 0.25rem 0.125rem 0;
+    vertical-align: middle;
+    cursor: zoom-in;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.inline-note-image {
+    display: block;
+    height: 3.5rem;
+    width: auto;
+    max-width: 5.5rem;
+    border-radius: 0.375rem;
+    border: 1px solid rgba(255, 157, 0, 0.25);
+    object-fit: cover;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+    pointer-events: none;
+}
+
+.inline-note-image-wrap:hover .inline-note-image {
+    border-color: rgba(255, 157, 0, 0.5);
+    box-shadow: 0 0 0 1px rgba(255, 157, 0, 0.15);
+}
+
+.inline-note-image-remove {
+    position: absolute;
+    top: -0.375rem;
+    right: -0.375rem;
+    display: flex;
+    height: 1.75rem;
+    width: 1.75rem;
+    min-height: 1.75rem;
+    min-width: 1.75rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    border: 1px solid rgba(255, 157, 0, 0.4);
+    background-color: #03060f;
+    font-size: 0.875rem;
+    line-height: 1;
+    color: rgb(203 213 225);
+    opacity: 0;
+    transition: opacity 150ms ease;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.inline-note-image-wrap:hover .inline-note-image-remove,
+.inline-note-image-wrap:focus-within .inline-note-image-remove {
+    opacity: 1;
+}
+
+.inline-note-image-remove:hover {
+    color: white;
+}
+
+@media (hover: none), (pointer: coarse) {
+    .inline-note-image-remove {
+        opacity: 1;
+    }
+
+    .inline-note-image-wrap:active .inline-note-image {
+        border-color: rgba(255, 157, 0, 0.55);
+        box-shadow: 0 0 0 2px rgba(255, 157, 0, 0.2);
+    }
+}
+
 /* Dashboard score bar finish line (race finish stripe) */
 .finish-line {
     background: repeating-linear-gradient(
