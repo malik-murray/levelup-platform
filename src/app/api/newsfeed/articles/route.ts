@@ -309,9 +309,9 @@ export async function GET(request: NextRequest) {
                     image_url: article.image_url || null,
                     topic_ids: article.topic_ids,
                     source: {
-                        id: source?.id,
-                        name: source?.name,
-                        display_name: source?.display_name,
+                        id: source?.id ?? article.source_id,
+                        name: source?.name ?? 'unknown',
+                        display_name: source?.display_name ?? 'Unknown source',
                     },
                     summary,
                     analysis: analysis
