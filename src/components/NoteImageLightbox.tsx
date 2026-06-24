@@ -13,10 +13,12 @@ export default function NoteImageLightbox({
     url,
     alt = 'Note image',
     onClose,
+    onDelete,
 }: {
     url: string | null;
     alt?: string;
     onClose: () => void;
+    onDelete?: () => void;
 }) {
     const [mounted, setMounted] = useState(false);
 
@@ -65,6 +67,19 @@ export default function NoteImageLightbox({
                 className="max-h-[calc(100dvh-6rem)] max-w-full touch-pan-y rounded-lg object-contain shadow-2xl"
                 onClick={(event) => event.stopPropagation()}
             />
+            {onDelete ? (
+                <button
+                    type="button"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onDelete();
+                        onClose();
+                    }}
+                    className="absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 min-h-11 -translate-x-1/2 rounded-full border border-red-400/40 bg-red-950/80 px-5 py-2.5 text-sm font-medium text-red-200 active:bg-red-950"
+                >
+                    Remove image
+                </button>
+            ) : null}
         </div>,
         document.body
     );

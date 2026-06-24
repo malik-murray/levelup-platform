@@ -189,7 +189,7 @@ body {
 
 @media (hover: none), (pointer: coarse) {
     .inline-note-image-remove {
-        opacity: 1;
+        display: none;
     }
 
     .inline-note-image-wrap:active .inline-note-image {

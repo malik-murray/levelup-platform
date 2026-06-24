@@ -79,8 +79,17 @@ export default function DailyNoteField({
     const [uploading, setUploading] = useState(false);
     const [uploadError, setUploadError] = useState<string | null>(null);
     const [lightbox, setLightbox] = useState<{ url: string; alt: string } | null>(null);
+    const [isTouchDevice, setIsTouchDevice] = useState(false);
 
     useEffect(() => () => autoHeightCleanupRef.current?.(), []);
+
+    useEffect(() => {
+        const media = window.matchMedia('(hover: none), (pointer: coarse)');
+        const update = () => setIsTouchDevice(media.matches);
+        update();
+        media.addEventListener('change', update);
+        return () => media.removeEventListener('change', update);
+    }, []);
 
     useEffect(() => {
         const editor = editorRef.current;
@@ -153,6 +162,21 @@ export default function DailyNoteField({
             const file = item.getAsFile();
             if (file) await handleImageUpload(file);
             return;
+        }
+    };
+
+    const handleRemoveLightboxImage = () => {
+        const editor = editorRef.current;
+        const imageUrl = lightbox?.url;
+        if (!editor || !imageUrl) return;
+
+        for (const wrap of editor.querySelectorAll(`.${INLINE_NOTE_IMAGE_WRAP_CLASS}`)) {
+            const img = wrap.querySelector('img');
+            if (img instanceof HTMLImageElement && img.src === imageUrl) {
+                wrap.remove();
+                emitEditorValue(true);
+                return;
+            }
         }
     };
 
@@ -270,6 +294,7 @@ export default function DailyNoteField({
                 url={lightbox?.url ?? null}
                 alt={lightbox?.alt}
                 onClose={() => setLightbox(null)}
+                onDelete={lightbox && isTouchDevice ? handleRemoveLightboxImage : undefined}
             />
         </div>
     );
