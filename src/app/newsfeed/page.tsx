@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { formatLocalDate } from '@/lib/newsfeed/dateRange';
 import { rankArticlesForBriefing } from '@/lib/newsfeed/topStoriesRanking';
+import { getSummaryParagraph } from '@/lib/newsfeed/articlePresentation';
+import { normalizeUserFeedContext, type UserFeedContext } from '@/lib/newsfeed/userFeedContext';
 
 type Source = {
     id: string;
@@ -19,12 +21,13 @@ type Topic = {
 };
 
 type ArticleSummary = {
-    paragraphs_1?: string;
-    paragraphs_2?: string;
-    paragraphs_3?: string;
-    paragraphs_4?: string;
-    paragraphs_5?: string;
-    why_it_matters?: string;
+    paragraphs_1?: string | null;
+    paragraphs_2?: string | null;
+    paragraphs_3?: string | null;
+    paragraphs_4?: string | null;
+    paragraphs_5?: string | null;
+    why_it_matters?: string | null;
+    action_suggestion?: string | null;
 };
 
 type Article = {
@@ -86,12 +89,24 @@ export default function NewsfeedPage() {
     const [selectedTopicFilter, setSelectedTopicFilter] = useState<string | null>(null);
     const [activeCategory, setActiveCategory] = useState<CategoryKey>('for-you');
     const [ingestTriggered, setIngestTriggered] = useState(false);
+    const [userFeedContext, setUserFeedContext] = useState<UserFeedContext | null>(null);
 
     useEffect(() => {
         checkPreferences();
         loadSources();
         loadTopics();
+        loadUserContext();
     }, []);
+
+    const loadUserContext = async () => {
+        try {
+            const response = await fetch('/api/newsfeed/context');
+            const data = await response.json();
+            setUserFeedContext(normalizeUserFeedContext(data.context));
+        } catch (error) {
+            console.error('Error loading user context:', error);
+        }
+    };
 
     const triggerIngestion = useCallback(async () => {
         try {
@@ -253,10 +268,8 @@ export default function NewsfeedPage() {
         updateArticleAction(article.id, { is_archived: !article.user_action.is_archived });
     };
 
-    const getSummaryText = (summary: ArticleSummary | null, length: number): string => {
-        if (!summary) return '';
-        const key = `paragraphs_${length}` as keyof ArticleSummary;
-        return (summary[key] as string) || summary.paragraphs_1 || '';
+    const getSummaryText = (summary: ArticleSummary | null, length: number, description?: string | null): string => {
+        return getSummaryParagraph(summary, length, description);
     };
 
     const formatTimeAgo = (dateString: string) => {
@@ -303,7 +316,8 @@ export default function NewsfeedPage() {
 
     function renderArticleCard(article: Article, compact = false) {
         const preferredLength = article.user_action.preferred_summary_length || 1;
-        const summaryText = getSummaryText(article.summary, preferredLength) || article.description || '';
+        const summaryText =
+            getSummaryText(article.summary, preferredLength, article.description) || '';
         const sourceText = article.source.display_name || 'Source';
         const saveLabel = article.user_action.is_saved ? 'Unsave article' : 'Save article';
         const displaySummary = compact ? summaryText : summaryText;
@@ -334,6 +348,16 @@ export default function NewsfeedPage() {
                     {!compact && article.summary?.why_it_matters ? (
                         <p className="rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-2 text-xs text-violet-200">
                             Why it matters: {article.summary.why_it_matters}
+                        </p>
+                    ) : null}
+                    {!compact && article.summary?.action_suggestion ? (
+                        <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-2 text-xs text-emerald-200">
+                            Suggested action: {article.summary.action_suggestion}
+                        </p>
+                    ) : null}
+                    {compact && article.summary?.why_it_matters ? (
+                        <p className="text-[11px] leading-relaxed text-violet-200/90 line-clamp-2">
+                            {article.summary.why_it_matters}
                         </p>
                     ) : null}
                 </div>
@@ -407,7 +431,7 @@ export default function NewsfeedPage() {
     const { rankedArticles, topStories } = rankArticlesForBriefing(filteredArticles, topicIdToName, {
         topStoriesCount: 5,
         maxPerSource: 2,
-    });
+    }, userFeedContext);
     const topStoryIds = new Set(topStories.map((article) => article.id));
 
     const sectionedArticles = SECTION_DEFINITIONS.map((section) => {

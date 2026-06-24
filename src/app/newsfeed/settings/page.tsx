@@ -7,6 +7,12 @@ import Image from 'next/image';
 import logo from '../../logo.png';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { supabase } from '@auth/supabaseClient';
+import {
+    GOAL_SUGGESTIONS,
+    INTEREST_SUGGESTIONS,
+    normalizeUserFeedContext,
+    type UserFeedContext,
+} from '@/lib/newsfeed/userFeedContext';
 
 type Source = {
     id: string;
@@ -54,6 +60,11 @@ export default function NewsfeedSettingsPage() {
     const [preferences, setPreferences] = useState<Preferences>({
         selected_source_ids: [],
         selected_topic_ids: [],
+    });
+    const [userContext, setUserContext] = useState<UserFeedContext>({
+        role_job_context: null,
+        interests: [],
+        goals: [],
     });
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -106,10 +117,11 @@ export default function NewsfeedSettingsPage() {
             setLoading(true);
             setError(null);
             
-            const [sourcesRes, topicsRes, prefsRes] = await Promise.all([
+            const [sourcesRes, topicsRes, prefsRes, contextRes] = await Promise.all([
                 fetch('/api/newsfeed/sources'),
                 fetch('/api/newsfeed/topics'),
                 fetch('/api/newsfeed/preferences'),
+                fetch('/api/newsfeed/context'),
             ]);
 
             // Check for errors
@@ -128,6 +140,7 @@ export default function NewsfeedSettingsPage() {
             const sourcesData = await sourcesRes.json();
             const topicsData = await topicsRes.json();
             const prefsData = await prefsRes.json();
+            const contextData = contextRes.ok ? await contextRes.json() : { context: null };
 
             console.log('Loaded sources:', sourcesData.sources?.length || 0);
             console.log('Loaded topics:', topicsData.topics?.length || 0);
@@ -135,6 +148,7 @@ export default function NewsfeedSettingsPage() {
             setSources(sourcesData.sources || []);
             setTopics(topicsData.topics || []);
             setPreferences(prefsData.preferences || { selected_source_ids: [], selected_topic_ids: [] });
+            setUserContext(normalizeUserFeedContext(contextData.context));
             
             if ((sourcesData.sources || []).length === 0) {
                 setError('No sources found. Please run the database migration to populate sources.');
@@ -341,6 +355,19 @@ export default function NewsfeedSettingsPage() {
             }
 
             console.log('Preferences saved successfully:', result);
+
+            const contextPayload = normalizeUserFeedContext(userContext);
+            const contextResponse = await fetch('/api/newsfeed/context', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify(contextPayload),
+            });
+            if (!contextResponse.ok) {
+                const contextError = await contextResponse.json().catch(() => ({}));
+                throw new Error(contextError.error || 'Failed to save About Me profile');
+            }
+
             setSaved(true);
             setError(null);
 
@@ -404,6 +431,16 @@ export default function NewsfeedSettingsPage() {
                 ? prev.selected_topic_ids.filter((id) => id !== topicId)
                 : [...prev.selected_topic_ids, topicId];
             return { ...prev, selected_topic_ids: newIds };
+        });
+    };
+
+    const toggleContextItem = (field: 'interests' | 'goals', value: string) => {
+        setUserContext((prev) => {
+            const current = prev[field];
+            const next = current.includes(value)
+                ? current.filter((item) => item !== value)
+                : [...current, value];
+            return { ...prev, [field]: next };
         });
     };
 
@@ -489,6 +526,77 @@ export default function NewsfeedSettingsPage() {
                                 {preset.label}
                             </button>
                         ))}
+                    </div>
+                </div>
+
+                {/* About Me */}
+                <div className="rounded-lg border border-slate-800 bg-slate-950 dark:bg-slate-950 p-4 sm:p-6">
+                    <h2 className="text-lg font-semibold mb-2">About Me</h2>
+                    <p className="text-sm text-slate-400 mb-4">
+                        Personalize your For You feed. We use this to rank stories and tailor AI summaries to what matters for your role, interests, and goals.
+                    </p>
+
+                    <label className="block text-sm font-medium text-slate-200 mb-2" htmlFor="role-context">
+                        Role / job context
+                    </label>
+                    <input
+                        id="role-context"
+                        type="text"
+                        value={userContext.role_job_context || ''}
+                        onChange={(e) =>
+                            setUserContext((prev) => ({
+                                ...prev,
+                                role_job_context: e.target.value || null,
+                            }))
+                        }
+                        placeholder="e.g. Federal employee in DC, software engineer, small business owner"
+                        className="mb-4 w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+                    />
+
+                    <div className="mb-4">
+                        <p className="text-sm font-medium text-slate-200 mb-2">Interests</p>
+                        <div className="flex flex-wrap gap-2">
+                            {INTEREST_SUGGESTIONS.map((interest) => {
+                                const selected = userContext.interests.includes(interest);
+                                return (
+                                    <button
+                                        key={interest}
+                                        type="button"
+                                        onClick={() => toggleContextItem('interests', interest)}
+                                        className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                                            selected
+                                                ? 'border-amber-400/50 bg-amber-400/20 text-amber-300'
+                                                : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-600'
+                                        }`}
+                                    >
+                                        {interest}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    <div>
+                        <p className="text-sm font-medium text-slate-200 mb-2">Goals</p>
+                        <div className="flex flex-wrap gap-2">
+                            {GOAL_SUGGESTIONS.map((goal) => {
+                                const selected = userContext.goals.includes(goal);
+                                return (
+                                    <button
+                                        key={goal}
+                                        type="button"
+                                        onClick={() => toggleContextItem('goals', goal)}
+                                        className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                                            selected
+                                                ? 'border-amber-400/50 bg-amber-400/20 text-amber-300'
+                                                : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-600'
+                                        }`}
+                                    >
+                                        {goal}
+                                    </button>
+                                );
+                            })}
+                        </div>
                     </div>
                 </div>
 
@@ -645,7 +753,7 @@ export default function NewsfeedSettingsPage() {
                         disabled={saving}
                         className="rounded-md bg-amber-400 px-6 py-3 text-sm font-semibold text-black hover:bg-amber-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
-                        {saving ? 'Saving...' : 'Save Preferences'}
+                        {saving ? 'Saving...' : 'Save Settings'}
                     </button>
                 </div>
             </div>

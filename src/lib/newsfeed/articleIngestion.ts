@@ -328,6 +328,15 @@ async function insertArticles(
     const fallbackTopicName = getFallbackTopicNameForSourceCategory(source.sourceCategory);
     const fallbackTopicId = topicNameToId.get(fallbackTopicName);
 
+    const normalizedUrls = articles.map((article) => normalizeUrl(article.url));
+    const { data: existingRows } = await supabase
+        .from('newsfeed_articles')
+        .select('url, publish_time')
+        .in('url', normalizedUrls);
+    const existingPublishTimeByUrl = new Map(
+        (existingRows || []).map((row) => [row.url, row.publish_time as string]),
+    );
+
     // Normalize URLs and prepare for insertion
     const mappedArticles = articles.map((article) => {
         const normalizedUrl = normalizeUrl(article.url);
@@ -365,7 +374,9 @@ async function insertArticles(
             source_id: source.sourceId,
             title: article.title.substring(0, 500), // Limit title length
             url: normalizedUrl,
-            publish_time: article.publishTime.toISOString(),
+            publish_time: article.publishTime
+                ? article.publishTime.toISOString()
+                : existingPublishTimeByUrl.get(normalizedUrl) ?? new Date().toISOString(),
             description: description || null,
             image_url: article.imageUrl || null,
             raw_json: article.rawData || null,

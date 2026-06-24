@@ -3,6 +3,10 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { buildArticleDateRange, buildFallbackDateRange } from '@/lib/newsfeed/dateRange';
 import { triggerNewsfeedIngestionIfStale } from '@/lib/newsfeed/runIngestionIfStale';
+import { getMainstreamGlobalSourceNames } from '@/lib/newsfeed/sourceRegistry';
+import { rankArticlesForBriefing } from '@/lib/newsfeed/topStoriesRanking';
+import { buildArticleSummaryView } from '@/lib/newsfeed/articlePresentation';
+import { hasUserFeedContext, normalizeUserFeedContext } from '@/lib/newsfeed/userFeedContext';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -22,6 +26,14 @@ type ArticleSummaryRef = {
     why_it_matters: string | null;
 };
 
+type ArticleAnalysisRef = {
+    why_it_matters: string | null;
+    user_action: string | null;
+    final_score: number | null;
+    importance_score: number | null;
+    urgency_score: number | null;
+};
+
 type RawArticle = {
     id: string;
     title: string;
@@ -33,6 +45,7 @@ type RawArticle = {
     source_id: string;
     newsfeed_sources: SourceRef | SourceRef[] | null;
     newsfeed_article_summaries: ArticleSummaryRef | ArticleSummaryRef[] | null;
+    newsfeed_article_analysis: ArticleAnalysisRef | ArticleAnalysisRef[] | null;
 };
 
 function firstRelation<T>(value: T | T[] | null | undefined): T | null {
@@ -45,7 +58,7 @@ function firstRelation<T>(value: T | T[] | null | undefined): T | null {
 /**
  * GET /api/newsfeed/articles
  * Get articles for user's feed based on preferences
- * Query params: date (YYYY-MM-DD), filter (feed|saved|archived)
+ * Query params: date (YYYY-MM-DD), filter (feed|saved|archived), scope (personal|global)
  */
 export async function GET(request: NextRequest) {
     try {
@@ -83,9 +96,25 @@ export async function GET(request: NextRequest) {
         const { searchParams } = new URL(request.url);
         const dateParam = searchParams.get('date');
         const filter = searchParams.get('filter') || 'feed';
+        const scope = searchParams.get('scope') || 'personal';
         const sourceIdFilter = searchParams.get('sourceId');
         const topicIdFilter = searchParams.get('topicId');
         let expandedTopicFilterIds: string[] | null = null;
+        let globalSourceIds: string[] = [];
+
+        if (scope === 'global') {
+            const { data: globalSources, error: globalSourcesError } = await supabase
+                .from('newsfeed_sources')
+                .select('id')
+                .in('name', getMainstreamGlobalSourceNames())
+                .eq('is_active', true);
+
+            if (globalSourcesError) {
+                throw globalSourcesError;
+            }
+
+            globalSourceIds = (globalSources || []).map((source) => source.id);
+        }
 
         const { data: preferences, error: prefError } = await supabase
             .from('newsfeed_user_preferences')
@@ -103,6 +132,13 @@ export async function GET(request: NextRequest) {
         const selectedTopicIds: string[] = Array.isArray(preferences?.selected_topic_ids)
             ? preferences.selected_topic_ids
             : [];
+
+        const { data: contextRow } = await supabase
+            .from('newsfeed_user_context')
+            .select('role_job_context, interests, goals')
+            .eq('user_id', user.id)
+            .maybeSingle();
+        const userFeedContext = normalizeUserFeedContext(contextRow);
 
         if (topicIdFilter) {
             const { data: selectedTopic } = await supabase
@@ -122,14 +158,24 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        if (selectedSourceIds.length === 0 && selectedTopicIds.length === 0) {
+        if (scope !== 'global' && selectedSourceIds.length === 0 && selectedTopicIds.length === 0) {
             return NextResponse.json({ articles: [] });
         }
 
         if (filter === 'feed') {
-            triggerNewsfeedIngestionIfStale({
-                sourceIds: selectedSourceIds.length > 0 ? selectedSourceIds : undefined,
-            });
+            if (scope === 'global' && globalSourceIds.length > 0) {
+                const primaryRange = buildArticleDateRange(dateParam);
+                triggerNewsfeedIngestionIfStale({
+                    sourceIds: globalSourceIds,
+                    lookbackHours: 24,
+                    force: primaryRange.isToday,
+                });
+            } else {
+                triggerNewsfeedIngestionIfStale({
+                    sourceIds: selectedSourceIds.length > 0 ? selectedSourceIds : undefined,
+                    userFeedContext: hasUserFeedContext(userFeedContext) ? userFeedContext : null,
+                });
+            }
         }
 
         const primaryRange = buildArticleDateRange(dateParam);
@@ -153,7 +199,8 @@ export async function GET(request: NextRequest) {
                     created_at,
                     source_id,
                     newsfeed_sources(id, name, display_name),
-                    newsfeed_article_summaries(id, summary_1_paragraph, summary_2_paragraphs, summary_3_paragraphs, summary_4_paragraphs, summary_5_paragraphs, why_it_matters)
+                    newsfeed_article_summaries(id, summary_1_paragraph, summary_2_paragraphs, summary_3_paragraphs, summary_4_paragraphs, summary_5_paragraphs, why_it_matters),
+                    newsfeed_article_analysis(why_it_matters, user_action, final_score, importance_score, urgency_score)
                 `)
                 .gte('publish_time', startDate.toISOString())
                 .lte('publish_time', endDate.toISOString())
@@ -161,6 +208,8 @@ export async function GET(request: NextRequest) {
 
             if (sourceIdFilter) {
                 query = query.eq('source_id', sourceIdFilter);
+            } else if (scope === 'global' && globalSourceIds.length > 0) {
+                query = query.in('source_id', globalSourceIds);
             } else if (selectedSourceIds.length > 0) {
                 query = query.in('source_id', selectedSourceIds);
             }
@@ -189,6 +238,10 @@ export async function GET(request: NextRequest) {
                     }
 
                     if (!topicIdFilter && !sourceIdFilter) {
+                        if (scope === 'global') {
+                            return true;
+                        }
+
                         const matchesSource =
                             selectedSourceIds.length === 0 || selectedSourceIds.includes(articleSourceId);
                         const matchesTopic =
@@ -242,8 +295,10 @@ export async function GET(request: NextRequest) {
 
             return filteredArticles.map((article) => {
                 const action = userActionsMap[article.id] || {};
-                const summary = firstRelation(article.newsfeed_article_summaries);
+                const storedSummary = firstRelation(article.newsfeed_article_summaries);
+                const analysis = firstRelation(article.newsfeed_article_analysis);
                 const source = firstRelation(article.newsfeed_sources);
+                const summary = buildArticleSummaryView(storedSummary, analysis, article.description);
 
                 return {
                     id: article.id,
@@ -258,14 +313,12 @@ export async function GET(request: NextRequest) {
                         name: source?.name,
                         display_name: source?.display_name,
                     },
-                    summary: summary
+                    summary,
+                    analysis: analysis
                         ? {
-                              paragraphs_1: summary.summary_1_paragraph,
-                              paragraphs_2: summary.summary_2_paragraphs,
-                              paragraphs_3: summary.summary_3_paragraphs,
-                              paragraphs_4: summary.summary_4_paragraphs,
-                              paragraphs_5: summary.summary_5_paragraphs,
-                              why_it_matters: summary.why_it_matters,
+                              final_score: analysis.final_score,
+                              importance_score: analysis.importance_score,
+                              urgency_score: analysis.urgency_score,
                           }
                         : null,
                     user_action: {
@@ -288,45 +341,31 @@ export async function GET(request: NextRequest) {
         }
 
         if (transformedArticles.length > 0) {
-            const transformedIds = transformedArticles.map((article) => article.id);
-            const { data: rankingRows, error: rankingError } = await supabase
-                .from('newsfeed_top_story_rankings')
-                .select('article_id, rank_position, final_score')
-                .in('article_id', transformedIds);
+            const { data: topics } = await supabase.from('newsfeed_topics').select('id, name');
+            const topicIdToName = new Map((topics || []).map((topic) => [topic.id, topic.name]));
 
-            if (rankingError) {
-                console.warn('Ranking table unavailable, using publish_time ordering:', rankingError.message);
+            if (scope === 'global') {
+                const { topStories } = rankArticlesForBriefing(transformedArticles, topicIdToName, {
+                    topStoriesCount: 20,
+                    maxPerSource: 2,
+                });
+                transformedArticles = topStories;
+            } else {
+                const { rankedArticles } = rankArticlesForBriefing(
+                    transformedArticles,
+                    topicIdToName,
+                    { topStoriesCount: transformedArticles.length, maxPerSource: 3 },
+                    userFeedContext,
+                );
+                transformedArticles = rankedArticles;
             }
-
-            const rankingMap = new Map(
-                (rankingRows || []).map((row) => [
-                    row.article_id,
-                    {
-                        rank_position: row.rank_position ?? Number.MAX_SAFE_INTEGER,
-                        final_score: row.final_score ?? 0,
-                    },
-                ])
-            );
-
-            transformedArticles.sort((a, b) => {
-                const rankA = rankingMap.get(a.id);
-                const rankB = rankingMap.get(b.id);
-                if (rankA && rankB) {
-                    if (rankA.rank_position !== rankB.rank_position) {
-                        return rankA.rank_position - rankB.rank_position;
-                    }
-                    return rankB.final_score - rankA.final_score;
-                }
-                if (rankA) return -1;
-                if (rankB) return 1;
-                return new Date(b.publish_time).getTime() - new Date(a.publish_time).getTime();
-            });
         }
 
         return NextResponse.json({
             articles: transformedArticles,
             meta: {
                 usedFallback,
+                scope,
                 dateRange: {
                     start: activeRange.startDate.toISOString(),
                     end: activeRange.endDate.toISOString(),

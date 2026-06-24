@@ -1,3 +1,6 @@
+import type { UserFeedContext } from '@/lib/newsfeed/userFeedContext';
+import { getPersonalRelevanceScore } from '@/lib/newsfeed/userFeedContext';
+
 type TopicNameMap = Map<string, string>;
 
 type SourceLike = {
@@ -38,6 +41,7 @@ export type RankedArticle<T extends RankableArticle> = {
         recency: number;
         reliability: number;
         summaryQuality: number;
+        personalRelevance: number;
         noisePenalty: number;
     };
 };
@@ -189,7 +193,12 @@ function getEventClusterKey(article: RankableArticle): string {
     return Array.from(new Set(tokens)).slice(0, 4).join('-') || article.id;
 }
 
-function scoreArticle<T extends RankableArticle>(article: T, topicIdToName: TopicNameMap, config: RankingConfig): RankedArticle<T> {
+function scoreArticle<T extends RankableArticle>(
+    article: T,
+    topicIdToName: TopicNameMap,
+    config: RankingConfig,
+    userContext?: UserFeedContext | null,
+): RankedArticle<T> {
     const topicNames = getTopicNames(article, topicIdToName);
     const topic = getTopicWeight(topicNames);
     const needToKnow = getNeedToKnowScore(article, topicNames);
@@ -197,14 +206,16 @@ function scoreArticle<T extends RankableArticle>(article: T, topicIdToName: Topi
     const recency = getRecencyScore(article.publish_time);
     const reliability = getSourceReliabilityScore(article.source.name, config);
     const summaryQuality = getSummaryQualityScore(article);
+    const personalRelevance = getPersonalRelevanceScore(toText(article), topicNames, userContext);
     const noisePenalty = getNoisePenalty(article, topicNames);
 
-    const score = topic + needToKnow + urgency + recency + reliability + summaryQuality - noisePenalty;
+    const score =
+        topic + needToKnow + urgency + recency + reliability + summaryQuality + personalRelevance - noisePenalty;
 
     return {
         article,
         score,
-        debug: { topic, needToKnow, urgency, recency, reliability, summaryQuality, noisePenalty },
+        debug: { topic, needToKnow, urgency, recency, reliability, summaryQuality, personalRelevance, noisePenalty },
     };
 }
 
@@ -254,6 +265,7 @@ export function rankArticlesForBriefing<T extends RankableArticle>(
     articles: T[],
     topicIdToName: TopicNameMap,
     overrides?: Partial<RankingConfig>,
+    userContext?: UserFeedContext | null,
 ) {
     const config: RankingConfig = {
         ...DEFAULT_CONFIG,
@@ -265,7 +277,7 @@ export function rankArticlesForBriefing<T extends RankableArticle>(
     };
 
     const ranked = articles
-        .map((article) => scoreArticle(article, topicIdToName, config))
+        .map((article) => scoreArticle(article, topicIdToName, config, userContext))
         .sort((a, b) => b.score - a.score);
 
     const deduped = deduplicateByEvent(ranked);

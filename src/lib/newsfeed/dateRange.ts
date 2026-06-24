@@ -26,29 +26,7 @@ export type ArticleDateRange = {
     isToday: boolean;
 };
 
-/**
- * Build the publish_time window for feed queries.
- * - Today / no date: rolling last 48 hours through now
- * - Historical dates: full local calendar day
- */
-export function buildArticleDateRange(dateParam: string | null, now = new Date()): ArticleDateRange {
-    if (!dateParam) {
-        const endDate = new Date(now);
-        const startDate = new Date(now);
-        startDate.setHours(startDate.getHours() - 48);
-        return { startDate, endDate, isToday: true };
-    }
-
-    const targetDate = parseLocalDateParam(dateParam);
-    const isToday = isSameLocalCalendarDay(targetDate, now);
-
-    if (isToday) {
-        const endDate = new Date(now);
-        const startDate = new Date(now);
-        startDate.setHours(startDate.getHours() - 48);
-        return { startDate, endDate, isToday: true };
-    }
-
+function buildLocalCalendarDayRange(targetDate: Date): ArticleDateRange {
     const startDate = new Date(targetDate);
     startDate.setHours(0, 0, 0, 0);
     const endDate = new Date(targetDate);
@@ -56,10 +34,21 @@ export function buildArticleDateRange(dateParam: string | null, now = new Date()
     return { startDate, endDate, isToday: false };
 }
 
-/** Wider window used when today's feed has no matches. */
+/**
+ * Build the publish_time window for feed queries.
+ * - Today / no date: local calendar day (midnight through end of day)
+ * - Historical dates: full local calendar day
+ */
+export function buildArticleDateRange(dateParam: string | null, now = new Date()): ArticleDateRange {
+    const targetDate = dateParam ? parseLocalDateParam(dateParam) : now;
+    const isToday = isSameLocalCalendarDay(targetDate, now);
+    const range = buildLocalCalendarDayRange(targetDate);
+    return { ...range, isToday };
+}
+
+/** Previous calendar day, used when today's feed has no matches. */
 export function buildFallbackDateRange(now = new Date()): ArticleDateRange {
-    const endDate = new Date(now);
-    const startDate = new Date(now);
-    startDate.setDate(startDate.getDate() - 7);
-    return { startDate, endDate, isToday: true };
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    return buildLocalCalendarDayRange(yesterday);
 }

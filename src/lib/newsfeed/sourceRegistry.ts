@@ -102,3 +102,21 @@ export const APPROVED_SOURCE_REGISTRY: SourceRegistryEntry[] = [
     { name: 'buzzfeed_news', display_name: 'BuzzFeed News', domain: 'buzzfeednews.com', category: 'entertainment_culture', region: 'US', url: 'https://www.buzzfeednews.com', rss_url: null, reliability_score: 0.64, priority_weight: 0.58, is_active: true },
     { name: 'tmz', display_name: 'TMZ', domain: 'tmz.com', category: 'entertainment_culture', region: 'US', url: 'https://www.tmz.com', rss_url: null, reliability_score: 0.32, priority_weight: 0.3, is_active: true },
 ];
+
+const MAINSTREAM_GLOBAL_CATEGORIES = new Set<NewsSourceCategory>([
+    'national_news',
+    'world_news',
+    'business_economy',
+]);
+
+/** Mainstream wire/national outlets used for the dashboard global trending feed. */
+export function getMainstreamGlobalSourceNames(): string[] {
+    return APPROVED_SOURCE_REGISTRY.filter(
+        (source) =>
+            source.is_active &&
+            source.rss_url &&
+            MAINSTREAM_GLOBAL_CATEGORIES.has(source.category),
+    )
+        .sort((a, b) => b.priority_weight - a.priority_weight)
+        .map((source) => source.name);
+}

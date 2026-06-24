@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { runNewsfeedIngestionIfStale } from '@/lib/newsfeed/runIngestionIfStale';
+import { normalizeUserFeedContext } from '@/lib/newsfeed/userFeedContext';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -37,11 +38,22 @@ export async function POST(request: NextRequest) {
         const lookbackHours = typeof body.lookbackHours === 'number' ? body.lookbackHours : undefined;
         const force = body.force === true;
 
+        let userFeedContext = null;
+        if (user) {
+            const { data: contextRow } = await supabase
+                .from('newsfeed_user_context')
+                .select('role_job_context, interests, goals')
+                .eq('user_id', user.id)
+                .maybeSingle();
+            userFeedContext = normalizeUserFeedContext(contextRow);
+        }
+
         const outcome = await runNewsfeedIngestionIfStale({
             sourceIds,
             maxArticles,
             lookbackHours,
             force,
+            userFeedContext,
         });
 
         return NextResponse.json({

@@ -21,11 +21,14 @@ describe('newsfeed dateRange', () => {
         expect(parsed.getHours()).toBe(0);
     });
 
-    it('uses a rolling 48-hour window for today', () => {
+    it('uses the local calendar day for today', () => {
         const { startDate, endDate, isToday } = buildArticleDateRange('2026-06-17', now);
         expect(isToday).toBe(true);
-        expect(endDate.getTime()).toBe(now.getTime());
-        expect(endDate.getTime() - startDate.getTime()).toBe(48 * 60 * 60 * 1000);
+        expect(startDate.getHours()).toBe(0);
+        expect(startDate.getMinutes()).toBe(0);
+        expect(endDate.getHours()).toBe(23);
+        expect(endDate.getMinutes()).toBe(59);
+        expect(isSameLocalCalendarDay(startDate, parseLocalDateParam('2026-06-17'))).toBe(true);
     });
 
     it('uses the full local day for historical dates', () => {
@@ -36,9 +39,11 @@ describe('newsfeed dateRange', () => {
         expect(isSameLocalCalendarDay(startDate, parseLocalDateParam('2026-06-10'))).toBe(true);
     });
 
-    it('builds a 7-day fallback window', () => {
+    it('builds a yesterday fallback window', () => {
         const { startDate, endDate } = buildFallbackDateRange(now);
-        expect(endDate.getTime()).toBe(now.getTime());
-        expect(endDate.getTime() - startDate.getTime()).toBe(7 * 24 * 60 * 60 * 1000);
+        expect(startDate.getDate()).toBe(16);
+        expect(endDate.getDate()).toBe(16);
+        expect(startDate.getHours()).toBe(0);
+        expect(endDate.getHours()).toBe(23);
     });
 });

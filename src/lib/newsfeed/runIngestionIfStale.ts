@@ -1,12 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 import { runNewsfeedGraph } from '@/lib/newsfeed/graph/newsfeedGraph';
+import type { UserFeedContext } from '@/lib/newsfeed/userFeedContext';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 export function getFreshnessThresholdMinutes() {
-    const parsed = Number(process.env.NEWSFEED_INGEST_FRESHNESS_MINUTES || '45');
-    if (!Number.isFinite(parsed) || parsed < 5) return 45;
+    const parsed = Number(process.env.NEWSFEED_INGEST_FRESHNESS_MINUTES || '15');
+    if (!Number.isFinite(parsed) || parsed < 5) return 15;
     return parsed;
 }
 
@@ -22,6 +23,7 @@ export async function runNewsfeedIngestionIfStale(options?: {
     maxArticles?: number;
     lookbackHours?: number;
     force?: boolean;
+    userFeedContext?: UserFeedContext | null;
 }): Promise<IngestionRunResult> {
     const serviceDb = createClient(supabaseUrl, supabaseServiceKey, {
         auth: { persistSession: false },
@@ -46,23 +48,6 @@ export async function runNewsfeedIngestionIfStale(options?: {
                 reason: `Latest ingestion is newer than ${thresholdMinutes} minutes`,
             };
         }
-
-        const { data: latestArticle } = await serviceDb
-            .from('newsfeed_articles')
-            .select('publish_time')
-            .order('publish_time', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-        if (latestArticle?.publish_time) {
-            const articleAgeMs = Date.now() - new Date(latestArticle.publish_time).getTime();
-            if (articleAgeMs <= thresholdMinutes * 60 * 1000) {
-                return {
-                    skipped: true,
-                    reason: 'Latest article is within freshness threshold',
-                };
-            }
-        }
     }
 
     const startedAt = new Date();
@@ -86,6 +71,7 @@ export async function runNewsfeedIngestionIfStale(options?: {
             sourceIds: options?.sourceIds,
             maxArticles: options?.maxArticles,
             lookbackHours: options?.lookbackHours,
+            userFeedContext: options?.userFeedContext,
         });
 
         const finishedAt = new Date();
@@ -137,6 +123,8 @@ export async function runNewsfeedIngestionIfStale(options?: {
 export function triggerNewsfeedIngestionIfStale(options?: {
     sourceIds?: string[];
     lookbackHours?: number;
+    force?: boolean;
+    userFeedContext?: UserFeedContext | null;
 }): void {
     void runNewsfeedIngestionIfStale(options).catch((error) => {
         console.error('[newsfeed] Background ingestion failed:', error);

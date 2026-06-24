@@ -4,6 +4,12 @@ import { ChatOpenAI } from '@langchain/openai';
 import { z } from 'zod';
 import { ingestArticlesFromSources } from '@/lib/newsfeed/articleIngestion';
 import { APPROVED_SOURCE_REGISTRY, SourceRegistryEntry } from '@/lib/newsfeed/sourceRegistry';
+import {
+    formatUserContextForPrompt,
+    getPersonalRelevanceScore,
+    normalizeUserFeedContext,
+    type UserFeedContext,
+} from '@/lib/newsfeed/userFeedContext';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -89,6 +95,10 @@ const NewsfeedGraphState = Annotation.Root({
     lookbackHours: Annotation<number>({
         reducer: (_, update) => update ?? 36,
         default: () => 36,
+    }),
+    userFeedContext: Annotation<UserFeedContext | null>({
+        reducer: (_, update) => update ?? null,
+        default: () => null,
     }),
     fetchedCount: Annotation<number>({
         reducer: (_, update) => update ?? 0,
@@ -269,17 +279,26 @@ function getClusterKey(article: CandidateArticle): string {
     return parts.slice(0, 4).join('-') || article.id;
 }
 
-function heuristicAnalysis(article: CandidateArticle, sourceConfig: SourceRegistryEntry | undefined) {
+function heuristicAnalysis(
+    article: CandidateArticle,
+    sourceConfig: SourceRegistryEntry | undefined,
+    userFeedContext: UserFeedContext | null,
+) {
     const text = `${article.title} ${article.description || ''}`.toLowerCase();
     const importance = /federal|government|policy|security|market|inflation|rate|layoff|housing|dmv/.test(text) ? 75 : 45;
     const urgency = /deadline|emergency|layoff|warning|immediate|outage/.test(text) ? 70 : 35;
-    const personal = /job|salary|benefits|tax|mortgage|retirement/.test(text) ? 72 : 40;
+    const personalBoost = getPersonalRelevanceScore(text, new Set(), userFeedContext);
+    const personal = Math.min(95, 40 + personalBoost);
     const location = LOCATION_TERMS.some((term) => text.includes(term)) ? 78 : 28;
     const need = /rights|safety|services|government|market|housing|ai|automation/.test(text) ? 74 : 38;
     const noisePenalty = /gossip|celebrity|viral|rumor|opinion/.test(text) ? 40 : 8;
     const reliabilityBoost = (sourceConfig?.reliability_score ?? 0.7) * 20;
     const priorityBoost = (sourceConfig?.priority_weight ?? 1) * 8;
     const finalScore = importance * 0.24 + urgency * 0.18 + personal * 0.16 + location * 0.12 + need * 0.2 + reliabilityBoost + priorityBoost - noisePenalty * 0.2;
+
+    const whyItMatters = userFeedContext?.role_job_context
+        ? `This story may affect your work as ${userFeedContext.role_job_context} or your selected interests and goals.`
+        : 'This story may impact policy, decisions, or local conditions relevant to your daily priorities.';
 
     return {
         topic: sourceConfig?.category || 'general',
@@ -288,7 +307,7 @@ function heuristicAnalysis(article: CandidateArticle, sourceConfig: SourceRegist
         personal_relevance_score: personal,
         location_relevance_score: location,
         need_to_know_score: need,
-        why_it_matters: 'This story may impact policy, decisions, or local conditions relevant to your daily priorities.',
+        why_it_matters: whyItMatters,
         user_action: urgency > 60 ? 'Monitor this closely and review official guidance.' : 'Keep informed; no immediate action required.',
         noise_penalty: noisePenalty,
         confidence: 0.6,
@@ -296,25 +315,34 @@ function heuristicAnalysis(article: CandidateArticle, sourceConfig: SourceRegist
     };
 }
 
-async function analyzeWithRetry(article: CandidateArticle, sourceConfig: SourceRegistryEntry | undefined, retries = 1) {
+async function analyzeWithRetry(
+    article: CandidateArticle,
+    sourceConfig: SourceRegistryEntry | undefined,
+    userFeedContext: UserFeedContext | null,
+    retries = 1,
+) {
     const model = new ChatOpenAI({
         model: 'gpt-4o-mini',
         temperature: 0.1,
         timeout: 30000,
     });
     const structuredModel = model.withStructuredOutput(analysisSchema);
+    const readerProfile = formatUserContextForPrompt(userFeedContext);
     const prompt = `
 You are a high-signal news analyst. Return only JSON matching schema.
 Prioritize need-to-know over trending content.
 Focus on: job impact, money impact, federal/DMV/public service impact, rights/safety, major tech or market shifts.
 Penalize gossip, rumor, celebrity, opinion-only, and low-information content.
 
+Reader profile:
+${readerProfile}
+
 Article title: ${article.title}
 Article description: ${article.description || 'No description provided.'}
 Source category: ${sourceConfig?.category || 'unknown'}
 Source region: ${sourceConfig?.region || 'unknown'}
 
-Use short, actionable "why_it_matters" and "user_action".
+Use short, actionable "why_it_matters" and "user_action" tailored to the reader profile when provided.
 `.trim();
 
     let lastError: string | null = null;
@@ -383,6 +411,7 @@ async function analyzeNode(state: NewsfeedGraphStateType) {
     }
 
     const registryByName = new Map(APPROVED_SOURCE_REGISTRY.map((source) => [source.name, source]));
+    const userFeedContext = normalizeUserFeedContext(state.userFeedContext);
 
     const analyzed: GeneratedAnalysis[] = [];
     const errors: string[] = [];
@@ -401,12 +430,12 @@ async function analyzeNode(state: NewsfeedGraphStateType) {
                 | ReturnType<typeof heuristicAnalysis>
                 | (z.infer<typeof analysisSchema> & { finalScore: number });
             if (!process.env.OPENAI_API_KEY) {
-                analysisResult = heuristicAnalysis(article, sourceConfig);
+                analysisResult = heuristicAnalysis(article, sourceConfig, userFeedContext);
             } else {
                 try {
-                    analysisResult = await analyzeWithRetry(article, sourceConfig);
+                    analysisResult = await analyzeWithRetry(article, sourceConfig, userFeedContext);
                 } catch {
-                    analysisResult = heuristicAnalysis(article, sourceConfig);
+                    analysisResult = heuristicAnalysis(article, sourceConfig, userFeedContext);
                 }
             }
 
@@ -548,11 +577,13 @@ export async function runNewsfeedGraph(input?: {
     sourceIds?: string[];
     maxArticles?: number;
     lookbackHours?: number;
+    userFeedContext?: UserFeedContext | null;
 }) {
     const result = await graph.invoke({
         sourceIds: input?.sourceIds,
         maxArticles: input?.maxArticles ?? 20,
         lookbackHours: input?.lookbackHours ?? 36,
+        userFeedContext: normalizeUserFeedContext(input?.userFeedContext),
     });
 
     return {

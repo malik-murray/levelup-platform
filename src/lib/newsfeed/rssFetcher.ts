@@ -15,7 +15,7 @@ const parser = new Parser({
 export interface RSSArticle {
     title: string;
     url: string;
-    publishTime: Date;
+    publishTime: Date | null;
     description?: string;
     imageUrl?: string;
     rawData?: unknown;
@@ -43,8 +43,8 @@ export async function fetchRSSFeed(feedUrl: string): Promise<RSSArticle[]> {
         }
 
         const articles: RSSArticle[] = feed.items.map((item) => {
-            // Parse publish date
-            let publishTime = new Date();
+            // Parse publish date — leave null when the feed omits it so re-ingest won't stamp "now"
+            let publishTime: Date | null = null;
             if (item.pubDate) {
                 const parsed = new Date(item.pubDate);
                 if (!isNaN(parsed.getTime())) {
