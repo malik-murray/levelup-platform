@@ -58,14 +58,18 @@ export function initDraftFromTemplate(template: {
 }
 
 export function initDraftFromHabit(habit: GritHabitTemplate): GritHabitFormDraft {
+  const categories = habit.categories?.length ? habit.categories : [habit.category];
+  const goal_ids = habit.goal_ids?.length ? habit.goal_ids : habit.goal_id ? [habit.goal_id] : [];
   return {
     ...DEFAULT_HABIT_FORM,
     name: habit.name,
     icon: habit.icon,
-    category: habit.category,
+    category: categories[0] ?? habit.category,
+    categories,
     time_of_day: habit.time_of_day,
     is_bad_habit: habit.is_bad_habit,
-    goal_id: habit.goal_id,
+    goal_id: goal_ids[0] ?? null,
+    goal_ids,
     type: habit.type ?? (habit.is_bad_habit ? 'bad' : 'good'),
   };
 }

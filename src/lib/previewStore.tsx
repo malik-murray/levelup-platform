@@ -14,8 +14,10 @@ export type PreviewHabitTemplate = {
   name: string;
   icon: string;
   category: PreviewCategory;
+  categories?: PreviewCategory[];
   time_of_day: PreviewTimeOfDay | null;
   goal_id: string | null;
+  goal_ids?: string[];
   is_bad_habit: boolean;
   is_active: boolean;
   sort_order: number | null;

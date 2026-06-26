@@ -19,9 +19,13 @@ import {
   syncBacklogCompletion,
   syncBacklogEisenhower,
   syncBacklogTitle,
+  updateBacklogTaskGoal,
   updateTodoEisenhower,
+  updateTodoGoal,
 } from '@/lib/habitBacklog';
 import { TodoDeleteButton } from '@/components/TodoDeleteButton';
+import { GoalPicker } from '@/components/goals/GoalPicker';
+import { useGoalsForPicker } from '@/lib/goals/useGoalsForPicker';
 import {
   loadBacklogCategories,
   loadBacklogTaskCategoryIdsByTaskId,
@@ -44,6 +48,7 @@ type TodoItem = {
   backlog_task_id: string | null;
   daily_todo_id: string | null;
   category_ids: string[];
+  goal_id: string | null;
 };
 
 const isBacklogOnly = (todo: TodoItem) => todo.daily_todo_id === null;
@@ -157,6 +162,8 @@ export default function TodoPage() {
   const [groupFilter, setGroupFilter] = useState<GroupFilter>('');
   const [categories, setCategories] = useState<BacklogCategory[]>([]);
   const [newTodoCategoryIds, setNewTodoCategoryIds] = useState<string[]>([]);
+  const [newTodoGoalId, setNewTodoGoalId] = useState<string | null>(null);
+  const goals = useGoalsForPicker(userId);
 
   const todayString = useMemo(() => formatDate(new Date()), []);
 
@@ -192,14 +199,14 @@ export default function TodoPage() {
         loadBacklogCategories(supabase, activeUserId),
         supabase
           .from('habit_daily_todos')
-          .select('id, title, is_done, date, created_at, is_important, is_urgent, backlog_task_id')
+          .select('id, title, is_done, date, created_at, is_important, is_urgent, backlog_task_id, goal_id')
           .eq('user_id', activeUserId)
           .eq('is_done', false)
           .order('date', { ascending: false })
           .order('created_at', { ascending: false }),
         supabase
           .from('habit_backlog_tasks')
-          .select('id, title, assigned_date, created_at, is_important, is_urgent')
+          .select('id, title, assigned_date, created_at, is_important, is_urgent, goal_id')
           .eq('user_id', activeUserId)
           .is('completed_at', null)
           .or('daily_item_type.eq.todo,daily_item_type.is.null'),
@@ -224,7 +231,7 @@ export default function TodoPage() {
 
         const { data: repairedRows, error: repairedError } = await supabase
           .from('habit_daily_todos')
-          .select('id, title, is_done, date, created_at, is_important, is_urgent, backlog_task_id')
+          .select('id, title, is_done, date, created_at, is_important, is_urgent, backlog_task_id, goal_id')
           .eq('user_id', activeUserId)
           .eq('is_done', false)
           .order('date', { ascending: false })
@@ -271,6 +278,7 @@ export default function TodoPage() {
         is_important: todo.is_important,
         is_urgent: todo.is_urgent,
         category_ids: categoryIdsByTodoId[todo.daily_todo_id ?? ''] ?? [],
+        goal_id: todo.goal_id ?? null,
       }));
 
       const unassignedItems: TodoItem[] = unassignedBacklogTasks.map((task) => ({
@@ -284,6 +292,7 @@ export default function TodoPage() {
         is_important: task.is_important,
         is_urgent: task.is_urgent,
         category_ids: categoryIdsByBacklogTaskId[task.id] ?? [],
+        goal_id: task.goal_id ?? null,
       }));
 
       const mergedTodos = sortTodoItems([...assignedItems, ...unassignedItems]);
@@ -383,8 +392,9 @@ export default function TodoPage() {
           title: trimmed,
           is_important: false,
           is_urgent: false,
+          goal_id: newTodoGoalId,
         })
-        .select('id, title, created_at, is_important, is_urgent')
+        .select('id, title, created_at, is_important, is_urgent, goal_id')
         .single();
       if (error) throw error;
       if (data) {
@@ -402,12 +412,14 @@ export default function TodoPage() {
           is_important: data.is_important,
           is_urgent: data.is_urgent,
           category_ids: [...newTodoCategoryIds],
+          goal_id: data.goal_id ?? null,
         };
         setTodos((prev) => sortTodoItems([item, ...prev]));
         setAssignDateById((prev) => ({ ...prev, [data.id]: todayString }));
       }
       setNewTodoTitle('');
       setNewTodoCategoryIds([]);
+      setNewTodoGoalId(null);
     } catch (err) {
       console.error('Error adding to-do:', err);
     }
@@ -539,6 +551,30 @@ export default function TodoPage() {
     }
   };
 
+  const handleTodoGoalChange = async (todoId: string, goalId: string | null) => {
+    if (!userId) return;
+
+    const previous = todos.find((item) => item.id === todoId);
+    if (!previous) return;
+
+    setTodos((prev) =>
+      prev.map((item) => (item.id === todoId ? { ...item, goal_id: goalId } : item))
+    );
+
+    try {
+      if (isBacklogOnly(previous) && previous.backlog_task_id) {
+        await updateBacklogTaskGoal(userId, previous.backlog_task_id, goalId);
+      } else if (previous.daily_todo_id) {
+        await updateTodoGoal(previous.daily_todo_id, userId, goalId);
+      }
+    } catch (err) {
+      console.error('Error linking goal:', err);
+      setTodos((prev) =>
+        prev.map((item) => (item.id === todoId ? { ...item, goal_id: previous.goal_id } : item))
+      );
+    }
+  };
+
   const handleTodoCategoriesChange = async (todoId: string, categoryIds: string[]) => {
     if (!userId) return;
 
@@ -646,7 +682,8 @@ export default function TodoPage() {
             is_important: todo.is_important ?? false,
             is_urgent: todo.is_urgent ?? false,
           },
-          todo.category_ids
+          todo.category_ids,
+          todo.goal_id
         );
         if (!created) return;
 
@@ -661,6 +698,7 @@ export default function TodoPage() {
           is_important: created.is_important,
           is_urgent: created.is_urgent,
           category_ids: todo.category_ids,
+          goal_id: created.goal_id ?? todo.goal_id,
         };
         setTodos((prev) => prev.map((item) => (item.id === todoId ? assigned : item)));
         setAssignDateById((prev) => ({ ...prev, [assigned.id]: selectedDate }));
@@ -855,6 +893,12 @@ export default function TodoPage() {
                         selectedIds={newTodoCategoryIds}
                         onChange={setNewTodoCategoryIds}
                       />
+                      <GoalPicker
+                        compact
+                        goals={goals}
+                        value={newTodoGoalId}
+                        onChange={setNewTodoGoalId}
+                      />
                       <button
                         type="button"
                         onClick={() => void handleAddTodo()}
@@ -902,6 +946,12 @@ export default function TodoPage() {
                                     onChange={(categoryIds) =>
                                       void handleTodoCategoriesChange(todo.id, categoryIds)
                                     }
+                                  />
+                                  <GoalPicker
+                                    compact
+                                    goals={goals}
+                                    value={todo.goal_id}
+                                    onChange={(goalId) => void handleTodoGoalChange(todo.id, goalId)}
                                   />
                                   <EisenhowerToggles
                                     compact

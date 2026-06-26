@@ -17,6 +17,7 @@ import type { GritHabitFormDraft, GritHabitTemplate } from '../../lib/gritTypes'
 import { HabitFormScreen } from '../../components/grit/HabitFormScreen';
 import { HabitFlowLoading } from '../../components/HabitFlowShell';
 import { deactivateHabitTemplate } from '@/lib/habit/habitTemplateActions';
+import { loadHabitTemplateLinks, syncHabitCategories, syncHabitGoals } from '@/lib/habit/habitTemplateLinks';
 
 export default function EditHabitPage() {
   const router = useRouter();
@@ -66,7 +67,16 @@ export default function EditHabitPage() {
         .single();
 
       if (data) {
-        setDraft(initDraftFromHabit(dbToGrit(data)));
+        const links = await loadHabitTemplateLinks(supabase, user.id, id);
+        setDraft(
+          initDraftFromHabit(
+            dbToGrit({
+              ...data,
+              categories: links.categories.length > 0 ? links.categories : [data.category],
+              goal_ids: links.goalIds,
+            })
+          )
+        );
       }
       setLoading(false);
     }
@@ -90,10 +100,12 @@ export default function EditHabitPage() {
                   ...t,
                   name: draft.name.trim(),
                   icon: draft.icon,
-                  category: draft.category,
+                  category: draft.categories[0] ?? draft.category,
+                  categories: draft.categories,
                   time_of_day: draft.time_of_day,
                   is_bad_habit: draft.is_bad_habit,
-                  goal_id: draft.goal_id,
+                  goal_id: draft.goal_ids[0] ?? draft.goal_id,
+                  goal_ids: draft.goal_ids,
                 }
               : t
           ),
@@ -116,6 +128,11 @@ export default function EditHabitPage() {
         .update(payload)
         .eq('id', id)
         .eq('user_id', user.id);
+
+      const categories =
+        draft.categories.length > 0 ? draft.categories : [draft.category];
+      await syncHabitGoals(supabase, user.id, id, draft.goal_ids);
+      await syncHabitCategories(supabase, user.id, id, categories);
 
       setStoredDraft(null);
       clearReturnPath();

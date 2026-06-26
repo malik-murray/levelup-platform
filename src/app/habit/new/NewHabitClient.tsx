@@ -14,6 +14,7 @@ import {
   draftToDb,
 } from '../lib/habitFormStore';
 import type { GritHabitFormDraft } from '../lib/gritTypes';
+import { syncHabitCategories, syncHabitGoals } from '@/lib/habit/habitTemplateLinks';
 import { HabitFormScreen } from '../components/grit/HabitFormScreen';
 
 export default function NewHabitClient() {
@@ -58,9 +59,11 @@ export default function NewHabitClient() {
           id: preview.generateId(),
           name: draft.name.trim(),
           icon: draft.icon,
-          category: draft.category,
+          category: draft.categories[0] ?? draft.category,
+          categories: draft.categories.length > 0 ? draft.categories : [draft.category],
           time_of_day: draft.time_of_day,
-          goal_id: draft.goal_id,
+          goal_id: draft.goal_ids[0] ?? draft.goal_id,
+          goal_ids: draft.goal_ids,
           is_bad_habit: draft.is_bad_habit,
           is_active: true,
           sort_order: null,
@@ -95,6 +98,10 @@ export default function NewHabitClient() {
         .single();
 
       if (data) {
+        const categories =
+          draft.categories.length > 0 ? draft.categories : [draft.category];
+        await syncHabitGoals(supabase, user.id, data.id, draft.goal_ids);
+        await syncHabitCategories(supabase, user.id, data.id, categories);
         setStoredDraft(null);
         clearReturnPath();
         router.push(getReturnPath() || '/habit/today');

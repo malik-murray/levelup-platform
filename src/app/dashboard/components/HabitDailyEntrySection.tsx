@@ -5,9 +5,12 @@ import Link from 'next/link';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate, type Category, type TimeOfDay, type HabitStatus } from '@/lib/habitHelpers';
 import { computeDailyScoreSnapshot } from '@/lib/habit/computeDailyScores';
-import { syncBacklogCompletion, syncBacklogTitle } from '@/lib/habitBacklog';
+import { enrichHabitTemplates } from '@/lib/habit/habitTemplateLinks';
+import { syncBacklogCompletion, syncBacklogTitle, updatePriorityGoal, updateTodoGoal } from '@/lib/habitBacklog';
 import { compareByQuadrant } from '@/lib/habit/eisenhower';
 import { TodoDeleteButton } from '@/components/TodoDeleteButton';
+import { GoalPicker } from '@/components/goals/GoalPicker';
+import { useGoalsForPicker } from '@/lib/goals/useGoalsForPicker';
 import { neon } from '../neonTheme';
 import CollapsiblePanel from './CollapsiblePanel';
 
@@ -16,6 +19,7 @@ type HabitTemplate = {
     name: string;
     icon: string;
     category: Category;
+    categories: Category[];
     time_of_day: TimeOfDay | null;
     is_active: boolean;
     sort_order: number | null;
@@ -39,6 +43,7 @@ type Priority = {
     completed_at: string | null;
     sort_order: number | null;
     backlog_task_id?: string | null;
+    goal_id?: string | null;
     is_important?: boolean | null;
     is_urgent?: boolean | null;
 };
@@ -56,6 +61,7 @@ type Todo = {
     start_time?: string | null;
     end_time?: string | null;
     backlog_task_id?: string | null;
+    goal_id?: string | null;
     is_important?: boolean | null;
     is_urgent?: boolean | null;
 };
@@ -128,6 +134,7 @@ export default function HabitDailyEntrySection({
         bad: true,
     });
     const [eventDisplayMap, setEventDisplayMap] = useState<Record<string, { start_time: string | null; end_time: string | null; title: string }>>({});
+    const goals = useGoalsForPicker(userId);
 
     useEffect(() => {
         if (userId) {
@@ -216,6 +223,12 @@ export default function HabitDailyEntrySection({
                 .eq('is_active', true)
                 .order('sort_order');
 
+            const enrichedTemplates = await enrichHabitTemplates(
+                supabase,
+                userId,
+                templates || []
+            );
+
             // Load habit entries
             const { data: entries } = await supabase
                 .from('habit_daily_entries')
@@ -234,7 +247,7 @@ export default function HabitDailyEntrySection({
             // Load todos (including weekly links and optional time)
             const { data: todosData } = await supabase
                 .from('habit_daily_todos')
-                .select('id, title, category, is_done, date, completed_at, weekly_item_day_id, weekly_event_id, created_at, start_time, end_time, backlog_task_id, is_important, is_urgent')
+                .select('id, title, category, is_done, date, completed_at, weekly_item_day_id, weekly_event_id, created_at, start_time, end_time, backlog_task_id, goal_id, is_important, is_urgent')
                 .eq('user_id', userId)
                 .eq('date', dateStr)
                 .order('created_at');
@@ -290,7 +303,7 @@ export default function HabitDailyEntrySection({
                 .eq('date', dateStr)
                 .single();
 
-            setHabitTemplates(templates || []);
+            setHabitTemplates(enrichedTemplates);
             setHabitEntries(entries || []);
             setPriorities(prioritiesData || []);
             setTodos(sortedTodos);
@@ -537,6 +550,76 @@ export default function HabitDailyEntrySection({
         }
     };
 
+    const handlePriorityGoalChange = async (priorityId: string, goalId: string | null) => {
+        if (!userId) return;
+        const previous = priorities.find((p) => p.id === priorityId);
+        if (!previous) return;
+
+        setPriorities((prev) =>
+            prev.map((p) => (p.id === priorityId ? { ...p, goal_id: goalId } : p))
+        );
+
+        try {
+            await updatePriorityGoal(priorityId, userId, goalId);
+
+            const dateStr = formatDate(selectedDate);
+            if (previous.backlog_task_id) {
+                await supabase
+                    .from('habit_daily_todos')
+                    .update({ goal_id: goalId })
+                    .eq('user_id', userId)
+                    .eq('backlog_task_id', previous.backlog_task_id);
+            } else if (previous.text.trim()) {
+                await supabase
+                    .from('habit_daily_todos')
+                    .update({ goal_id: goalId })
+                    .eq('user_id', userId)
+                    .eq('date', dateStr)
+                    .eq('title', previous.text.trim());
+            }
+
+            setTodos((prev) =>
+                prev.map((t) => {
+                    if (previous.backlog_task_id && t.backlog_task_id === previous.backlog_task_id) {
+                        return { ...t, goal_id: goalId };
+                    }
+                    if (
+                        !previous.backlog_task_id &&
+                        t.date === dateStr &&
+                        t.title.trim() === previous.text.trim()
+                    ) {
+                        return { ...t, goal_id: goalId };
+                    }
+                    return t;
+                })
+            );
+        } catch (error) {
+            console.error('Error linking priority to goal:', error);
+            setPriorities((prev) =>
+                prev.map((p) => (p.id === priorityId ? { ...p, goal_id: previous.goal_id ?? null } : p))
+            );
+        }
+    };
+
+    const handleTodoGoalChange = async (todoId: string, goalId: string | null) => {
+        if (!userId) return;
+        const previous = todos.find((t) => t.id === todoId);
+        if (!previous) return;
+
+        setTodos((prev) =>
+            prev.map((t) => (t.id === todoId ? { ...t, goal_id: goalId } : t))
+        );
+
+        try {
+            await updateTodoGoal(todoId, userId, goalId);
+        } catch (error) {
+            console.error('Error linking to-do to goal:', error);
+            setTodos((prev) =>
+                prev.map((t) => (t.id === todoId ? { ...t, goal_id: previous.goal_id ?? null } : t))
+            );
+        }
+    };
+
     const handleTodoSlotBlur = async (slotIndex: number, value: string) => {
         if (!userId) return;
         const dateStr = formatDate(selectedDate);
@@ -601,6 +684,17 @@ export default function HabitDailyEntrySection({
 
             const dateStr = formatDate(selectedDate);
             if (!completed && priorityText) {
+                const todoPatch = {
+                    is_done: true,
+                    completed_at: completedAt,
+                    goal_id: selectedPriority?.goal_id ?? null,
+                    is_important: selectedPriority?.is_important ?? false,
+                    is_urgent: selectedPriority?.is_urgent ?? false,
+                    ...(selectedPriority?.backlog_task_id
+                        ? { backlog_task_id: selectedPriority.backlog_task_id }
+                        : {}),
+                };
+
                 const { data: existing } = await supabase
                     .from('habit_daily_todos')
                     .select('id')
@@ -611,15 +705,14 @@ export default function HabitDailyEntrySection({
                 if (existing) {
                     await supabase
                         .from('habit_daily_todos')
-                        .update({ is_done: true, completed_at: completedAt })
+                        .update(todoPatch)
                         .eq('id', existing.id);
                 } else {
                     await supabase.from('habit_daily_todos').insert({
                         user_id: userId,
                         date: dateStr,
                         title: priorityText,
-                        is_done: true,
-                        completed_at: completedAt,
+                        ...todoPatch,
                     });
                 }
             } else if (completed && priorityText) {
@@ -705,6 +798,7 @@ export default function HabitDailyEntrySection({
             templates: habitTemplates.map((t) => ({
                 id: t.id,
                 category: t.category,
+                categories: t.categories,
                 time_of_day: t.time_of_day,
                 is_bad_habit: Boolean(t.is_bad_habit),
             })),
@@ -864,6 +958,16 @@ export default function HabitDailyEntrySection({
                                         rows={2}
                                         className={`min-h-[2.5rem] w-full resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${priority?.completed ? 'text-slate-500 line-through' : ''}`}
                                     />
+                                    {priority ? (
+                                        <GoalPicker
+                                            compact
+                                            goals={goals}
+                                            value={priority.goal_id ?? null}
+                                            onChange={(goalId) =>
+                                                void handlePriorityGoalChange(priority.id, goalId)
+                                            }
+                                        />
+                                    ) : null}
                                 </div>
                                 {priority ? (
                                     <TodoDeleteButton
@@ -933,6 +1037,14 @@ export default function HabitDailyEntrySection({
                                         rows={2}
                                         className={`min-h-[2.5rem] w-full resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${todo?.is_done ? 'text-slate-500 line-through' : ''}`}
                                     />
+                                    {todo ? (
+                                        <GoalPicker
+                                            compact
+                                            goals={goals}
+                                            value={todo.goal_id ?? null}
+                                            onChange={(goalId) => void handleTodoGoalChange(todo.id, goalId)}
+                                        />
+                                    ) : null}
                                 </div>
                                 {todo ? (
                                     <TodoDeleteButton
@@ -1046,11 +1158,18 @@ export default function HabitDailyEntrySection({
                                                     ? `(${formatCompletedTime(habit.checked_at)}) ${habit.name}`
                                                     : habit.name}
                                             </span>
-                                            <span
-                                                className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium capitalize ${categoryColors[habit.category]}`}
-                                                title={habit.category}
-                                            >
-                                                {habit.category}
+                                            <span className="flex shrink-0 flex-wrap justify-end gap-1">
+                                                {(habit.categories?.length ? habit.categories : [habit.category]).map(
+                                                    (cat) => (
+                                                        <span
+                                                            key={cat}
+                                                            className={`rounded border px-1.5 py-0.5 text-[10px] font-medium capitalize ${categoryColors[cat]}`}
+                                                            title={cat}
+                                                        >
+                                                            {cat}
+                                                        </span>
+                                                    )
+                                                )}
                                             </span>
                                         </label>
                                     ))}

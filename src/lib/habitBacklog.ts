@@ -8,6 +8,7 @@ type OrphanedBacklogTask = {
     assigned_date: string | null;
     is_important: boolean | null;
     is_urgent: boolean | null;
+    goal_id: string | null;
 };
 
 export async function repairOrphanedBacklogTasks(
@@ -29,6 +30,7 @@ export async function repairOrphanedBacklogTasks(
                 is_done: false,
                 is_important: task.is_important ?? false,
                 is_urgent: task.is_urgent ?? false,
+                goal_id: task.goal_id,
                 backlog_task_id: task.id,
             })
             .select('id')
@@ -81,6 +83,61 @@ export async function syncBacklogEisenhower(backlogTaskId: string, fields: Eisen
             is_urgent: fields.is_urgent,
         })
         .eq('id', backlogTaskId);
+    if (error) throw error;
+}
+
+export async function syncBacklogGoal(backlogTaskId: string, goalId: string | null) {
+    const { error } = await supabase
+        .from('habit_backlog_tasks')
+        .update({ goal_id: goalId, updated_at: new Date().toISOString() })
+        .eq('id', backlogTaskId);
+    if (error) throw error;
+}
+
+export async function updateTodoGoal(
+    todoId: string,
+    userId: string,
+    goalId: string | null,
+    backlogTaskId?: string | null
+) {
+    const { error } = await supabase
+        .from('habit_daily_todos')
+        .update({ goal_id: goalId })
+        .eq('id', todoId)
+        .eq('user_id', userId);
+    if (error) throw error;
+    if (backlogTaskId) {
+        await syncBacklogGoal(backlogTaskId, goalId);
+    }
+}
+
+export async function updatePriorityGoal(
+    priorityId: string,
+    userId: string,
+    goalId: string | null,
+    backlogTaskId?: string | null
+) {
+    const { error } = await supabase
+        .from('habit_daily_priorities')
+        .update({ goal_id: goalId })
+        .eq('id', priorityId)
+        .eq('user_id', userId);
+    if (error) throw error;
+    if (backlogTaskId) {
+        await syncBacklogGoal(backlogTaskId, goalId);
+    }
+}
+
+export async function updateBacklogTaskGoal(
+    userId: string,
+    backlogTaskId: string,
+    goalId: string | null
+) {
+    const { error } = await supabase
+        .from('habit_backlog_tasks')
+        .update({ goal_id: goalId, updated_at: new Date().toISOString() })
+        .eq('id', backlogTaskId)
+        .eq('user_id', userId);
     if (error) throw error;
 }
 
@@ -193,7 +250,8 @@ export async function assignBacklogTodoToDate(
     title: string,
     date: string,
     fields: EisenhowerFields,
-    categoryIds: string[]
+    categoryIds: string[],
+    goalId?: string | null
 ) {
     const { data: todo, error: insertError } = await supabase
         .from('habit_daily_todos')
@@ -204,9 +262,10 @@ export async function assignBacklogTodoToDate(
             is_done: false,
             is_important: fields.is_important ?? false,
             is_urgent: fields.is_urgent ?? false,
+            goal_id: goalId ?? null,
             backlog_task_id: backlogTaskId,
         })
-        .select('id, title, is_done, date, created_at, is_important, is_urgent, backlog_task_id')
+        .select('id, title, is_done, date, created_at, is_important, is_urgent, backlog_task_id, goal_id')
         .single();
     if (insertError) throw insertError;
 

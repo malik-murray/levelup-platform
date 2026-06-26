@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import type { GritHabitFormDraft } from '../../lib/gritTypes';
+import { formatCategoriesLabel, formatGoalsLabel } from '../../lib/gritTypes';
 import { HabitFlowShell } from '../HabitFlowShell';
 import { HabitManageSection } from './HabitManageSection';
 import { neon } from '@/app/dashboard/neonTheme';
@@ -126,7 +127,16 @@ export function HabitFormScreen({
           value="None"
           href={`/habit/groups?return=${encodeURIComponent(returnPath)}`}
         />
-        <SettingsRow label="Goal" value={draft.goal_id ? 'Linked' : 'None'} comingSoon />
+        <SettingsRow
+          label="Categories"
+          value={formatCategoriesLabel(draft.categories)}
+          href={`/habit/categories?return=${encodeURIComponent(returnPath)}`}
+        />
+        <SettingsRow
+          label="Goal"
+          value={formatGoalsLabel(draft.goal_ids)}
+          href={`/habit/goal?return=${encodeURIComponent(returnPath)}`}
+        />
         <SettingsRow label="Average" value="—" comingSoon />
         <SettingsRow
           label="Repeat"

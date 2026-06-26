@@ -20,6 +20,7 @@ type App = {
 const primaryNavApps: App[] = [
     { name: 'Dashboard', href: '/dashboard', icon: '📊' },
     { name: 'To-Do', href: '/todo', icon: '📝' },
+    { name: 'Goals & Vision', href: '/goals', icon: '🎯' },
     { name: 'Trends', href: '/trends', icon: '📉' },
     { name: 'Weekly plan', href: '/habit/weekly-plan', icon: '📅' },
     { name: 'Settings', href: '/settings', icon: '⚙️' },
@@ -41,7 +42,7 @@ function renderAppRow(
     const href = app.comingSoonKey ? comingSoonMenuHref(app.comingSoonKey) : app.href;
     const isActive = app.comingSoonKey
         ? comingSoonActive === app.comingSoonKey
-        : pathname === app.href;
+        : pathname === app.href || (app.href !== '/dashboard' && pathname.startsWith(`${app.href}/`));
     const isComingSoon = Boolean(app.comingSoonKey);
 
     const base =

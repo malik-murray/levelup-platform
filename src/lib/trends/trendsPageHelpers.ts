@@ -1,4 +1,6 @@
 import { formatDate } from '@/lib/habitHelpers';
+import { formatCategoriesLabel } from '@/app/habit/lib/gritTypes';
+import { habitMatchesCategory } from '@/lib/habit/habitTemplateLinks';
 import type { QuestTrend } from '@/lib/trends/trendsCopy';
 import type {
     DailyScoreRow,
@@ -47,7 +49,7 @@ export function computeStreaks(flags: boolean[]) {
 
 function templateMatchesLane(t: HabitTemplateRow, lane: LaneFilter): boolean {
     if (lane === 'all') return true;
-    return t.category === lane;
+    return habitMatchesCategory(t, lane);
 }
 
 export function computeHabitTrends(
@@ -102,11 +104,13 @@ export function computeHabitTrends(
             if (trend === 'declining') negativeSignals.push(`Down ${Math.abs(delta)}% vs prior period`);
             if (current === 0 && completionRate < 40) negativeSignals.push('Low momentum this period');
 
+            const categories =
+                t.categories && t.categories.length > 0 ? t.categories : [t.category];
             return {
                 id: t.id,
                 name: t.name,
                 icon: t.icon,
-                category: t.category,
+                category: formatCategoriesLabel(categories),
                 completionRate,
                 completedDays: Math.round(completedWeighted),
                 totalDays,
@@ -194,7 +198,7 @@ function dayLanePct(
     lane: LaneFilter,
 ): number | null {
     const eligible = templates.filter(
-        (t) => !t.is_bad_habit && t.category === cat && templateMatchesLane(t, lane),
+        (t) => !t.is_bad_habit && habitMatchesCategory(t, cat) && templateMatchesLane(t, lane),
     );
     if (eligible.length === 0) return null;
     let sum = 0;

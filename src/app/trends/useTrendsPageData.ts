@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate } from '@/lib/habitHelpers';
+import { enrichHabitTemplates, habitMatchesCategory } from '@/lib/habit/habitTemplateLinks';
 import { entryWeight } from '@/lib/trends/trendsPageHelpers';
 import type { DailyScoreRow, HabitEntryRow, HabitTemplateRow } from '@/lib/trends/trendsPageTypes';
 import type { TrendsPeriodPreset } from '@/lib/trends/trendsRangeResolve';
@@ -66,7 +67,9 @@ function categoryCompletionWeighted(
     dateKeys: string[],
     category: 'physical' | 'mental' | 'spiritual',
 ): { completed: number; total: number } {
-    const eligible = templates.filter((t) => !t.is_bad_habit && t.category === category);
+    const eligible = templates.filter(
+        (t) => !t.is_bad_habit && habitMatchesCategory(t, category),
+    );
     let total = 0;
     let completed = 0;
     for (const dateKey of dateKeys) {
@@ -261,7 +264,7 @@ export function useTrendsPageData() {
                         .order('date', { ascending: true }),
                     supabase
                         .from('habit_templates')
-                        .select('id, name, icon, category, time_of_day, is_bad_habit, is_active')
+                        .select('id, name, icon, category, time_of_day, is_bad_habit, is_active, goal_id')
                         .eq('user_id', userId)
                         .eq('is_active', true)
                         .order('sort_order'),
@@ -274,8 +277,14 @@ export function useTrendsPageData() {
                     priorQuery ?? Promise.resolve({ data: [] as Pick<DailyScoreRow, 'score_overall' | 'score_habits'>[] }),
                 ]);
 
+                const enrichedTemplates = await enrichHabitTemplates(
+                    supabase,
+                    userId,
+                    templateData || [],
+                );
+
                 setScores((scoreData || []) as DailyScoreRow[]);
-                setTemplates((templateData || []) as HabitTemplateRow[]);
+                setTemplates(enrichedTemplates as HabitTemplateRow[]);
                 setEntries((entryData || []) as HabitEntryRow[]);
                 setPriorScores((priorResult.data || []) as Pick<DailyScoreRow, 'score_overall' | 'score_habits'>[]);
             } catch (err) {

@@ -9,6 +9,7 @@ export type HabitTemplateRow = {
     name: string;
     icon: string;
     category: 'physical' | 'mental' | 'spiritual';
+    categories?: ('physical' | 'mental' | 'spiritual')[];
     time_of_day: 'morning' | 'afternoon' | 'evening' | null;
     is_bad_habit?: boolean;
     is_active?: boolean;

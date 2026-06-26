@@ -8,9 +8,12 @@ import {
     type TimeOfDay,
 } from '@/lib/habitHelpers';
 
+import { habitMatchesCategory } from '@/lib/habit/habitTemplateLinks';
+
 export type HabitTemplateRow = {
     id: string;
     category: Category;
+    categories?: Category[];
     time_of_day: TimeOfDay | null;
     is_bad_habit: boolean;
 };
@@ -62,10 +65,10 @@ function computeCategoryScore(
     targetCategory: Category,
 ): number {
     const habitItems = templates
-        .filter((t) => !t.is_bad_habit && t.category === targetCategory)
+        .filter((t) => !t.is_bad_habit && habitMatchesCategory(t, targetCategory))
         .map((t) => {
             const entry = entries.find((e) => e.habit_template_id === t.id);
-            return { category: t.category, status: (entry?.status ?? 'missed') as HabitStatus };
+            return { category: targetCategory, status: (entry?.status ?? 'missed') as HabitStatus };
         });
     const priorityItems = priorities
         .filter((p) => p.category === targetCategory)

@@ -12,6 +12,7 @@ import {
   deactivateHabitTemplate,
   reorderHabitTemplates,
 } from '@/lib/habit/habitTemplateActions';
+import { enrichHabitTemplates } from '@/lib/habit/habitTemplateLinks';
 
 type HabitWithStatus = GritHabitTemplate & {
   status: 'checked' | 'half' | 'missed';
@@ -70,7 +71,8 @@ export default function HabitTodayPage() {
         .eq('user_id', user.id)
         .eq('date', dateStr);
 
-      const list = (templates || []).map((t) => dbToGrit(t));
+      const enriched = await enrichHabitTemplates(supabase, user.id, templates || []);
+      const list = enriched.map((t) => dbToGrit(t));
       const withStatus: HabitWithStatus[] = list.map((t) => {
         const entry = (entries || []).find((e) => e.habit_template_id === t.id);
         return {
