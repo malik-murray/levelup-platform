@@ -57,7 +57,7 @@ export function GoalLinkButton({ goals, value, onChange, compact = false }: Prop
         <TargetIcon className={iconClass} />
       </button>
       {open ? (
-        <div className="absolute right-0 top-full z-20 mt-1 max-h-52 w-48 overflow-y-auto rounded-lg border border-[#ff9d00]/35 bg-[#03060f] py-1 shadow-lg">
+        <div className="absolute right-0 top-full z-20 mt-1 max-h-52 w-[min(12rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-[#ff9d00]/35 bg-[#03060f] py-1 shadow-lg sm:w-48">
           <button
             type="button"
             onClick={() => {

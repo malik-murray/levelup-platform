@@ -926,21 +926,24 @@ export default function HabitDailyEntrySection({
                 </button>
                 <CollapsiblePanel open={prioritiesOpen}>
                 <div className="p-4 pt-0 space-y-2 min-w-0 overflow-hidden">
-                <ol className="list-decimal list-inside space-y-2 min-w-0">
+                <ol className="list-none space-y-2 min-w-0 pl-0">
                     {Array.from({ length: sortedPrioritiesForSlots.length + 1 }, (_, slotIndex) => {
                         const priority = sortedPrioritiesForSlots[slotIndex];
                         const isAddRow = slotIndex === sortedPrioritiesForSlots.length;
                         return (
-                            <li key={priority?.id ?? `priority-slot-${slotIndex}`} className="flex items-start gap-2 min-w-0">
+                            <li
+                                key={priority?.id ?? `priority-slot-${slotIndex}`}
+                                className="grid min-w-0 grid-cols-[auto_1fr] grid-rows-[auto_auto] gap-x-2 gap-y-1 sm:grid-cols-[auto_1fr_auto] sm:grid-rows-1"
+                            >
                                 {priority ? (
                                     <input
                                         type="checkbox"
                                         checked={priority.completed}
                                         onChange={() => handleTogglePriority(priority.id, priority.completed)}
-                                        className="mt-2.5 h-5 w-5 shrink-0 rounded border-[#ff9d00]/50 text-[#ff9d00] focus:ring-[#ff9d00]/40"
+                                        className="col-start-1 row-start-1 mt-2.5 h-5 w-5 shrink-0 rounded border-[#ff9d00]/50 text-[#ff9d00] focus:ring-[#ff9d00]/40"
                                     />
                                 ) : (
-                                    <span className="w-5 shrink-0 mt-2.5" aria-hidden />
+                                    <span className="col-start-1 row-start-1 mt-2.5 w-5 shrink-0" aria-hidden />
                                 )}
                                 <textarea
                                         value={draftPriorities[slotIndex] ?? ''}
@@ -955,11 +958,12 @@ export default function HabitDailyEntrySection({
                                         onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
                                         placeholder={isAddRow ? 'Add priority' : `Priority ${slotIndex + 1}`}
                                         rows={2}
-                                        className={`min-h-[2.5rem] min-w-0 flex-1 resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${priority?.completed ? 'text-slate-500 line-through' : ''}`}
+                                        className={`col-start-2 row-start-1 min-h-[2.5rem] min-w-0 w-full resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${priority?.completed ? 'text-slate-500 line-through' : ''}`}
                                     />
                                 {priority ? (
-                                    <div className="mt-2.5 flex shrink-0 items-start gap-1">
+                                    <div className="col-start-2 row-start-2 flex justify-end gap-1 sm:col-start-3 sm:row-start-1 sm:mt-2.5">
                                         <GoalLinkButton
+                                            compact
                                             goals={goals}
                                             value={priority.goal_id ?? null}
                                             onChange={(goalId) =>
@@ -967,6 +971,7 @@ export default function HabitDailyEntrySection({
                                             }
                                         />
                                         <TodoDeleteButton
+                                            compact
                                             itemLabel={priority.text}
                                             confirmMessage={`Delete "${priority.text}"? This removes it from today's priorities.`}
                                             onConfirm={() => void handleDeletePriority(priority)}
@@ -1002,21 +1007,24 @@ export default function HabitDailyEntrySection({
                 </button>
                 <CollapsiblePanel open={todosOpen}>
                 <div className="p-4 pt-0 space-y-2 min-w-0 overflow-hidden">
-                <ol className="list-decimal list-inside space-y-2 min-w-0">
+                <ol className="list-none space-y-2 min-w-0 pl-0">
                     {Array.from({ length: todos.length + 1 }, (_, slotIndex) => {
                         const todo = todos[slotIndex];
                         const isAddRow = slotIndex === todos.length;
                         return (
-                            <li key={todo?.id ?? `todo-slot-${slotIndex}`} className="flex items-start gap-2 min-w-0">
+                            <li
+                                key={todo?.id ?? `todo-slot-${slotIndex}`}
+                                className="grid min-w-0 grid-cols-[auto_1fr] grid-rows-[auto_auto] gap-x-2 gap-y-1 sm:grid-cols-[auto_1fr_auto] sm:grid-rows-1"
+                            >
                                 {todo ? (
                                     <input
                                         type="checkbox"
                                         checked={todo.is_done}
                                         onChange={() => handleToggleTodo(todo.id, todo.is_done)}
-                                        className="mt-2.5 h-5 w-5 shrink-0 rounded border-[#ff9d00]/50 text-[#ff9d00] focus:ring-[#ff9d00]/40"
+                                        className="col-start-1 row-start-1 mt-2.5 h-5 w-5 shrink-0 rounded border-[#ff9d00]/50 text-[#ff9d00] focus:ring-[#ff9d00]/40"
                                     />
                                 ) : (
-                                    <span className="w-5 shrink-0 mt-2.5" aria-hidden />
+                                    <span className="col-start-1 row-start-1 mt-2.5 w-5 shrink-0" aria-hidden />
                                 )}
                                 <textarea
                                         value={draftTodos[slotIndex] ?? ''}
@@ -1031,16 +1039,18 @@ export default function HabitDailyEntrySection({
                                         onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
                                         placeholder={isAddRow ? 'Add to-do' : `To-do ${slotIndex + 1}`}
                                         rows={2}
-                                        className={`min-h-[2.5rem] min-w-0 flex-1 resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${todo?.is_done ? 'text-slate-500 line-through' : ''}`}
+                                        className={`col-start-2 row-start-1 min-h-[2.5rem] min-w-0 w-full resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${todo?.is_done ? 'text-slate-500 line-through' : ''}`}
                                     />
                                 {todo ? (
-                                    <div className="mt-2.5 flex shrink-0 items-start gap-1">
+                                    <div className="col-start-2 row-start-2 flex justify-end gap-1 sm:col-start-3 sm:row-start-1 sm:mt-2.5">
                                         <GoalLinkButton
+                                            compact
                                             goals={goals}
                                             value={todo.goal_id ?? null}
                                             onChange={(goalId) => void handleTodoGoalChange(todo.id, goalId)}
                                         />
                                         <TodoDeleteButton
+                                            compact
                                             itemLabel={todo.title}
                                             confirmMessage={`Delete "${todo.title}"? This removes it from today's to-do list.`}
                                             onConfirm={() => void handleDeleteTodo(todo)}
