@@ -9,7 +9,7 @@ import { enrichHabitTemplates } from '@/lib/habit/habitTemplateLinks';
 import { syncBacklogCompletion, syncBacklogTitle, updatePriorityGoal, updateTodoGoal } from '@/lib/habitBacklog';
 import { compareByQuadrant } from '@/lib/habit/eisenhower';
 import { TodoDeleteButton } from '@/components/TodoDeleteButton';
-import { GoalPicker } from '@/components/goals/GoalPicker';
+import { GoalLinkButton } from '@/components/goals/GoalLinkButton';
 import { useGoalsForPicker } from '@/lib/goals/useGoalsForPicker';
 import { neon } from '../neonTheme';
 import CollapsiblePanel from './CollapsiblePanel';
@@ -942,8 +942,7 @@ export default function HabitDailyEntrySection({
                                 ) : (
                                     <span className="w-5 shrink-0 mt-2.5" aria-hidden />
                                 )}
-                                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                                    <textarea
+                                <textarea
                                         value={draftPriorities[slotIndex] ?? ''}
                                         onChange={(e) =>
                                             setDraftPriorities((prev) => {
@@ -956,25 +955,23 @@ export default function HabitDailyEntrySection({
                                         onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
                                         placeholder={isAddRow ? 'Add priority' : `Priority ${slotIndex + 1}`}
                                         rows={2}
-                                        className={`min-h-[2.5rem] w-full resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${priority?.completed ? 'text-slate-500 line-through' : ''}`}
+                                        className={`min-h-[2.5rem] min-w-0 flex-1 resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${priority?.completed ? 'text-slate-500 line-through' : ''}`}
                                     />
-                                    {priority ? (
-                                        <GoalPicker
-                                            compact
+                                {priority ? (
+                                    <div className="mt-2.5 flex shrink-0 items-start gap-1">
+                                        <GoalLinkButton
                                             goals={goals}
                                             value={priority.goal_id ?? null}
                                             onChange={(goalId) =>
                                                 void handlePriorityGoalChange(priority.id, goalId)
                                             }
                                         />
-                                    ) : null}
-                                </div>
-                                {priority ? (
-                                    <TodoDeleteButton
-                                        itemLabel={priority.text}
-                                        confirmMessage={`Delete "${priority.text}"? This removes it from today's priorities.`}
-                                        onConfirm={() => void handleDeletePriority(priority)}
-                                    />
+                                        <TodoDeleteButton
+                                            itemLabel={priority.text}
+                                            confirmMessage={`Delete "${priority.text}"? This removes it from today's priorities.`}
+                                            onConfirm={() => void handleDeletePriority(priority)}
+                                        />
+                                    </div>
                                 ) : null}
                             </li>
                         );
@@ -1021,8 +1018,7 @@ export default function HabitDailyEntrySection({
                                 ) : (
                                     <span className="w-5 shrink-0 mt-2.5" aria-hidden />
                                 )}
-                                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                                    <textarea
+                                <textarea
                                         value={draftTodos[slotIndex] ?? ''}
                                         onChange={(e) =>
                                             setDraftTodos((prev) => {
@@ -1035,23 +1031,21 @@ export default function HabitDailyEntrySection({
                                         onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
                                         placeholder={isAddRow ? 'Add to-do' : `To-do ${slotIndex + 1}`}
                                         rows={2}
-                                        className={`min-h-[2.5rem] w-full resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${todo?.is_done ? 'text-slate-500 line-through' : ''}`}
+                                        className={`min-h-[2.5rem] min-w-0 flex-1 resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${todo?.is_done ? 'text-slate-500 line-through' : ''}`}
                                     />
-                                    {todo ? (
-                                        <GoalPicker
-                                            compact
+                                {todo ? (
+                                    <div className="mt-2.5 flex shrink-0 items-start gap-1">
+                                        <GoalLinkButton
                                             goals={goals}
                                             value={todo.goal_id ?? null}
                                             onChange={(goalId) => void handleTodoGoalChange(todo.id, goalId)}
                                         />
-                                    ) : null}
-                                </div>
-                                {todo ? (
-                                    <TodoDeleteButton
-                                        itemLabel={todo.title}
-                                        confirmMessage={`Delete "${todo.title}"? This removes it from today's to-do list.`}
-                                        onConfirm={() => void handleDeleteTodo(todo)}
-                                    />
+                                        <TodoDeleteButton
+                                            itemLabel={todo.title}
+                                            confirmMessage={`Delete "${todo.title}"? This removes it from today's to-do list.`}
+                                            onConfirm={() => void handleDeleteTodo(todo)}
+                                        />
+                                    </div>
                                 ) : null}
                             </li>
                         );
