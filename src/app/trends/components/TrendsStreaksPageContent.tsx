@@ -12,6 +12,9 @@ type Props = {
 
 type StreakScope = 'current' | 'longest';
 type StreakFilter = 'all' | 'good' | 'bad';
+type CategoryFilter = 'all' | 'physical' | 'mental' | 'spiritual';
+type TimeFilter = 'all' | 'morning' | 'afternoon' | 'evening' | 'none';
+type SortBy = 'streak' | 'name' | 'category';
 
 const SCOPE_TABS: { id: StreakScope; label: string }[] = [
     { id: 'current', label: 'Current' },
@@ -22,6 +25,27 @@ const STREAK_FILTERS: { id: StreakFilter; label: string }[] = [
     { id: 'all', label: 'All' },
     { id: 'good', label: 'Good' },
     { id: 'bad', label: 'Bad' },
+];
+
+const CATEGORY_FILTERS: { id: CategoryFilter; label: string }[] = [
+    { id: 'all', label: 'All' },
+    { id: 'physical', label: 'Physical' },
+    { id: 'mental', label: 'Mental' },
+    { id: 'spiritual', label: 'Spiritual' },
+];
+
+const TIME_FILTERS: { id: TimeFilter; label: string }[] = [
+    { id: 'all', label: 'All' },
+    { id: 'morning', label: 'Morning' },
+    { id: 'afternoon', label: 'Afternoon' },
+    { id: 'evening', label: 'Evening' },
+    { id: 'none', label: 'Any time' },
+];
+
+const SORT_OPTIONS: { id: SortBy; label: string }[] = [
+    { id: 'streak', label: 'Streak' },
+    { id: 'name', label: 'Name' },
+    { id: 'category', label: 'Category' },
 ];
 
 function HabitStreakCard({
@@ -75,10 +99,36 @@ function HabitStreakCard({
 export default function TrendsStreaksPageContent({ model }: Props) {
     const [streakScope, setStreakScope] = useState<StreakScope>('current');
     const [streakFilter, setStreakFilter] = useState<StreakFilter>('all');
+    const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
+    const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
+    const [sortBy, setSortBy] = useState<SortBy>('streak');
+    const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
     const { habitMomentumRows } = model;
 
+    const activeExtraFilterCount =
+        (categoryFilter !== 'all' ? 1 : 0) + (timeFilter !== 'all' ? 1 : 0) + (sortBy !== 'streak' ? 1 : 0);
+
+    const filteredRows = useMemo(() => {
+        return habitMomentumRows.filter((r) => {
+            if (categoryFilter !== 'all' && !r.categories.includes(categoryFilter)) return false;
+            if (timeFilter !== 'all') {
+                if (timeFilter === 'none' ? r.timeOfDay !== null : r.timeOfDay !== timeFilter) return false;
+            }
+            return true;
+        });
+    }, [habitMomentumRows, categoryFilter, timeFilter]);
+
+    const byNameOrCategory = (a: HabitMomentumRow, b: HabitMomentumRow) =>
+        sortBy === 'category'
+            ? a.category.localeCompare(b.category) || a.name.localeCompare(b.name)
+            : a.name.localeCompare(b.name);
+
     const goodSorted = useMemo(() => {
-        const copy = [...habitMomentumRows];
+        const copy = [...filteredRows];
+        if (sortBy !== 'streak') {
+            copy.sort(byNameOrCategory);
+            return copy;
+        }
         if (streakScope === 'current') {
             copy.sort(
                 (a, b) =>
@@ -95,13 +145,17 @@ export default function TrendsStreaksPageContent({ model }: Props) {
             );
         }
         return copy;
-    }, [habitMomentumRows, streakScope]);
+    }, [filteredRows, streakScope, sortBy]);
 
     const badSorted = useMemo(() => {
         const copy =
             streakScope === 'current'
-                ? habitMomentumRows.filter((r) => r.currentMissStreak >= 1)
-                : habitMomentumRows.filter((r) => r.longestMissStreak >= 1);
+                ? filteredRows.filter((r) => r.currentMissStreak >= 1)
+                : filteredRows.filter((r) => r.longestMissStreak >= 1);
+        if (sortBy !== 'streak') {
+            copy.sort(byNameOrCategory);
+            return copy;
+        }
         if (streakScope === 'current') {
             copy.sort(
                 (a, b) =>
@@ -118,7 +172,7 @@ export default function TrendsStreaksPageContent({ model }: Props) {
             );
         }
         return copy;
-    }, [habitMomentumRows, streakScope]);
+    }, [filteredRows, streakScope, sortBy]);
 
     return (
         <main className="min-w-0 space-y-8 px-4 py-8 pb-12 lg:px-8">
@@ -158,6 +212,76 @@ export default function TrendsStreaksPageContent({ model }: Props) {
                         </button>
                     ))}
                 </div>
+
+                <button
+                    type="button"
+                    onClick={() => setMoreFiltersOpen((v) => !v)}
+                    aria-expanded={moreFiltersOpen}
+                    className="flex w-full items-center justify-center gap-1.5 py-1 text-[11px] font-semibold text-slate-400 transition-colors hover:text-[#ffe066]/90 sm:justify-start"
+                >
+                    <span>{moreFiltersOpen ? 'Hide filters' : 'Category, time & sort'}</span>
+                    {activeExtraFilterCount > 0 && (
+                        <span className="rounded-full bg-[#ff9d00]/25 px-1.5 py-0.5 text-[10px] text-[#ffe066]">
+                            {activeExtraFilterCount}
+                        </span>
+                    )}
+                    <span aria-hidden>{moreFiltersOpen ? '▴' : '▾'}</span>
+                </button>
+
+                {moreFiltersOpen && (
+                    <>
+                        <div
+                            className={`${neon.trendsPillRow} justify-center sm:justify-start`}
+                            role="group"
+                            aria-label="Filter by category"
+                        >
+                            {CATEGORY_FILTERS.map((f) => (
+                                <button
+                                    key={f.id}
+                                    type="button"
+                                    onClick={() => setCategoryFilter(f.id)}
+                                    className={categoryFilter === f.id ? neon.trendsPillOn : neon.trendsPillOff}
+                                >
+                                    {f.label}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div
+                            className={`${neon.trendsPillRow} justify-center sm:justify-start`}
+                            role="group"
+                            aria-label="Filter by time of day"
+                        >
+                            {TIME_FILTERS.map((f) => (
+                                <button
+                                    key={f.id}
+                                    type="button"
+                                    onClick={() => setTimeFilter(f.id)}
+                                    className={timeFilter === f.id ? neon.trendsPillOn : neon.trendsPillOff}
+                                >
+                                    {f.label}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div
+                            className={`${neon.trendsPillRow} justify-center sm:justify-start`}
+                            role="group"
+                            aria-label="Sort by"
+                        >
+                            {SORT_OPTIONS.map((f) => (
+                                <button
+                                    key={f.id}
+                                    type="button"
+                                    onClick={() => setSortBy(f.id)}
+                                    className={sortBy === f.id ? neon.trendsPillOn : neon.trendsPillOff}
+                                >
+                                    {f.label}
+                                </button>
+                            ))}
+                        </div>
+                    </>
+                )}
             </div>
 
             <div className="mx-auto max-w-2xl space-y-10">
@@ -168,7 +292,9 @@ export default function TrendsStreaksPageContent({ model }: Props) {
                         </h2>
                         {goodSorted.length === 0 ? (
                             <p className={`${neon.section} px-4 py-6 text-center text-sm text-slate-400`}>
-                                No active habits. Add habits from the habit tracker.
+                                {habitMomentumRows.length === 0
+                                    ? 'No active habits. Add habits from the habit tracker.'
+                                    : 'No habits match the selected filters.'}
                             </p>
                         ) : (
                             <div className="grid gap-2 sm:grid-cols-2">

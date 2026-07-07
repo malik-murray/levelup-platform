@@ -1,14 +1,17 @@
 import { formatDate } from '@/lib/habitHelpers';
 import { computeStreaks, entryWeight } from '@/lib/trends/trendsPageHelpers';
 import type { HabitEntryRow, HabitTemplateRow } from '@/lib/trends/trendsPageTypes';
-import { enumerateDateKeysInclusive, todayLocal } from '@/lib/trends/trendsRangeResolve';
+import { addDays, enumerateDateKeysInclusive, todayLocal } from '@/lib/trends/trendsRangeResolve';
 
 export type HabitMomentumRow = {
     id: string;
     name: string;
     icon: string;
     category: string;
+    /** All categories this habit belongs to (multi-category habits list more than one) */
+    categories: HabitTemplateRow['category'][];
     timeLabel: string;
+    timeOfDay: HabitTemplateRow['time_of_day'];
     /** Consecutive days at end of range with half or full completion */
     currentGoodStreak: number;
     longestGoodStreak: number;
@@ -20,6 +23,10 @@ export type HabitMomentumRow = {
 function timeLabel(t: HabitTemplateRow): string {
     if (t.time_of_day) return t.time_of_day.charAt(0).toUpperCase() + t.time_of_day.slice(1);
     return 'Any time';
+}
+
+function effectiveCategories(t: HabitTemplateRow): HabitTemplateRow['category'][] {
+    return t.categories && t.categories.length > 0 ? t.categories : [t.category];
 }
 
 function computeMissStreaks(missFlags: boolean[]): { current: number; longest: number } {
@@ -62,7 +69,9 @@ export function buildHabitMomentumRows(
             name: t.name,
             icon: t.icon,
             category: t.category,
+            categories: effectiveCategories(t),
             timeLabel: timeLabel(t),
+            timeOfDay: t.time_of_day,
             currentGoodStreak,
             longestGoodStreak,
             currentMissStreak,
@@ -79,7 +88,9 @@ const EMPTY_STREAKS = {
 } as const;
 
 /**
- * Calendar streaks from each habit’s first logged day through today (local).
+ * Calendar streaks from each habit’s first logged day through yesterday (local).
+ * Today is still in progress, so it's excluded until it becomes "yesterday" —
+ * checking a habit today doesn't extend the streak until the next calendar day.
  * Days before the first log are not counted — that habit’s timeline starts at its first entry.
  */
 export function buildHabitOverallMomentumRows(
@@ -92,7 +103,7 @@ export function buildHabitOverallMomentumRows(
         byHabit.get(e.habit_template_id)!.set(e.date, e.status);
     }
 
-    const endStr = formatDate(todayLocal());
+    const endStr = formatDate(addDays(todayLocal(), -1));
     const active = templates.filter((t) => !t.is_bad_habit);
 
     return active.map((t) => {
@@ -103,7 +114,9 @@ export function buildHabitOverallMomentumRows(
                 name: t.name,
                 icon: t.icon,
                 category: t.category,
+                categories: effectiveCategories(t),
                 timeLabel: timeLabel(t),
+                timeOfDay: t.time_of_day,
                 ...EMPTY_STREAKS,
             };
         }
@@ -117,7 +130,9 @@ export function buildHabitOverallMomentumRows(
                 name: t.name,
                 icon: t.icon,
                 category: t.category,
+                categories: effectiveCategories(t),
                 timeLabel: timeLabel(t),
+                timeOfDay: t.time_of_day,
                 ...EMPTY_STREAKS,
             };
         }
@@ -132,7 +147,9 @@ export function buildHabitOverallMomentumRows(
             name: t.name,
             icon: t.icon,
             category: t.category,
+            categories: effectiveCategories(t),
             timeLabel: timeLabel(t),
+            timeOfDay: t.time_of_day,
             currentGoodStreak,
             longestGoodStreak,
             currentMissStreak,
