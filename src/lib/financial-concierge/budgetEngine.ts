@@ -28,17 +28,73 @@ export interface BudgetGenerationOptions {
     profileType?: string; // Override profile type
 }
 
-// Category *groups* (see supabase/migrations/002_default_budget_categories.sql) used to
-// classify individual categories for guardrail purposes.
+// Category/group names used to classify spend for guardrail purposes. The live `categories`
+// table is mostly flat (few categories actually have a parent group), so this matches on
+// whichever name getCategoryGroupNames() resolves to - the group name if the category has
+// one, otherwise the category's own name.
 const ESSENTIAL_GROUPS = new Set([
     'Housing',
-    'Transportation',
-    'Food & Dining',
+    'Rent/Mortgage',
+    'Debt Payment',
+    'Loan Payment',
+    'Credit Card Payment',
     'Utilities',
-    'Debt Payments',
-    'Health & Fitness',
+    'Insurance',
+    'Health Insurance',
+    'Healthcare',
+    'Pharmacy',
+    'Doctor Visits',
+    'Transportation',
+    'Public Transit',
+    'Gas',
+    'Car',
+    'Parking',
+    'Phone Bill',
+    'Child Support',
+    'Home Maintenance',
+    'Fees & Taxes',
+    'Food & Dining', // group name for Groceries
+    // Unknown spend - don't guardrail-cut something we can't classify
+    'Needs Review',
+    'Uncategorized',
 ]);
-const PROTECTED_GROUPS = new Set(['Savings']);
+const PROTECTED_GROUPS = new Set(['Savings', 'Savings/Investing']);
+
+/**
+ * Finds a leaf category to attach an explicit savings/investing goal budget line to
+ * (under a "Savings"/"Savings/Investing" group). Prefers a user-owned category named
+ * "Investments" as a general catch-all, falling back to the first leaf under that group.
+ */
+async function resolveSavingsGoalCategoryId(supabase: any, userId: string): Promise<string | null> {
+    const { data: userGroups } = await supabase
+        .from('categories')
+        .select('id, name')
+        .eq('kind', 'group')
+        .eq('user_id', userId);
+
+    let group = (userGroups || []).find((g: any) => /saving|invest/i.test(g.name));
+
+    if (!group) {
+        const { data: globalGroups } = await supabase
+            .from('categories')
+            .select('id, name')
+            .eq('kind', 'group')
+            .is('user_id', null);
+        group = (globalGroups || []).find((g: any) => /saving|invest/i.test(g.name));
+    }
+
+    if (!group) return null;
+
+    const { data: leaves } = await supabase
+        .from('categories')
+        .select('id, name')
+        .eq('parent_id', group.id)
+        .eq('kind', 'category');
+
+    if (!leaves || leaves.length === 0) return null;
+
+    return (leaves.find((c: any) => c.name === 'Investments') || leaves[0]).id;
+}
 
 /**
  * Maps category_id -> parent group name for a set of categories, so guardrails can tell
@@ -274,15 +330,44 @@ export async function generateBudgetPlan(
     const userId = options.userId;
 
     // Get user profile
-    const profile = options.profileType 
+    const profile = options.profileType
         ? { profile_type: options.profileType, guardrails: {}, preferences: {}, budget_strategy: 'zero_based' } as UserProfile
         : await getUserProfile(userId);
 
-    // Get spend summary and income
-    const [categorySpends, avgIncome] = await Promise.all([
+    // Get spend summary, income, and savings target. Transaction-derived income is
+    // unreliable (brokerage transfers, tax refunds, and other one-off inflows all look like
+    // "income"), so a user-declared figure in profile.preferences takes priority when set.
+    const [categorySpends, txAvgIncome, survey] = await Promise.all([
         getCategorySpendSummary(userId, sourceDataDays),
         getAverageMonthlyIncome(userId, sourceDataDays),
+        supabase
+            .from('user_survey')
+            .select('target_savings_amount, target_savings_timeline_months')
+            .eq('user_id', userId)
+            .maybeSingle()
+            .then((r: any) => r.data),
     ]);
+
+    const declaredIncome = (profile?.preferences as any)?.declared_monthly_income;
+    const avgIncome = declaredIncome && declaredIncome > 0 ? declaredIncome : txAvgIncome;
+
+    const monthlySavingsGoal =
+        survey?.target_savings_amount && survey?.target_savings_timeline_months
+            ? survey.target_savings_amount / survey.target_savings_timeline_months
+            : null;
+
+    // Override the profile's static minimum_savings_rate with one derived from the actual
+    // goal amount + income, when we have both, instead of the generic per-profile-type default.
+    const effectiveProfile: UserProfile | null =
+        profile && monthlySavingsGoal && avgIncome > 0
+            ? {
+                  ...profile,
+                  guardrails: {
+                      ...profile.guardrails,
+                      minimum_savings_rate: monthlySavingsGoal / avgIncome,
+                  },
+              }
+            : profile;
 
     // Calculate start and end dates for source data
     const endDate = new Date();
@@ -310,6 +395,8 @@ export async function generateBudgetPlan(
             status: 'active' as BudgetPlanStatus,
             metadata: {
                 avg_monthly_income: avgIncome,
+                income_source: declaredIncome && declaredIncome > 0 ? 'declared' : 'transaction_derived',
+                monthly_savings_goal: monthlySavingsGoal,
                 categories_included: categorySpends.length,
             },
         })
@@ -331,7 +418,7 @@ export async function generateBudgetPlan(
         const { adjustedAmount, guardrailReason } = applyGuardrails(
             categorySpend.avg_monthly_spend,
             avgIncome,
-            profile,
+            effectiveProfile,
             categoryGroupNames.get(categorySpend.category_id) || categorySpend.category_name
         );
 
@@ -351,6 +438,59 @@ export async function generateBudgetPlan(
 
         if (!itemError && budgetItem) {
             budgetItems.push(budgetItem as BudgetItem);
+        }
+    }
+
+    // Ensure the savings/investing goal shows up as its own budget line, even if there's no
+    // spend history for it yet (e.g. transfers to external savings/brokerage accounts that
+    // aren't Plaid-connected won't show up as categorized transactions). Other categories
+    // already tracked under the Savings/Investing group (e.g. a recurring 529 contribution)
+    // count toward the goal instead of stacking on top of it.
+    if (monthlySavingsGoal && monthlySavingsGoal > 0) {
+        const savingsCategoryId = await resolveSavingsGoalCategoryId(supabase, userId);
+        if (savingsCategoryId) {
+            const existing = budgetItems.find((i) => i.category_id === savingsCategoryId);
+            const otherTrackedSavings = budgetItems
+                .filter(
+                    (i) =>
+                        i.category_id !== savingsCategoryId &&
+                        PROTECTED_GROUPS.has(categoryGroupNames.get(i.category_id) || '')
+                )
+                .reduce((sum, i) => sum + (i.user_override_amount ?? i.amount), 0);
+            const targetAmount = Math.max(
+                existing?.amount || 0,
+                monthlySavingsGoal - otherTrackedSavings
+            );
+
+            if (existing) {
+                const { data: updated } = await supabase
+                    .from('budget_items')
+                    .update({
+                        amount: targetAmount,
+                        guardrail_reason: 'Savings/investing goal',
+                    })
+                    .eq('id', existing.id)
+                    .select()
+                    .single();
+                if (updated) Object.assign(existing, updated);
+            } else {
+                const { data: goalItem, error: goalError } = await supabase
+                    .from('budget_items')
+                    .insert({
+                        budget_plan_id: budgetPlan.id,
+                        category_id: savingsCategoryId,
+                        amount: targetAmount,
+                        guardrail_adjustment: 0,
+                        guardrail_reason: 'Savings/investing goal',
+                        user_override_amount: null,
+                        user_override_reason: null,
+                    })
+                    .select()
+                    .single();
+                if (!goalError && goalItem) {
+                    budgetItems.push(goalItem as BudgetItem);
+                }
+            }
         }
     }
 

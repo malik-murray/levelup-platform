@@ -5,7 +5,6 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { Outfit } from 'next/font/google';
 import LockedAppPreview from '@/components/access/LockedAppPreview';
-import { isComingSoonAppKey } from '@/lib/comingSoonApps';
 import type { AppKey } from '@/lib/access/types';
 
 const outfit = Outfit({ subsets: ['latin'], weight: ['400', '600', '700', '800'] });
@@ -13,7 +12,6 @@ const LOGO_SRC = '/brand/levelup-logo.png';
 
 function parseAppParam(value: string | null): Exclude<AppKey, 'dashboard' | 'habit' | 'settings'> | null {
     if (!value) return null;
-    if (isComingSoonAppKey(value)) return 'markets';
     const allowed = [
         'habit-weekly-plan',
         'finance',

@@ -2,13 +2,11 @@
  * Paid apps shown in the sidebar as "coming soon" until checkout is wired.
  * Replace with real entitlements (e.g. Stripe) later.
  */
-export const COMING_SOON_APP_KEYS = ['markets'] as const;
+export const COMING_SOON_APP_KEYS = [] as const;
 
 export type ComingSoonAppKey = (typeof COMING_SOON_APP_KEYS)[number];
 
-export const COMING_SOON_APP_LABELS: Record<ComingSoonAppKey, string> = {
-    markets: 'Stock & Crypto Analyzer',
-};
+export const COMING_SOON_APP_LABELS: Record<ComingSoonAppKey, string> = {};
 
 export function isComingSoonAppKey(v: string): v is ComingSoonAppKey {
     return (COMING_SOON_APP_KEYS as readonly string[]).includes(v);

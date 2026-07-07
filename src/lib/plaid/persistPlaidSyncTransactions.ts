@@ -134,6 +134,18 @@ function buildRowFromPlaid(params: {
     const { plaidTransaction, userId, accountId, plaidItemDbId } = params;
     const amount = mapPlaidAmount(plaidTransaction.amount);
     const pfc = snapshotPlaidPfc(plaidTransaction);
+    // Paying off a credit card (or a buy-now-pay-later plan) settles spend that already
+    // happened when the card was swiped - it isn't new spend itself, regardless of whether
+    // the card is connected in Plaid. Treat it like an internal transfer so it doesn't get
+    // double-counted in budgets/insights.
+    const isCardPayoff =
+        pfc?.detailed === 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' || pfc?.detailed === 'LOAN_PAYMENTS_BNPL';
+    // Plaid already tells us these are transfers (brokerage/investment account moves,
+    // account-to-account transfers, etc.) via personal_finance_category.primary - the
+    // categorizer already skips auto-labeling them (see SKIP_DETAILED_PREFIXES in
+    // plaidPfcToLeafCategoryName.ts), but that signal never made it to is_transfer, so these
+    // were being counted as real income/spend in budgets.
+    const isPlaidTransfer = pfc?.primary === 'TRANSFER_IN' || pfc?.primary === 'TRANSFER_OUT';
 
     const originalPending =
         params.preserveOriginalPendingId ??
@@ -165,6 +177,10 @@ function buildRowFromPlaid(params: {
         synced_from_plaid: true,
         removed_at: null,
     };
+
+    if (isCardPayoff || isPlaidTransfer) {
+        row.is_transfer = true;
+    }
 
     if (params.preserveNotifiedAt != null) {
         row.notified_at = params.preserveNotifiedAt;
