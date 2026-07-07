@@ -11,7 +11,8 @@ export type AppKey =
     | 'todo'
     | 'goals'
     | 'settings'
-    | 'markets';
+    | 'markets'
+    | 'home-search';
 
 export type DashboardFeature = 'habits' | 'daily-notes' | 'newsfeed' | 'finance' | 'fitness';
 

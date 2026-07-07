@@ -19,6 +19,7 @@ const DEFAULT_DESCRIPTIONS: Record<LockedAppPreviewProps['app'], string> = {
     todo: 'Daily to-dos synced with your master task backlog.',
     goals: 'Long-term goals, vision board, and milestone tracking.',
     markets: 'Stock and crypto analysis with alerts and signals.',
+    'home-search': 'Daily-ranked home listings matched to your budget and commute.',
 };
 
 export default function LockedAppPreview({ app, description, compact }: LockedAppPreviewProps) {

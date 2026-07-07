@@ -35,6 +35,7 @@ const otherApps: App[] = [
     { name: 'Newsfeed', href: '/newsfeed', icon: '📰', appKey: 'newsfeed' },
     { name: 'Fitness Tracker', href: '/fitness', icon: '💪', appKey: 'fitness' },
     { name: 'Stock & Crypto Analyzer', href: '/markets', icon: '📈', appKey: 'markets', comingSoonKey: 'markets' },
+    { name: 'Home Search', href: '/home-search', icon: '🏡', appKey: 'home-search' },
 ];
 
 function renderAppRow(

@@ -12,6 +12,7 @@ const FULL_TIER_APPS: AppKey[] = [
     'goals',
     'settings',
     'markets',
+    'home-search',
 ];
 
 const FREE_TIER_APPS: AppKey[] = ['dashboard', 'habit', 'settings'];
@@ -52,6 +53,7 @@ export function appKeyFromPath(pathname: string): AppKey | null {
     if (pathname.startsWith('/goals')) return 'goals';
     if (pathname.startsWith('/settings')) return 'settings';
     if (pathname.startsWith('/markets')) return 'markets';
+    if (pathname.startsWith('/home-search')) return 'home-search';
     return null;
 }
 
@@ -64,4 +66,5 @@ export const LOCKED_APP_LABELS: Record<Exclude<AppKey, 'dashboard' | 'habit' | '
     todo: 'To-Do & Masterlog',
     goals: 'Goals & Vision',
     markets: 'Stock & Crypto Analyzer',
+    'home-search': 'Home Search',
 };
