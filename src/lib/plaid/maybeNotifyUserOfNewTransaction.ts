@@ -8,6 +8,7 @@ import {
 import { getQuickCategoryActionsForPush } from '@/lib/push/getQuickCategoryActionsForPush';
 import { createNotificationActionToken } from '@/lib/push/notificationActionToken';
 import { sendFinanceSpendPush } from '@/lib/plaid/sendFinancePushNotification';
+import { getRemainingBudgetForCategory } from '@/lib/financial-concierge/budgetEngine';
 
 export type TransactionForNotification = {
     id: string;
@@ -90,7 +91,32 @@ export async function maybeNotifyUserOfNewTransaction(
         transaction.date && /^\d{4}-\d{2}-\d{2}$/.test(transaction.date)
             ? ` (${transaction.date})`
             : '';
-    const body = `$${spendAbs.toFixed(2)} at ${merchant}${dateSuffix}`;
+
+    let remainingSuffix = '';
+    if (transaction.category_id) {
+        const month =
+            transaction.date && /^\d{4}-\d{2}/.test(transaction.date)
+                ? transaction.date.slice(0, 7)
+                : new Date().toISOString().slice(0, 7);
+        try {
+            const remaining = await getRemainingBudgetForCategory(
+                supabase,
+                transaction.user_id,
+                transaction.category_id,
+                month
+            );
+            if (remaining) {
+                remainingSuffix =
+                    remaining.remaining >= 0
+                        ? ` — $${remaining.remaining.toFixed(2)} left in ${remaining.categoryName}`
+                        : ` — $${Math.abs(remaining.remaining).toFixed(2)} over ${remaining.categoryName}`;
+            }
+        } catch (err) {
+            console.error('getRemainingBudgetForCategory failed:', err);
+        }
+    }
+
+    const body = `$${spendAbs.toFixed(2)} at ${merchant}${dateSuffix}${remainingSuffix}`;
 
     const [quickCategories, actionToken] = await Promise.all([
         getQuickCategoryActionsForPush(supabase, transaction.user_id, transaction.category_id ?? null),

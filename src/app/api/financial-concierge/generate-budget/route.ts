@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
         const budgetPlan = await generateBudgetPlan({
             userId: user.id,
             month,
-            sourceDataDays: source_data_days || 90,
+            sourceDataDays: source_data_days || 180,
         });
 
         return NextResponse.json({

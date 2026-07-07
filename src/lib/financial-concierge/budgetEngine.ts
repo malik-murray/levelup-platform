@@ -3,19 +3,77 @@
  * Applies profile-specific guardrails (debt payoff, saving, spend control, etc.)
  */
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { BudgetPlan, BudgetItem, BudgetPlanStatus, BudgetPlanGeneratedBy } from './types';
 import { UserProfile } from './types';
 import { getUserProfile } from './userProfileService';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+// Server-only module (cron jobs + already-authorized API routes, no end-user session).
+// Service role is required so RLS doesn't block reads/writes, same pattern as
+// transactionSyncService.ts.
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
+
+function getServiceClient() {
+    return createClient(supabaseUrl, supabaseServiceKey, {
+        auth: { persistSession: false },
+    });
+}
 
 export interface BudgetGenerationOptions {
     userId: string;
     month: string; // YYYY-MM format
-    sourceDataDays?: number; // Default: 90 days
+    sourceDataDays?: number; // Default: 180 days (~6 months)
     profileType?: string; // Override profile type
+}
+
+// Category *groups* (see supabase/migrations/002_default_budget_categories.sql) used to
+// classify individual categories for guardrail purposes.
+const ESSENTIAL_GROUPS = new Set([
+    'Housing',
+    'Transportation',
+    'Food & Dining',
+    'Utilities',
+    'Debt Payments',
+    'Health & Fitness',
+]);
+const PROTECTED_GROUPS = new Set(['Savings']);
+
+/**
+ * Maps category_id -> parent group name for a set of categories, so guardrails can tell
+ * essential/protected spend apart from discretionary spend.
+ */
+async function getCategoryGroupNames(
+    supabase: any,
+    categoryIds: string[]
+): Promise<Map<string, string>> {
+    const groupByCategoryId = new Map<string, string>();
+    if (categoryIds.length === 0) return groupByCategoryId;
+
+    const { data: categories } = await supabase
+        .from('categories')
+        .select('id, name, parent_id')
+        .in('id', categoryIds);
+
+    const parentIds = Array.from(
+        new Set((categories || []).map((c: any) => c.parent_id).filter(Boolean))
+    );
+
+    const { data: parents } = parentIds.length
+        ? await supabase.from('categories').select('id, name').in('id', parentIds)
+        : { data: [] as any[] };
+
+    const parentNameById = new Map((parents || []).map((p: any) => [p.id, p.name as string]));
+
+    for (const category of (categories || []) as any[]) {
+        const groupName = category.parent_id
+            ? parentNameById.get(category.parent_id) || category.name
+            : category.name;
+        groupByCategoryId.set(category.id, groupName);
+    }
+
+    return groupByCategoryId;
 }
 
 export interface CategorySpendSummary {
@@ -31,13 +89,9 @@ export interface CategorySpendSummary {
  */
 async function getCategorySpendSummary(
     userId: string,
-    days: number = 90
+    days: number = 180
 ): Promise<CategorySpendSummary[]> {
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-        auth: {
-            persistSession: false,
-        },
-    });
+    const supabase = getServiceClient();
 
     const endDate = new Date();
     const startDate = new Date();
@@ -56,6 +110,7 @@ async function getCategorySpendSummary(
         .gte('date', startDate.toISOString().split('T')[0])
         .lt('date', endDate.toISOString().split('T')[0])
         .lt('amount', 0) // Expenses only
+        .eq('is_transfer', false) // Exclude money moved between the user's own accounts
         .not('category_id', 'is', null);
 
     if (error) {
@@ -100,12 +155,8 @@ async function getCategorySpendSummary(
 /**
  * Gets income average for the last N days
  */
-async function getAverageMonthlyIncome(userId: string, days: number = 90): Promise<number> {
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-        auth: {
-            persistSession: false,
-        },
-    });
+async function getAverageMonthlyIncome(userId: string, days: number = 180): Promise<number> {
+    const supabase = getServiceClient();
 
     const endDate = new Date();
     const startDate = new Date();
@@ -117,7 +168,8 @@ async function getAverageMonthlyIncome(userId: string, days: number = 90): Promi
         .eq('user_id', userId)
         .gte('date', startDate.toISOString().split('T')[0])
         .lt('date', endDate.toISOString().split('T')[0])
-        .gt('amount', 0); // Income only
+        .gt('amount', 0) // Income only
+        .eq('is_transfer', false); // Exclude money moved between the user's own accounts
 
     if (error) {
         console.error('Error fetching income:', error);
@@ -130,15 +182,25 @@ async function getAverageMonthlyIncome(userId: string, days: number = 90): Promi
 }
 
 /**
- * Applies guardrails to budget amounts based on profile type
+ * Applies guardrails to budget amounts based on profile type and the category's group
+ * (essential / protected-for-savings / discretionary — see ESSENTIAL_GROUPS/PROTECTED_GROUPS).
  */
 function applyGuardrails(
     categorySpend: number,
     totalIncome: number,
-    profile: UserProfile | null
+    profile: UserProfile | null,
+    categoryGroupName: string
 ): { adjustedAmount: number; guardrailReason: string | null } {
     if (!profile || !profile.guardrails) {
         // No profile or guardrails - use raw spend
+        return { adjustedAmount: categorySpend, guardrailReason: null };
+    }
+
+    const isEssential = ESSENTIAL_GROUPS.has(categoryGroupName);
+    const isProtected = PROTECTED_GROUPS.has(categoryGroupName); // e.g. Savings — never cut
+
+    if (isProtected) {
+        // Savings/investing categories are the goal itself - never guardrail them down.
         return { adjustedAmount: categorySpend, guardrailReason: null };
     }
 
@@ -150,37 +212,34 @@ function applyGuardrails(
         case 'debt_payoff': {
             // Emphasize minimum payments, reduce discretionary spending
             const maxDiscretionary = (guardrails.max_discretionary_spending as number) || 0.3;
-            const discretionaryCategories = ['Entertainment', 'Dining', 'Shopping', 'Hobbies'];
 
-            // Check if this is a discretionary category (simplified - should check category name)
-            const isDiscretionary = false; // TODO: Check category name/group
-
-            if (isDiscretionary) {
+            if (!isEssential) {
                 adjustedAmount = categorySpend * (maxDiscretionary * 0.8); // Reduce discretionary by 20%
                 reason = 'Debt payoff: Reduced discretionary spending';
             }
             break;
         }
 
-        case 'saving_focused': {
-            // Emphasize sinking funds, maintain essential spending
-            const minSavingsRate = (guardrails.minimum_savings_rate as number) || 0.2;
-            const essentialCategories = ['Housing', 'Food', 'Transportation', 'Utilities'];
+        case 'saving_focused':
+        case 'investing_focused':
+        case 'mixed': {
+            // Saving/investing goals: cap non-essential categories so more income is left
+            // over for the Savings group. 'mixed' covers users who selected both saving and
+            // investing goals (no single-goal profile applies), so it gets the same guardrail.
+            const minSavingsRate = (guardrails.minimum_savings_rate as number) || 0.1;
+            const capRate = Math.max(0.05, 0.5 - minSavingsRate); // more aggressive savings goal -> tighter cap
 
-            const isEssential = false; // TODO: Check category name/group
-
-            if (!isEssential && adjustedAmount > totalIncome * 0.05) {
-                // Cap non-essential categories at 5% of income each
-                adjustedAmount = Math.min(adjustedAmount, totalIncome * 0.05);
-                reason = 'Saving focused: Capped non-essential spending';
+            if (!isEssential && adjustedAmount > totalIncome * capRate) {
+                adjustedAmount = Math.min(adjustedAmount, totalIncome * capRate);
+                reason =
+                    profile.profile_type === 'mixed'
+                        ? 'Saving & investing goals: capped non-essential spending'
+                        : 'Saving focused: capped non-essential spending';
             }
             break;
         }
 
         case 'spend_control': {
-            // Strict category limits
-            const maxDiscretionary = (guardrails.max_discretionary_spending as number) || 0.4;
-            
             // Cap at 10% increase from average
             const maxIncrease = categorySpend * 1.1;
             adjustedAmount = Math.min(adjustedAmount, maxIncrease);
@@ -189,11 +248,6 @@ function applyGuardrails(
         }
 
         case 'rebuild_credit': {
-            // Prioritize bills, reduce unnecessary spending
-            const essentialCategories = ['Housing', 'Food', 'Transportation', 'Utilities', 'Debt Payment'];
-
-            const isEssential = false; // TODO: Check category name/group
-
             if (!isEssential) {
                 adjustedAmount = categorySpend * 0.9; // Reduce by 10%
                 reason = 'Rebuild credit: Reduced non-essential spending';
@@ -201,14 +255,7 @@ function applyGuardrails(
             break;
         }
 
-        case 'investing_focused': {
-            // Maintain essential, optimize for investment
-            // Similar to saving focused
-            break;
-        }
-
         default:
-            // Mixed profile - no specific adjustments
             break;
     }
 
@@ -221,13 +268,9 @@ function applyGuardrails(
 export async function generateBudgetPlan(
     options: BudgetGenerationOptions
 ): Promise<BudgetPlan & { items: BudgetItem[] }> {
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-        auth: {
-            persistSession: false,
-        },
-    });
+    const supabase = getServiceClient();
 
-    const sourceDataDays = options.sourceDataDays || 90;
+    const sourceDataDays = options.sourceDataDays || 180;
     const userId = options.userId;
 
     // Get user profile
@@ -279,12 +322,17 @@ export async function generateBudgetPlan(
 
     // Create budget items with guardrails
     const budgetItems: BudgetItem[] = [];
+    const categoryGroupNames = await getCategoryGroupNames(
+        supabase,
+        categorySpends.map((c) => c.category_id)
+    );
 
     for (const categorySpend of categorySpends) {
         const { adjustedAmount, guardrailReason } = applyGuardrails(
             categorySpend.avg_monthly_spend,
             avgIncome,
-            profile
+            profile,
+            categoryGroupNames.get(categorySpend.category_id) || categorySpend.category_name
         );
 
         const { data: budgetItem, error: itemError } = await supabase
@@ -319,11 +367,7 @@ export async function getActiveBudgetPlan(
     userId: string,
     month: string
 ): Promise<(BudgetPlan & { items: BudgetItem[] }) | null> {
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-        auth: {
-            persistSession: false,
-        },
-    });
+    const supabase = getServiceClient();
 
     const { data: budgetPlan, error } = await supabase
         .from('budget_plans')
@@ -345,6 +389,73 @@ export async function getActiveBudgetPlan(
     return {
         ...(budgetPlan as BudgetPlan),
         items: (budgetItems || []) as BudgetItem[],
+    };
+}
+
+export interface RemainingCategoryBudget {
+    categoryName: string;
+    budgetAmount: number;
+    spent: number;
+    remaining: number;
+}
+
+/**
+ * Looks up how much is left in a category's budget for the given month, including all
+ * spend recorded so far (used to annotate spend notifications). Returns null if there's
+ * no active budget plan for the month or no budget item for this category yet.
+ */
+export async function getRemainingBudgetForCategory(
+    supabase: SupabaseClient,
+    userId: string,
+    categoryId: string,
+    month: string // YYYY-MM
+): Promise<RemainingCategoryBudget | null> {
+    const { data: budgetPlan } = await supabase
+        .from('budget_plans')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('month', month)
+        .eq('status', 'active')
+        .maybeSingle();
+
+    if (!budgetPlan) return null;
+
+    const { data: budgetItem } = await supabase
+        .from('budget_items')
+        .select('amount, user_override_amount, category_id')
+        .eq('budget_plan_id', budgetPlan.id)
+        .eq('category_id', categoryId)
+        .maybeSingle();
+
+    if (!budgetItem) return null;
+
+    const budgetAmount = budgetItem.user_override_amount ?? budgetItem.amount;
+    if (!budgetAmount || budgetAmount <= 0) return null;
+
+    const [year, monthNum] = month.split('-').map(Number);
+    const monthStart = `${month}-01`;
+    const nextMonthStart = new Date(Date.UTC(year, monthNum, 1)).toISOString().split('T')[0];
+
+    const [{ data: category }, { data: transactions }] = await Promise.all([
+        supabase.from('categories').select('name').eq('id', categoryId).maybeSingle(),
+        supabase
+            .from('transactions')
+            .select('amount')
+            .eq('user_id', userId)
+            .eq('category_id', categoryId)
+            .gte('date', monthStart)
+            .lt('date', nextMonthStart)
+            .lt('amount', 0)
+            .eq('is_transfer', false),
+    ]);
+
+    const spent = (transactions || []).reduce((sum: number, tx: any) => sum + Math.abs(tx.amount), 0);
+
+    return {
+        categoryName: category?.name || 'this category',
+        budgetAmount,
+        spent,
+        remaining: budgetAmount - spent,
     };
 }
 

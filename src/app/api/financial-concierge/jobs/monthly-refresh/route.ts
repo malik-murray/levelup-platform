@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
 
 /**
  * POST /api/financial-concierge/jobs/monthly-refresh
@@ -25,7 +26,9 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-        const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+        // Service role: this route runs unauthenticated (CRON_SECRET-gated), so an anon-key
+        // client can't see any rows under RLS - it was silently finding zero users every run.
+        const supabase = createClient(supabaseUrl, supabaseServiceKey, {
             auth: {
                 persistSession: false,
             },
@@ -53,7 +56,7 @@ export async function POST(request: NextRequest) {
                 await generateBudgetPlan({
                     userId,
                     month: currentMonth,
-                    sourceDataDays: 90,
+                    sourceDataDays: 180,
                 });
                 budgetResults.push({ userId, success: true });
             } catch (error) {

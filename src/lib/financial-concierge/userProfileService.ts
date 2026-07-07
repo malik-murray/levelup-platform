@@ -205,7 +205,11 @@ export async function createOrUpdateUserProfile(
  * Gets user profile (or creates default if none exists)
  */
 export async function getUserProfile(userId: string): Promise<UserProfile | null> {
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    // Service role: this is called from server-only contexts (cron jobs, already-authorized
+    // API routes) with no end-user session, so an anon-key client would be blocked by RLS
+    // and always return null. See transactionSyncService.ts for the same pattern.
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const { data, error } = await supabase
         .from('user_profile')
