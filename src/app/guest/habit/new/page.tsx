@@ -1,2 +1,2 @@
-import NewHabitPage from '../../habit/new/page';
+import NewHabitPage from '../../../habit/new/page';
 export default NewHabitPage;

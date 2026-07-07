@@ -102,7 +102,7 @@ export function upsertPreviewPriority(
     dateStr: string,
     slotIndex: number,
     text: string,
-    existing?: PreviewPriority
+    existing?: Pick<PreviewPriority, 'id'>
 ) {
     preview.setHabit((prev) => {
         if (existing) {
@@ -139,7 +139,7 @@ export function upsertPreviewTodo(
     preview: PreviewContextValue,
     dateStr: string,
     title: string,
-    existing?: PreviewTodo
+    existing?: Pick<PreviewTodo, 'id'>
 ) {
     preview.setHabit((prev) => {
         if (existing) {
