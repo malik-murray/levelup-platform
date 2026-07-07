@@ -36,6 +36,7 @@ const otherApps: App[] = [
     { name: 'Fitness Tracker', href: '/fitness', icon: '💪', appKey: 'fitness' },
     { name: 'Stock & Crypto Analyzer', href: '/markets', icon: '📈', appKey: 'markets', comingSoonKey: 'markets' },
     { name: 'Home Search', href: '/home-search', icon: '🏡', appKey: 'home-search' },
+    { name: 'Sports Betting Bot', href: '/sports-betting', icon: '⚽', appKey: 'sports-betting' },
 ];
 
 function renderAppRow(

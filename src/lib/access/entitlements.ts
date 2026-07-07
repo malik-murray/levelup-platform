@@ -13,6 +13,7 @@ const FULL_TIER_APPS: AppKey[] = [
     'settings',
     'markets',
     'home-search',
+    'sports-betting',
 ];
 
 const FREE_TIER_APPS: AppKey[] = ['dashboard', 'habit', 'settings'];
@@ -54,6 +55,7 @@ export function appKeyFromPath(pathname: string): AppKey | null {
     if (pathname.startsWith('/settings')) return 'settings';
     if (pathname.startsWith('/markets')) return 'markets';
     if (pathname.startsWith('/home-search')) return 'home-search';
+    if (pathname.startsWith('/sports-betting')) return 'sports-betting';
     return null;
 }
 
@@ -67,4 +69,5 @@ export const LOCKED_APP_LABELS: Record<Exclude<AppKey, 'dashboard' | 'habit' | '
     goals: 'Goals & Vision',
     markets: 'Stock & Crypto Analyzer',
     'home-search': 'Home Search',
+    'sports-betting': 'Sports Betting Bot',
 };

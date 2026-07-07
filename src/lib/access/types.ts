@@ -12,7 +12,8 @@ export type AppKey =
     | 'goals'
     | 'settings'
     | 'markets'
-    | 'home-search';
+    | 'home-search'
+    | 'sports-betting';
 
 export type DashboardFeature = 'habits' | 'daily-notes' | 'newsfeed' | 'finance' | 'fitness';
 

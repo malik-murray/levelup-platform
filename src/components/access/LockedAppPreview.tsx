@@ -20,6 +20,7 @@ const DEFAULT_DESCRIPTIONS: Record<LockedAppPreviewProps['app'], string> = {
     goals: 'Long-term goals, vision board, and milestone tracking.',
     markets: 'Stock and crypto analysis with alerts and signals.',
     'home-search': 'Daily-ranked home listings matched to your budget and commute.',
+    'sports-betting': 'Daily +EV soccer picks with FanDuel line-shopping across other books.',
 };
 
 export default function LockedAppPreview({ app, description, compact }: LockedAppPreviewProps) {
