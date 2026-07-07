@@ -3,11 +3,10 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
-import { UniversalAnalyzer } from '@/lib/markets/analyzer';
-import { createMarketDataProvider } from '@/lib/markets/providers/composite';
+import { fetchAnalysis, fetchQuote } from '@/lib/markets/client';
 import { AnalysisResult, AnalysisMode, UserPosition } from '@/lib/markets/types';
 import { getModeConfig, MODE_CONFIGS } from '@/lib/markets/modes';
-import { createSupabaseLogger } from '@/lib/markets/signalLogger';
+import { classifyTicker } from '@/lib/markets/tickerClassification';
 import { getSwingPlaybookTier, getTierColor } from '@/lib/markets/swingPlaybook';
 import { createAlertIfNeeded } from '@/lib/markets/alertService';
 
@@ -30,13 +29,6 @@ export default function TickerAnalysisPage() {
     const [priceChange24h, setPriceChange24h] = useState<number | undefined>(undefined);
     const [priceChangePercent24h, setPriceChangePercent24h] = useState<number | undefined>(undefined);
     const [lastPriceUpdate, setLastPriceUpdate] = useState<Date | null>(null);
-
-    // Create analyzer with composite provider (switches between real/mock based on config)
-    // and logger that will automatically log to database
-    const analyzer = new UniversalAnalyzer(
-        createMarketDataProvider(), // Uses real data for ETH if enabled, mock otherwise
-        createSupabaseLogger(supabase) // Logger will fetch userId dynamically
-    );
 
     useEffect(() => {
         if (!ticker) return;
@@ -62,38 +54,43 @@ export default function TickerAnalysisPage() {
         runAnalysis();
     }, [ticker, mode]);
     
-    // Real-time price refresh (every 15 seconds)
+    // Real-time price refresh. Crypto is live via Binance so it can poll
+    // often (15s); stocks/ETFs are served from the Alpha Vantage cache
+    // (refreshed by the market-data-refresh cron), so polling faster than
+    // that cache actually updates would just hammer our own DB for nothing --
+    // poll every 5 minutes instead.
     useEffect(() => {
         if (!ticker) return;
-        
+
         const analysisTicker = isEth ? 'ETH-USD' : ticker;
-        const dataProvider = createMarketDataProvider();
-        
-        // Initial price fetch
+        const isCrypto = classifyTicker(analysisTicker) === 'crypto';
+
         const fetchPrice = async () => {
             try {
-                const priceData = await dataProvider.getCurrentPrice(analysisTicker);
+                const priceData = await fetchQuote(analysisTicker);
                 setCurrentPrice(priceData.price);
                 setPriceChange24h(priceData.change24h);
                 setPriceChangePercent24h(priceData.changePercent24h);
-                setLastPriceUpdate(new Date());
-                
+                setLastPriceUpdate(new Date(priceData.lastUpdated));
+
                 // Update analysis with new price if analysis exists
                 setAnalysis(prev => prev ? {
                     ...prev,
                     currentPrice: priceData.price,
                 } : null);
             } catch (error) {
+                // No cached quote yet for a stock/ETF that hasn't been fetched --
+                // it'll show up once the cron or an analysis run populates it.
                 console.error('Error fetching current price:', error);
             }
         };
-        
+
         // Fetch immediately
         fetchPrice();
-        
-        // Set up interval to refresh every 15 seconds
-        const interval = setInterval(fetchPrice, 15000);
-        
+
+        // Set up interval to refresh
+        const interval = setInterval(fetchPrice, isCrypto ? 15000 : 5 * 60 * 1000);
+
         return () => clearInterval(interval);
     }, [ticker, isEth]);
 
@@ -143,43 +140,37 @@ export default function TickerAnalysisPage() {
             // Use ETH-USD format for analysis
             const analysisTicker = isEth ? 'ETH-USD' : ticker;
 
-            // Update user position with current price if available
-            let position = userPosition;
-            if (position) {
-                const currentPriceData = await analyzer.getCurrentPrice(analysisTicker);
-                position = {
-                    ...position,
-                    currentPrice: currentPriceData.price,
-                    pnl: (currentPriceData.price - position.averageEntry) * position.quantity,
-                    pnlPercent: ((currentPriceData.price - position.averageEntry) / position.averageEntry) * 100,
-                };
-                setUserPosition(position);
-            }
+            const result = await fetchAnalysis(
+                analysisTicker,
+                mode,
+                userPosition ? { averageEntry: userPosition.averageEntry, quantity: userPosition.quantity } : undefined
+            );
 
-            // Use convenience function for ETH swing analysis
-            let result: AnalysisResult;
-            if (isEth && mode === 'swing') {
-                result = await analyzer.analyzeEthSwing(position);
-            } else {
-                result = await analyzer.analyzeTicker(analysisTicker, mode, position);
-            }
-            
             setAnalysis(result);
-            
-            // Update current price state from analysis result
+
+            // Update user position + current price state from the analysis result
+            if (userPosition) {
+                setUserPosition({
+                    ...userPosition,
+                    currentPrice: result.currentPrice,
+                    pnl: (result.currentPrice - userPosition.averageEntry) * userPosition.quantity,
+                    pnlPercent: ((result.currentPrice - userPosition.averageEntry) / userPosition.averageEntry) * 100,
+                });
+            }
             if (result.currentPrice) {
                 setCurrentPrice(result.currentPrice);
             }
-            
-            // Update price change data if available from the price fetch
+
+            // Update price change data if available (best-effort -- may not
+            // be cached yet for a stock that's never been fetched before)
             try {
-                const priceData = await analyzer.getCurrentPrice(analysisTicker);
+                const priceData = await fetchQuote(analysisTicker);
                 setPriceChange24h(priceData.change24h);
                 setPriceChangePercent24h(priceData.changePercent24h);
             } catch (error) {
                 // Ignore errors - price change is optional
             }
-            
+
             // Check if we should create an alert for this analysis
             try {
                 const { data: { user: authUser } } = await supabase.auth.getUser();

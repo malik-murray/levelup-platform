@@ -3,11 +3,9 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@auth/supabaseClient';
 import Link from 'next/link';
-import { UniversalAnalyzer } from '@/lib/markets/analyzer';
-import { createMarketDataProvider } from '@/lib/markets/providers/composite';
-import { AnalysisResult, AnalysisMode, UserPosition } from '@/lib/markets/types';
-import { getModeConfig } from '@/lib/markets/modes';
-import { createSupabaseLogger } from '@/lib/markets/signalLogger';
+import { fetchAnalysis } from '@/lib/markets/client';
+import { AnalysisResult, AnalysisMode } from '@/lib/markets/types';
+import { classifyTicker } from '@/lib/markets/tickerClassification';
 
 type WatchlistItem = {
     id: string;
@@ -35,11 +33,6 @@ export default function MarketsDashboardPage() {
     const [newTicker, setNewTicker] = useState('');
     const [addingTicker, setAddingTicker] = useState(false);
     const [notification, setNotification] = useState<string | null>(null);
-
-    const analyzer = new UniversalAnalyzer(
-        createMarketDataProvider(), // Uses real data for ETH if enabled, mock otherwise
-        createSupabaseLogger(supabase) // Auto-log all analyses
-    );
 
     // Load user data
     useEffect(() => {
@@ -109,10 +102,7 @@ export default function MarketsDashboardPage() {
         try {
             setAddingTicker(true);
             const ticker = newTicker.trim().toUpperCase();
-
-            // Detect asset type (simplified - would use analyzer in real implementation)
-            const assetType = ['BTC', 'ETH', 'BNB', 'ADA', 'SOL'].includes(ticker) ? 'crypto' :
-                ['SPY', 'QQQ', 'IWM', 'DIA', 'VTI'].includes(ticker) ? 'etf' : 'stock';
+            const assetType = classifyTicker(ticker);
 
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
@@ -168,29 +158,20 @@ export default function MarketsDashboardPage() {
         }
     };
 
-    const analyzeTicker = async (ticker: string, assetType: 'stock' | 'crypto' | 'etf') => {
+    const analyzeTicker = async (ticker: string) => {
         if (analyzingTicker) return;
 
         try {
             setAnalyzingTicker(ticker);
-            
+
             // Find position if exists
             const position = positions.find(p => p.ticker === ticker);
-            let userPosition: UserPosition | undefined;
-            
-            if (position && position.current_price) {
-                userPosition = {
-                    ticker,
-                    averageEntry: position.average_entry,
-                    quantity: position.quantity,
-                    currentPrice: position.current_price,
-                    pnl: (position.current_price - position.average_entry) * position.quantity,
-                    pnlPercent: ((position.current_price - position.average_entry) / position.average_entry) * 100,
-                };
-            }
+            const userPosition = position
+                ? { averageEntry: position.average_entry, quantity: position.quantity }
+                : undefined;
 
-            const result = await analyzer.analyzeTicker(ticker, defaultMode, userPosition);
-            
+            const result = await fetchAnalysis(ticker, defaultMode, userPosition);
+
             setAnalysisResults(prev => new Map(prev).set(ticker, result));
         } catch (error) {
             console.error('Error analyzing ticker:', error);
@@ -319,7 +300,7 @@ export default function MarketsDashboardPage() {
                                         <div className="flex items-center gap-2">
                                             {!analysis && (
                                                 <button
-                                                    onClick={() => analyzeTicker(pos.ticker, pos.asset_type)}
+                                                    onClick={() => analyzeTicker(pos.ticker)}
                                                     disabled={analyzingTicker === pos.ticker}
                                                     className="text-xs px-3 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
                                                 >
@@ -410,7 +391,7 @@ export default function MarketsDashboardPage() {
                                         <div className="flex items-center gap-2">
                                             {!analysis && (
                                                 <button
-                                                    onClick={() => analyzeTicker(item.ticker, item.asset_type)}
+                                                    onClick={() => analyzeTicker(item.ticker)}
                                                     disabled={analyzingTicker === item.ticker}
                                                     className="text-xs px-3 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
                                                 >

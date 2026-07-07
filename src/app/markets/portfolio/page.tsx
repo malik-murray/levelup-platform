@@ -3,10 +3,8 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { supabase } from '@auth/supabaseClient';
 import Link from 'next/link';
-import { UniversalAnalyzer } from '@/lib/markets/analyzer';
-import { createMarketDataProvider } from '@/lib/markets/providers/composite';
+import { fetchAnalysis, fetchQuote } from '@/lib/markets/client';
 import { AnalysisResult, AnalysisMode } from '@/lib/markets/types';
-import { createSupabaseLogger } from '@/lib/markets/signalLogger';
 
 type Position = {
     id: string;
@@ -40,11 +38,6 @@ export default function PortfolioPage() {
     const [newNotes, setNewNotes] = useState('');
     const [addingPosition, setAddingPosition] = useState(false);
 
-    const analyzer = new UniversalAnalyzer(
-        createMarketDataProvider(), // Uses real data for ETH if enabled, mock otherwise
-        createSupabaseLogger(supabase) // Auto-log all analyses
-    );
-
     useEffect(() => {
         loadData();
     }, []);
@@ -60,14 +53,14 @@ export default function PortfolioPage() {
             const updatedPositions = await Promise.all(
                 positions.map(async (pos) => {
                     try {
-                        const priceData = await analyzer.getCurrentPrice(pos.ticker);
+                        const priceData = await fetchQuote(pos.ticker);
                         // Update in database
                         await supabase
                             .from('market_positions')
                             .update({ current_price: priceData.price })
                             .eq('id', pos.id)
                             .eq('user_id', authUser.id);
-                        
+
                         return {
                             ...pos,
                             current_price: priceData.price,
@@ -116,7 +109,7 @@ export default function PortfolioPage() {
                     Promise.all(
                         loadedPositions.map(async (pos) => {
                             try {
-                                const priceData = await analyzer.getCurrentPrice(pos.ticker);
+                                const priceData = await fetchQuote(pos.ticker);
                                 // Update in database
                                 await supabase
                                     .from('market_positions')
@@ -191,16 +184,16 @@ export default function PortfolioPage() {
                 return;
             }
             
-            // Try to get current price for the ticker
+            // Try to get current price for the ticker (24h change isn't available
+            // from the analysis endpoint -- it'll show up once fetchQuote has a
+            // cached value, e.g. after the next portfolio refresh).
             let currentPrice: number | null = null;
             let priceChange24h: number | undefined;
             let priceChangePercent24h: number | undefined;
-            
+
             try {
-                const priceData = await analyzer.getCurrentPrice(newTicker.trim().toUpperCase());
-                currentPrice = priceData.price;
-                priceChange24h = priceData.change24h;
-                priceChangePercent24h = priceData.changePercent24h;
+                const analysis = await fetchAnalysis(newTicker.trim().toUpperCase(), defaultMode);
+                currentPrice = analysis.currentPrice;
             } catch (error) {
                 console.warn('Could not fetch current price, will set to null:', error);
             }
@@ -302,27 +295,29 @@ export default function PortfolioPage() {
         try {
             setAnalyzingTicker(position.ticker);
 
-            // Update current price with 24h change data
-            const currentPriceData = await analyzer.getCurrentPrice(position.ticker);
-            
-            // Update position in state with price change data
-            setPositions(prev => prev.map(p => 
-                p.id === position.id 
-                    ? { ...p, current_price: currentPriceData.price, priceChange24h: currentPriceData.change24h, priceChangePercent24h: currentPriceData.changePercent24h }
-                    : p
-            ));
-            
+            // Best-effort 24h change -- may not be cached yet for a ticker
+            // that's never been fetched before.
+            let priceData: { change24h?: number; changePercent24h?: number } | null = null;
+            try {
+                priceData = await fetchQuote(position.ticker);
+            } catch (error) {
+                console.warn(`No cached quote yet for ${position.ticker}:`, error);
+            }
+
             const userPosition = {
-                ticker: position.ticker,
                 averageEntry: position.average_entry,
                 quantity: position.quantity,
-                currentPrice: currentPriceData.price,
-                pnl: (currentPriceData.price - position.average_entry) * position.quantity,
-                pnlPercent: ((currentPriceData.price - position.average_entry) / position.average_entry) * 100,
             };
 
-            const result = await analyzer.analyzeTicker(position.ticker, defaultMode, userPosition);
+            const result = await fetchAnalysis(position.ticker, defaultMode, userPosition);
             setAnalysisResults(prev => new Map(prev).set(position.ticker, result));
+
+            const currentPrice = result.currentPrice;
+            setPositions(prev => prev.map(p =>
+                p.id === position.id
+                    ? { ...p, current_price: currentPrice, priceChange24h: priceData?.change24h, priceChangePercent24h: priceData?.changePercent24h }
+                    : p
+            ));
 
             // Get authenticated user
             const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -331,7 +326,7 @@ export default function PortfolioPage() {
             // Update position current price in database
             await supabase
                 .from('market_positions')
-                .update({ current_price: currentPriceData.price })
+                .update({ current_price: currentPrice })
                 .eq('id', position.id)
                 .eq('user_id', authUser.id);
         } catch (error) {

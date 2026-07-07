@@ -6,6 +6,7 @@
 
 import { BaseMarketDataProvider } from './base';
 import { OHLCV, FundamentalData, AssetType } from '../types';
+import { classifyTicker } from '../tickerClassification';
 
 // Module-level price state (persists across provider instances)
 const priceState: Map<string, { price: number; timestamp: number }> = new Map();
@@ -295,20 +296,7 @@ export class MockMarketDataProvider extends BaseMarketDataProvider {
     }
     
     async detectAssetType(ticker: string): Promise<AssetType> {
-        const upper = ticker.toUpperCase();
-        
-        // Common crypto tickers (including ETH-USD format)
-        if (['BTC', 'ETH', 'ETH-USD', 'BNB', 'ADA', 'SOL', 'DOT', 'DOGE', 'MATIC', 'AVAX', 'LINK'].includes(upper)) {
-            return 'crypto';
-        }
-        
-        // Common ETFs
-        if (['SPY', 'QQQ', 'IWM', 'DIA', 'VTI', 'VOO', 'VEA', 'VWO'].includes(upper)) {
-            return 'etf';
-        }
-        
-        // Default to stock
-        return 'stock';
+        return classifyTicker(ticker);
     }
     
     async getFundamentals(ticker: string): Promise<FundamentalData | null> {

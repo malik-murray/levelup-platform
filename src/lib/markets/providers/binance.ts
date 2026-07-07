@@ -1,15 +1,18 @@
 /**
  * Binance Crypto Market Data Provider
- * Fetches real crypto market data from Binance Public API (free, no auth required)
- * Supports ETH and other crypto pairs
+ * Fetches real crypto market data from Binance.US's public API (free, no
+ * auth required). Uses binance.us rather than binance.com because
+ * binance.com's API returns HTTP 451 (blocked) for US-based requests --
+ * confirmed by hitting it directly from this app's dev/deploy region.
  */
 
 import { BaseMarketDataProvider } from './base';
 import { OHLCV, FundamentalData, AssetType } from '../types';
+import { KNOWN_CRYPTO_TICKERS } from '../tickerClassification';
 
 export class BinanceCryptoProvider extends BaseMarketDataProvider {
-    private baseUrl = 'https://api.binance.com/api/v3';
-    
+    private baseUrl = 'https://api.binance.us/api/v3';
+
     /**
      * Map our timeframe format to Binance interval format
      */
@@ -23,28 +26,23 @@ export class BinanceCryptoProvider extends BaseMarketDataProvider {
         };
         return mapping[timeframe] || '1d';
     }
-    
+
     /**
      * Convert ticker to Binance symbol format
      */
     private toBinanceSymbol(ticker: string): string | null {
-        const upper = ticker.toUpperCase();
-        
-        // Handle ETH formats
-        if (upper === 'ETH' || upper === 'ETH-USD') {
-            return 'ETHUSDT';
-        }
-        
-        // Handle other common crypto formats
-        if (upper === 'BTC' || upper === 'BTC-USD') {
-            return 'BTCUSDT';
-        }
-        
+        const upper = ticker.toUpperCase().replace('-USD', '');
+
         // If already in Binance format (e.g., ETHUSDT), use as-is
         if (upper.endsWith('USDT')) {
             return upper;
         }
-        
+
+        // Any ticker in our known crypto list maps to its USDT pair
+        if (KNOWN_CRYPTO_TICKERS.includes(upper)) {
+            return `${upper}USDT`;
+        }
+
         return null;
     }
     
