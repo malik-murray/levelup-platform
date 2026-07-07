@@ -1,5 +1,10 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { getTrainingConsistencyForUser, type TrainingConsistency } from './workoutSessions';
+import {
+    getTrainingConsistencyForUser,
+    getWeeklyProgramCompletionForUser,
+    type TrainingConsistency,
+    type WeeklyProgramCompletion,
+} from './workoutSessions';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -28,7 +33,7 @@ export type FitnessTodaySnapshot = {
     date: string;
     metrics: FitnessDailyMetrics | null;
     nutrition: FitnessDailyNutrition;
-    streak: TrainingConsistency;
+    streak: TrainingConsistency & { weeklyCompletion: WeeklyProgramCompletion | null };
 };
 
 function todayDateString(): string {
@@ -43,7 +48,7 @@ export async function getFitnessTodaySnapshot(
     const client = getClient(supabase);
     const dateStr = date ?? todayDateString();
 
-    const [metricsResult, mealsResult, streak] = await Promise.all([
+    const [metricsResult, mealsResult, streak, weeklyCompletion] = await Promise.all([
         client
             .from('fitness_metrics')
             .select('weight_kg, steps, water_ml, sleep_hours')
@@ -56,6 +61,7 @@ export async function getFitnessTodaySnapshot(
             .eq('user_id', userId)
             .eq('date', dateStr),
         getTrainingConsistencyForUser(userId, client),
+        getWeeklyProgramCompletionForUser(userId, client),
     ]);
 
     if (metricsResult.error) {
@@ -90,6 +96,6 @@ export async function getFitnessTodaySnapshot(
               }
             : null,
         nutrition,
-        streak,
+        streak: { ...streak, weeklyCompletion },
     };
 }

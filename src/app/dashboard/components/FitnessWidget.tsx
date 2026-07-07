@@ -10,8 +10,10 @@ import { getFitnessTodaySnapshot } from '@/lib/fitness/dailySnapshot';
 import type { FitnessTodaySnapshot } from '@/lib/fitness/dailySnapshot';
 import { listInProgressSessionsForUser } from '@/lib/fitness/workoutSessions';
 import { getCurrentProgramAssignmentForUser, getOrCreateScheduledSessionForAssignment } from '@/lib/fitness/programEngine';
+import { getFitnessUserProfileForUser, type FitnessUserProfile } from '@/lib/fitness/profile';
 import FitnessTodayCard from '@/app/fitness/components/FitnessTodayCard';
 import DashboardCollapsibleSection from './DashboardCollapsibleSection';
+import FitnessGoalsOverlay from './FitnessGoalsOverlay';
 
 type ProgramAssignment = {
     scheduleEntryId: string;
@@ -42,6 +44,8 @@ export default function FitnessWidget({
     const [inProgressSession, setInProgressSession] = useState<InProgressSession | null>(null);
     const [startingScheduledWorkout, setStartingScheduledWorkout] = useState(false);
     const [startError, setStartError] = useState<string | null>(null);
+    const [profile, setProfile] = useState<FitnessUserProfile | null>(null);
+    const [showGoalsOverlay, setShowGoalsOverlay] = useState(false);
 
     const isToday = isSameLocalCalendarDay(selectedDate, new Date());
 
@@ -56,6 +60,16 @@ export default function FitnessWidget({
         const dateStr = formatDate(selectedDate);
 
         try {
+            const profileResult = await getFitnessUserProfileForUser(userId, supabase);
+            setProfile(profileResult);
+            if (!profileResult || !profileResult.is_onboarding_complete) {
+                setSnapshot(null);
+                setInProgressSession(null);
+                setProgramAssignment(null);
+                setLoading(false);
+                return;
+            }
+
             const snapshotPromise = getFitnessTodaySnapshot(userId, supabase, dateStr);
 
             const inProgressPromise = isToday
@@ -136,6 +150,21 @@ export default function FitnessWidget({
             <div className="space-y-3 p-4">
                 {loading ? (
                     <div className="py-4 text-center text-sm text-slate-400">Loading…</div>
+                ) : !profile || !profile.is_onboarding_complete ? (
+                    <div className="rounded-lg border border-amber-500/40 bg-amber-950/20 p-4">
+                        <p className="text-sm font-semibold text-amber-300">Set your fitness goals</p>
+                        <p className="mt-1 text-xs text-slate-300">
+                            Tell us your goals, schedule, and equipment so we can build a plan and keep
+                            you accountable.
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => setShowGoalsOverlay(true)}
+                            className="mt-3 rounded-md bg-amber-400 px-3 py-1.5 text-xs font-semibold text-black hover:bg-amber-300"
+                        >
+                            Set goals
+                        </button>
+                    </div>
                 ) : (
                     <>
                         <FitnessTodayCard
@@ -151,6 +180,13 @@ export default function FitnessWidget({
                         {startError ? (
                             <p className="text-xs text-red-400">{startError}</p>
                         ) : null}
+                        <button
+                            type="button"
+                            onClick={() => setShowGoalsOverlay(true)}
+                            className="text-xs font-semibold text-amber-400 transition-colors hover:text-amber-300"
+                        >
+                            Edit goals
+                        </button>
                     </>
                 )}
                 <div className="border-t border-slate-700/80 pt-2">
@@ -162,6 +198,13 @@ export default function FitnessWidget({
                     </Link>
                 </div>
             </div>
+            {showGoalsOverlay && (
+                <FitnessGoalsOverlay
+                    profile={profile}
+                    onClose={() => setShowGoalsOverlay(false)}
+                    onSaved={() => void loadData()}
+                />
+            )}
         </DashboardCollapsibleSection>
     );
 }

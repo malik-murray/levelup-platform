@@ -5,6 +5,7 @@ import { formatSlugAsTitle, getExerciseBySlug, getPrimaryMuscleSlugsByExerciseSl
 import { getFitnessUserProfileForUser } from './profile';
 import { markProgramAssignmentCompletedForSession } from './programEngine';
 import type { ExerciseCategory, ExerciseWithRelations } from './types';
+import { formatDate, getWeekStart } from '@/lib/habitHelpers';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -743,6 +744,51 @@ export async function getTrainingConsistencyForUser(
         trainedToday,
         currentStreak,
         recentTrainingDates,
+    };
+}
+
+export type WeeklyProgramCompletion = {
+    completed: number;
+    scheduled: number;
+};
+
+/**
+ * Ratio of this week's scheduled program days that are completed, for the user's
+ * active program. Returns null if the user has no active program.
+ */
+export async function getWeeklyProgramCompletionForUser(
+    userId: string,
+    supabase?: SupabaseClient
+): Promise<WeeklyProgramCompletion | null> {
+    const client = getClient(supabase);
+    const { data: activeData } = await client
+        .from('fitness_active_programs')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .maybeSingle();
+    if (!activeData) return null;
+
+    const weekStart = getWeekStart(new Date());
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+
+    const { data, error } = await client
+        .from('fitness_program_schedule')
+        .select('status')
+        .eq('active_program_id', activeData.id)
+        .gte('scheduled_date', formatDate(weekStart))
+        .lte('scheduled_date', formatDate(weekEnd));
+
+    if (error) {
+        console.error('getWeeklyProgramCompletionForUser:', error);
+        throw error;
+    }
+
+    const rows = data ?? [];
+    return {
+        completed: rows.filter((r) => r.status === 'completed').length,
+        scheduled: rows.length,
     };
 }
 

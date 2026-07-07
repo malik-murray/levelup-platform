@@ -53,6 +53,8 @@ export default function FitnessTodayCard({
         displayDate.getFullYear() === new Date().getFullYear() &&
         displayDate.getMonth() === new Date().getMonth() &&
         displayDate.getDate() === new Date().getDate();
+    const atRisk = Boolean(isToday && programAssignment && !streak?.trainedToday && !inProgressSession);
+    const weeklyCompletion = streak?.weeklyCompletion;
 
     const outerClass = embedded
         ? 'space-y-3'
@@ -74,15 +76,26 @@ export default function FitnessTodayCard({
                 {snapshotLoading ? (
                     <span className="text-[11px] text-zinc-500">Loading…</span>
                 ) : streak ? (
-                    <div className="flex items-center gap-2">
-                        <span className="rounded-full bg-amber-500/20 px-2.5 py-1 text-xs font-semibold text-amber-300">
-                            {streak.currentStreak > 0
-                                ? `${streak.currentStreak}-day streak`
-                                : 'Start your streak'}
-                        </span>
-                        {streak.trainedToday && (
-                            <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
-                                Trained today
+                    <div className="flex flex-col items-end gap-1">
+                        <div className="flex items-center gap-2">
+                            <span className="rounded-full bg-amber-500/20 px-2.5 py-1 text-xs font-semibold text-amber-300">
+                                {streak.currentStreak > 0
+                                    ? `${streak.currentStreak}-day streak`
+                                    : 'Start your streak'}
+                            </span>
+                            {streak.trainedToday ? (
+                                <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
+                                    Trained today
+                                </span>
+                            ) : atRisk ? (
+                                <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-medium text-red-300">
+                                    {streak.currentStreak > 0 ? "Don't break your streak" : 'Workout due today'}
+                                </span>
+                            ) : null}
+                        </div>
+                        {weeklyCompletion && weeklyCompletion.scheduled > 0 && (
+                            <span className="text-[10px] text-zinc-500">
+                                {weeklyCompletion.completed}/{weeklyCompletion.scheduled} this week
                             </span>
                         )}
                     </div>
