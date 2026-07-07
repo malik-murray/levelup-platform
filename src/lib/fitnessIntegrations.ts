@@ -1,85 +1,182 @@
 /**
- * Fitness Integration Service Stubs
- * 
- * These functions are stubs for future integration with fitness and nutrition apps.
- * For now, they only handle local database state (connected/disconnected status).
- * 
- * TODO: Implement actual API integration for:
- * - Apple Health / Apple Watch
- * - Fitbit
- * - MyFitnessPal
- * - Cronometer
- * - Other nutrition apps
+ * Fitness integration service — Fitbit OAuth + sync, with stubs for other providers.
  */
 
 import { supabase } from '@auth/supabaseClient';
 
-type Provider = 'apple_health' | 'fitbit' | 'myfitnesspal' | 'cronometer' | 'other';
+type Provider =
+    | 'apple_health'
+    | 'fitbit'
+    | 'myfitnesspal'
+    | 'cronometer'
+    | 'health_connect'
+    | 'google_health'
+    | 'other';
+
+export type FitnessConnectionSummary = {
+    provider: string;
+    status: 'connected' | 'disconnected' | 'coming_soon';
+    last_synced_at: string | null;
+    error_code: string | null;
+    error_message: string | null;
+    external_user_id: string | null;
+};
 
 /**
- * Connect an integration (mark as connected in database)
- * TODO: Implement actual OAuth flow and API connection
+ * Load integration status merged with provider connection metadata.
  */
-export async function connectIntegration(provider: Provider | string): Promise<void> {
-    const { data: { user } } = await supabase.auth.getUser();
+export async function loadFitnessConnections(): Promise<FitnessConnectionSummary[]> {
+    const {
+        data: { user },
+    } = await supabase.auth.getUser();
     if (!user) {
         throw new Error('Not authenticated');
     }
 
-    // Check if integration exists
-    const { data: existing } = await supabase
-        .from('fitness_integrations')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('provider', provider)
-        .single();
+    const [integrationsResult, connectionsResult] = await Promise.all([
+        supabase.from('fitness_integrations').select('provider, status, last_synced_at').eq('user_id', user.id),
+        supabase
+            .from('fitness_provider_connections')
+            .select('provider, last_successful_sync_at, error_code, error_message, external_user_id')
+            .eq('user_id', user.id),
+    ]);
 
-    if (existing) {
-        // Update to connected
-        const { error } = await supabase
-            .from('fitness_integrations')
-            .update({
-                status: 'connected',
-                last_synced_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-            })
-            .eq('id', existing.id);
-
-        if (error) {
-            throw new Error(`Failed to connect ${provider}: ${error.message}`);
-        }
-    } else {
-        // Create new integration
-        const { error } = await supabase
-            .from('fitness_integrations')
-            .insert({
-                user_id: user.id,
-                provider: provider,
-                status: 'connected',
-                last_synced_at: new Date().toISOString(),
-            });
-
-        if (error) {
-            throw new Error(`Failed to connect ${provider}: ${error.message}`);
-        }
+    if (integrationsResult.error) {
+        throw new Error(integrationsResult.error.message);
+    }
+    if (connectionsResult.error) {
+        throw new Error(connectionsResult.error.message);
     }
 
-    // TODO: Trigger actual OAuth flow and API connection
-    // TODO: Store OAuth tokens securely
-    // TODO: Set up webhook/background sync job
+    const integrationMap = new Map(
+        (integrationsResult.data ?? []).map(row => [row.provider, row])
+    );
+    const connectionMap = new Map(
+        (connectionsResult.data ?? []).map(row => [row.provider, row])
+    );
+
+    const providers: Provider[] = [
+        'apple_health',
+        'fitbit',
+        'health_connect',
+        'myfitnesspal',
+        'cronometer',
+    ];
+
+    return providers.map(provider => {
+        const integration = integrationMap.get(provider);
+        const connection = connectionMap.get(provider);
+
+        const lastSynced =
+            connection?.last_successful_sync_at ?? integration?.last_synced_at ?? null;
+
+        let status: FitnessConnectionSummary['status'] = integration?.status ?? 'disconnected';
+        if (connection && status !== 'connected') {
+            status = 'connected';
+        }
+
+        return {
+            provider,
+            status,
+            last_synced_at: lastSynced,
+            error_code: connection?.error_code ?? null,
+            error_message: connection?.error_message ?? null,
+            external_user_id: connection?.external_user_id ?? null,
+        };
+    });
 }
 
 /**
- * Disconnect an integration (mark as disconnected in database)
- * TODO: Revoke OAuth tokens and stop sync jobs
+ * Start Fitbit OAuth — redirects to the server authorize route.
+ */
+export function connectFitbit(): void {
+    window.location.href = '/api/fitness/fitbit/oauth/authorize';
+}
+
+/**
+ * Disconnect Fitbit — revokes tokens server-side.
+ */
+export async function disconnectFitbit(): Promise<void> {
+    const {
+        data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) {
+        throw new Error('Not authenticated');
+    }
+
+    const response = await fetch('/api/fitness/fitbit/disconnect', {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${session.access_token}`,
+        },
+    });
+
+    if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? 'Failed to disconnect Fitbit');
+    }
+}
+
+/**
+ * Manually sync Fitbit data for the current user.
+ */
+export async function syncFitbit(): Promise<string> {
+    const {
+        data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) {
+        throw new Error('Not authenticated');
+    }
+
+    const response = await fetch('/api/fitness/fitbit/sync', {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ register_webhooks: true, backfill_days: 7 }),
+    });
+
+    const body = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+    };
+
+    if (!response.ok) {
+        throw new Error(body.error ?? 'Fitbit sync failed');
+    }
+
+    return body.message ?? 'Sync complete';
+}
+
+/**
+ * Legacy stub connect for providers not yet implemented.
+ */
+export async function connectIntegration(provider: Provider | string): Promise<void> {
+    if (provider === 'fitbit') {
+        connectFitbit();
+        return;
+    }
+
+    throw new Error(`${provider} integration is not yet available`);
+}
+
+/**
+ * Legacy disconnect — routes Fitbit to real disconnect.
  */
 export async function disconnectIntegration(provider: Provider | string): Promise<void> {
-    const { data: { user } } = await supabase.auth.getUser();
+    if (provider === 'fitbit') {
+        await disconnectFitbit();
+        return;
+    }
+
+    const {
+        data: { user },
+    } = await supabase.auth.getUser();
     if (!user) {
         throw new Error('Not authenticated');
     }
 
-    // Update to disconnected
     const { error } = await supabase
         .from('fitness_integrations')
         .update({
@@ -93,101 +190,29 @@ export async function disconnectIntegration(provider: Provider | string): Promis
     if (error) {
         throw new Error(`Failed to disconnect ${provider}: ${error.message}`);
     }
-
-    // TODO: Revoke OAuth tokens
-    // TODO: Stop background sync jobs
-    // TODO: Clear cached data (optional)
 }
 
-/**
- * Import workouts from an external provider
- * TODO: Implement actual API calls to fetch workouts
- */
 export async function importWorkoutsFromProvider(
-    provider: Provider | string,
-    startDate: string,
-    endDate: string
+    _provider: Provider | string,
+    _startDate: string,
+    _endDate: string
 ): Promise<void> {
-    // Stub implementation
-    // TODO: Authenticate with provider API
-    // TODO: Fetch workouts for date range
-    // TODO: Transform provider format to our format
-    // TODO: Insert into fitness_workouts table with source and source_id
-    // TODO: Handle duplicates (update vs insert)
+    if (_provider === 'fitbit') {
+        await syncFitbit();
+        return;
+    }
 
-    throw new Error('importWorkoutsFromProvider is not yet implemented');
+    throw new Error('importWorkoutsFromProvider is not yet implemented for this provider');
 }
 
-/**
- * Import meals from an external provider
- * TODO: Implement actual API calls to fetch meals
- */
 export async function importMealsFromProvider(
-    provider: Provider | string,
-    startDate: string,
-    endDate: string
+    _provider: Provider | string,
+    _startDate: string,
+    _endDate: string
 ): Promise<void> {
-    // Stub implementation
-    // TODO: Authenticate with provider API
-    // TODO: Fetch meals for date range
-    // TODO: Transform provider format to our format
-    // TODO: Insert into fitness_meals table with source and source_id
-    // TODO: Handle duplicates (update vs insert)
-
     throw new Error('importMealsFromProvider is not yet implemented');
 }
 
-/**
- * Sync all connected integrations
- * TODO: Call importWorkoutsFromProvider and importMealsFromProvider for each connected integration
- */
 export async function syncAllIntegrations(): Promise<void> {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-        throw new Error('Not authenticated');
-    }
-
-    // Get all connected integrations
-    const { data: integrations, error } = await supabase
-        .from('fitness_integrations')
-        .select('provider')
-        .eq('user_id', user.id)
-        .eq('status', 'connected');
-
-    if (error) {
-        throw new Error(`Failed to load integrations: ${error.message}`);
-    }
-
-    if (!integrations || integrations.length === 0) {
-        return; // No integrations to sync
-    }
-
-    // Sync last 7 days by default
-    const endDate = new Date().toISOString().split('T')[0];
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 7);
-    const startDateStr = startDate.toISOString().split('T')[0];
-
-    // TODO: For each integration, call importWorkoutsFromProvider and importMealsFromProvider
-    // TODO: Update last_synced_at timestamp
-    // TODO: Handle errors gracefully (log but don't fail entire sync)
-
-    throw new Error('syncAllIntegrations is not yet implemented');
+    await syncFitbit();
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

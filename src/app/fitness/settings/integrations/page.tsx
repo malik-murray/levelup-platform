@@ -1,103 +1,169 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { supabase } from '@auth/supabaseClient';
-import { connectIntegration, disconnectIntegration } from '@/lib/fitnessIntegrations';
+import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import {
+    connectFitbit,
+    disconnectFitbit,
+    loadFitnessConnections,
+    syncFitbit,
+    type FitnessConnectionSummary,
+} from '@/lib/fitnessIntegrations';
 
-type Integration = {
-    id: string;
-    provider: string;
-    status: 'connected' | 'disconnected' | 'coming_soon';
-    last_synced_at: string | null;
+type ProviderConfig = {
+    key: string;
+    name: string;
+    description: string;
+    comingSoon: boolean;
+    supportsOAuth: boolean;
 };
 
-const availableProviders = [
-    { key: 'apple_health', name: 'Apple Health / Apple Watch', comingSoon: true },
-    { key: 'fitbit', name: 'Fitbit', comingSoon: true },
-    { key: 'myfitnesspal', name: 'MyFitnessPal', comingSoon: true },
-    { key: 'cronometer', name: 'Cronometer', comingSoon: true },
+const availableProviders: ProviderConfig[] = [
+    {
+        key: 'apple_health',
+        name: 'Apple Health / Apple Watch',
+        description: 'Requires the LevelUp mobile app to read HealthKit data.',
+        comingSoon: true,
+        supportsOAuth: false,
+    },
+    {
+        key: 'fitbit',
+        name: 'Fitbit',
+        description: 'Sync steps, sleep, heart rate, weight, and workouts automatically.',
+        comingSoon: false,
+        supportsOAuth: true,
+    },
+    {
+        key: 'health_connect',
+        name: 'Google Health Connect',
+        description: 'Requires the LevelUp Android app to read on-device health data.',
+        comingSoon: true,
+        supportsOAuth: false,
+    },
+    {
+        key: 'myfitnesspal',
+        name: 'MyFitnessPal',
+        description: 'Import meals and nutrition data.',
+        comingSoon: true,
+        supportsOAuth: false,
+    },
+    {
+        key: 'cronometer',
+        name: 'Cronometer',
+        description: 'Import detailed nutrition logs.',
+        comingSoon: true,
+        supportsOAuth: false,
+    },
 ];
 
+function formatSyncTimestamp(iso: string): string {
+    return new Date(iso).toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+    });
+}
+
 export default function IntegrationsPage() {
-    const [integrations, setIntegrations] = useState<Integration[]>([]);
+    const searchParams = useSearchParams();
+    const [connections, setConnections] = useState<FitnessConnectionSummary[]>([]);
     const [loading, setLoading] = useState(true);
     const [notification, setNotification] = useState<string | null>(null);
-    const [toggling, setToggling] = useState<string | null>(null);
+    const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-    useEffect(() => {
-        loadIntegrations();
-    }, []);
-
-    const loadIntegrations = async () => {
+    const loadConnections = useCallback(async () => {
         setLoading(true);
         setNotification(null);
 
         try {
-            // Get authenticated user
-            const { data: { user: authUser } } = await supabase.auth.getUser();
-            if (!authUser) {
-                window.location.href = '/login';
-                return;
-            }
-
-            const { data, error } = await supabase
-                .from('fitness_integrations')
-                .select('*')
-                .eq('user_id', authUser.id)
-                .order('provider');
-
-            if (error) throw error;
-
-            // Create integrations for all providers, defaulting to disconnected or coming_soon
-            const existingIntegrations = (data as Integration[]) || [];
-            const providerMap = new Map(existingIntegrations.map(i => [i.provider, i]));
-
-            const allIntegrations = availableProviders.map(provider => {
-                const existing = providerMap.get(provider.key);
-                return existing || {
-                    id: '',
-                    provider: provider.key,
-                    status: provider.comingSoon ? ('coming_soon' as const) : ('disconnected' as const),
-                    last_synced_at: null,
-                };
-            });
-
-            setIntegrations(allIntegrations);
+            const data = await loadFitnessConnections();
+            setConnections(data);
         } catch (error) {
             console.error('Error loading integrations:', error);
             setNotification(error instanceof Error ? error.message : 'Failed to load integrations');
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
-    const handleToggle = async (provider: string, currentStatus: string) => {
-        if (currentStatus === 'coming_soon') {
-            setNotification(`${provider} integration is coming soon!`);
+    useEffect(() => {
+        void loadConnections();
+    }, [loadConnections]);
+
+    useEffect(() => {
+        const fitbitStatus = searchParams.get('fitbit');
+        if (!fitbitStatus) return;
+
+        if (fitbitStatus === 'connected') {
+            setNotification('Fitbit connected! Your health data is syncing.');
+            if (searchParams.get('webhook_warning')) {
+                setNotification(
+                    'Fitbit connected and initial sync started. Webhook setup may need a retry from Sync Now.'
+                );
+            }
+            void loadConnections();
+        } else if (fitbitStatus === 'error') {
+            const message = searchParams.get('message') ?? 'Connection failed';
+            setNotification(`Fitbit connection failed: ${message}`);
+        }
+
+        window.history.replaceState({}, '', '/fitness/settings/integrations');
+    }, [searchParams, loadConnections]);
+
+    const getConnection = (provider: string) =>
+        connections.find(connection => connection.provider === provider);
+
+    const handleConnect = async (provider: ProviderConfig) => {
+        if (provider.comingSoon) {
+            setNotification(`${provider.name} is coming soon`);
             return;
         }
 
-        setToggling(provider);
+        if (provider.key === 'fitbit') {
+            connectFitbit();
+            return;
+        }
+
+        setNotification(`${provider.name} is not available yet`);
+    };
+
+    const handleDisconnect = async (provider: ProviderConfig) => {
+        setActionLoading(`disconnect-${provider.key}`);
         setNotification(null);
 
         try {
-            if (currentStatus === 'disconnected') {
-                await connectIntegration(provider);
-                setNotification(`${provider} connected successfully!`);
-            } else {
-                await disconnectIntegration(provider);
-                setNotification(`${provider} disconnected successfully!`);
+            if (provider.key === 'fitbit') {
+                await disconnectFitbit();
+                setNotification('Fitbit disconnected');
             }
-            await loadIntegrations();
+            await loadConnections();
         } catch (error) {
-            console.error(`Error toggling ${provider}:`, error);
-            setNotification(error instanceof Error ? error.message : `Failed to toggle ${provider}`);
+            setNotification(error instanceof Error ? error.message : 'Disconnect failed');
         } finally {
-            setToggling(null);
+            setActionLoading(null);
         }
     };
 
-    const getStatusColor = (status: string) => {
+    const handleSync = async (provider: ProviderConfig) => {
+        setActionLoading(`sync-${provider.key}`);
+        setNotification(null);
+
+        try {
+            if (provider.key === 'fitbit') {
+                const message = await syncFitbit();
+                setNotification(message);
+            }
+            await loadConnections();
+        } catch (error) {
+            setNotification(error instanceof Error ? error.message : 'Sync failed');
+        } finally {
+            setActionLoading(null);
+        }
+    };
+
+    const getStatusColor = (status: string, hasError: boolean) => {
+        if (hasError) return 'border-red-500/30 bg-red-950/20 text-red-300';
         switch (status) {
             case 'connected':
                 return 'border-emerald-500/30 bg-emerald-950/20 text-emerald-400';
@@ -108,100 +174,126 @@ export default function IntegrationsPage() {
         }
     };
 
-    const getStatusLabel = (status: string) => {
-        switch (status) {
-            case 'connected':
-                return 'Connected';
-            case 'coming_soon':
-                return 'Coming Soon';
-            default:
-                return 'Disconnected';
-        }
+    const getStatusLabel = (connection: FitnessConnectionSummary | undefined, comingSoon: boolean) => {
+        if (comingSoon) return 'Coming Soon';
+        if (connection?.error_code) return 'Needs attention';
+        if (connection?.status === 'connected') return 'Connected';
+        return 'Disconnected';
     };
 
     return (
         <div className="max-w-2xl space-y-6">
             {notification && (
-                <div className={`rounded-lg border p-3 text-xs ${
-                    notification.includes('Error') || notification.includes('Failed')
-                        ? 'border-red-500/30 bg-red-950/20 text-red-400'
-                        : 'border-emerald-500/30 bg-emerald-950/20 text-emerald-400'
-                }`}>
+                <div
+                    className={`rounded-lg border p-3 text-xs ${
+                        notification.includes('failed') || notification.includes('Failed')
+                            ? 'border-red-500/30 bg-red-950/20 text-red-400'
+                            : 'border-emerald-500/30 bg-emerald-950/20 text-emerald-400'
+                    }`}
+                >
                     {notification}
                 </div>
             )}
 
-            {/* Header */}
             <div>
                 <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Integrations</h2>
-                <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">Connect your fitness and nutrition apps</p>
+                <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                    Connect fitness and nutrition apps to keep your metrics up to date automatically
+                </p>
             </div>
 
-            {/* Integrations List */}
             <div className="space-y-4">
                 {loading ? (
                     <div className="text-xs text-slate-400">Loading...</div>
                 ) : (
-                    integrations.map(integration => {
-                        const providerInfo = availableProviders.find(p => p.key === integration.provider);
-                        const canToggle = integration.status !== 'coming_soon';
+                    availableProviders.map(provider => {
+                        const connection = getConnection(provider.key);
+                        const isConnected = connection?.status === 'connected';
+                        const hasError = Boolean(connection?.error_code);
+                        const canConnect = !provider.comingSoon && provider.supportsOAuth;
 
                         return (
                             <div
-                                key={integration.provider}
-                                className={`rounded-lg border p-4 ${getStatusColor(integration.status)}`}
+                                key={provider.key}
+                                className={`rounded-lg border p-4 ${getStatusColor(
+                                    connection?.status ?? 'disconnected',
+                                    hasError
+                                )}`}
                             >
-                                <div className="flex items-center justify-between">
+                                <div className="flex items-start justify-between gap-4">
                                     <div className="flex-1">
-                                        <div className="flex items-center gap-3 mb-1">
-                                            <h3 className="text-sm font-semibold text-white dark:text-white">
-                                                {providerInfo?.name || integration.provider}
+                                        <div className="mb-1 flex items-center gap-3">
+                                            <h3 className="text-sm font-semibold text-white">
+                                                {provider.name}
                                             </h3>
-                                            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                                                integration.status === 'connected'
-                                                    ? 'bg-emerald-400 text-black'
-                                                    : integration.status === 'coming_soon'
-                                                    ? 'bg-slate-700 text-slate-300'
-                                                    : 'bg-slate-800 text-slate-400'
-                                            }`}>
-                                                {getStatusLabel(integration.status)}
+                                            <span
+                                                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                                                    isConnected && !hasError
+                                                        ? 'bg-emerald-400 text-black'
+                                                        : hasError
+                                                          ? 'bg-red-800 text-red-100'
+                                                          : provider.comingSoon
+                                                            ? 'bg-slate-700 text-slate-300'
+                                                            : 'bg-slate-800 text-slate-400'
+                                                }`}
+                                            >
+                                                {getStatusLabel(connection, provider.comingSoon)}
                                             </span>
                                         </div>
-                                        {integration.status === 'connected' && integration.last_synced_at && (
-                                            <p className="text-xs text-slate-400 mt-1">
-                                                Last synced: {new Date(integration.last_synced_at).toLocaleString()}
+
+                                        <p className="text-xs text-slate-400">{provider.description}</p>
+
+                                        {isConnected && connection?.last_synced_at && (
+                                            <p className="mt-2 text-xs text-slate-400">
+                                                Last synced: {formatSyncTimestamp(connection.last_synced_at)}
                                             </p>
                                         )}
-                                        {integration.status === 'coming_soon' && (
-                                            <p className="text-xs text-slate-400 mt-1">
-                                                This integration will be available soon
-                                            </p>
-                                        )}
-                                        {integration.status === 'disconnected' && (
-                                            <p className="text-xs text-slate-400 mt-1">
-                                                Connect to automatically sync workouts and meals
+
+                                        {hasError && connection?.error_message && (
+                                            <p className="mt-2 text-xs text-red-300">
+                                                {connection.error_message}
                                             </p>
                                         )}
                                     </div>
-                                    <button
-                                        onClick={() => handleToggle(integration.provider, integration.status)}
-                                        disabled={!canToggle || toggling === integration.provider}
-                                        className={`rounded-md px-4 py-2 text-xs font-semibold transition-colors ${
-                                            integration.status === 'connected'
-                                                ? 'bg-red-900 text-red-200 hover:bg-red-800'
-                                                : integration.status === 'coming_soon'
-                                                ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                                                : 'bg-amber-400 text-black hover:bg-amber-300'
-                                        } disabled:opacity-50 disabled:cursor-not-allowed`}
-                                    >
-                                        {toggling === integration.provider
-                                            ? 'Connecting...'
-                                            : integration.status === 'connected'
-                                            ? 'Disconnect'
-                                            : integration.status === 'coming_soon'
-                                            ? 'Coming Soon'
-                                            : 'Connect'}
-                                    </button>
+
+                                    <div className="flex flex-col gap-2">
+                                        {isConnected ? (
+                                            <>
+                                                <button
+                                                    onClick={() => void handleSync(provider)}
+                                                    disabled={actionLoading === `sync-${provider.key}`}
+                                                    className="rounded-md bg-amber-400 px-4 py-2 text-xs font-semibold text-black transition-colors hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                    {actionLoading === `sync-${provider.key}`
+                                                        ? 'Syncing...'
+                                                        : 'Sync Now'}
+                                                </button>
+                                                <button
+                                                    onClick={() => void handleDisconnect(provider)}
+                                                    disabled={
+                                                        actionLoading === `disconnect-${provider.key}`
+                                                    }
+                                                    className="rounded-md bg-red-900 px-4 py-2 text-xs font-semibold text-red-200 transition-colors hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                    {actionLoading === `disconnect-${provider.key}`
+                                                        ? 'Disconnecting...'
+                                                        : 'Disconnect'}
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <button
+                                                onClick={() => void handleConnect(provider)}
+                                                disabled={!canConnect || actionLoading !== null}
+                                                className={`rounded-md px-4 py-2 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                                                    canConnect
+                                                        ? 'bg-amber-400 text-black hover:bg-amber-300'
+                                                        : 'bg-slate-800 text-slate-500'
+                                                }`}
+                                            >
+                                                {provider.comingSoon ? 'Coming Soon' : 'Connect'}
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         );
@@ -209,31 +301,15 @@ export default function IntegrationsPage() {
                 )}
             </div>
 
-            {/* Info Box */}
             <div className="rounded-lg border border-amber-500/30 bg-amber-950/20 p-4">
-                <h3 className="text-xs font-semibold text-amber-400 mb-2">About Integrations</h3>
-                <p className="text-xs text-slate-300">
-                    Connect your fitness and nutrition apps to automatically sync workouts, meals, and metrics.
-                    For now, integrations are in mock/testing mode. Real API connections will be added in future updates.
-                </p>
+                <h3 className="mb-2 text-xs font-semibold text-amber-400">How syncing works</h3>
+                <ul className="space-y-1 text-xs text-slate-300">
+                    <li>Fitbit syncs steps, sleep, resting heart rate, weight, and workouts.</li>
+                    <li>Data appears on your Fitness dashboard and Metrics page automatically.</li>
+                    <li>Background sync runs every 15 minutes when connected.</li>
+                    <li>Google Health Connect and Apple Health require a mobile companion app.</li>
+                </ul>
             </div>
         </div>
     );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

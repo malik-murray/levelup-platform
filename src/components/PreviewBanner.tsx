@@ -9,7 +9,7 @@ export default function PreviewBanner() {
         <span className="font-semibold">Preview Mode</span>
         <span className="text-amber-900/80">— Your data is saved only in this browser.</span>
         <Link
-          href="/login?redirect=/onboarding/preview"
+          href="/login?redirect=/onboarding/preview&mode=signup"
           className="rounded-md bg-black px-3 py-1.5 text-xs font-semibold text-amber-400 hover:bg-slate-800 transition-colors"
         >
           Create Account to Save & Sync

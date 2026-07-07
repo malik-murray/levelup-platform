@@ -37,15 +37,16 @@ function parseOptionalNumber(value: string): number | null {
     return Number.isFinite(num) ? num : null;
 }
 
-export default function ExerciseSetLogger({
+function StrengthSetLogger({
     item,
     canEdit,
     onItemUpdated,
     onSetCompleted,
 }: ExerciseSetLoggerProps) {
-    const initialSetCount = Math.max(item.target_sets, item.set_logs.length, 1);
+    const targetSets = item.target_sets ?? 3;
+    const initialSetCount = Math.max(targetSets, item.set_logs.length, 1);
     const [extraSets, setExtraSets] = useState(
-        Math.max(0, item.set_logs.length - item.target_sets)
+        Math.max(0, item.set_logs.length - targetSets)
     );
 
     const setNumbers = useMemo(
@@ -197,7 +198,7 @@ export default function ExerciseSetLogger({
                     <tbody>
                         {setNumbers.map((setNumber) => {
                             const edit = getEdit(setNumber);
-                            const isTargetSet = setNumber <= item.target_sets;
+                            const isTargetSet = setNumber <= targetSets;
                             return (
                                 <tr key={setNumber}>
                                     <td className="py-1 pr-1 align-top">
@@ -318,4 +319,238 @@ export default function ExerciseSetLogger({
             )}
         </div>
     );
+}
+
+function CardioSetLogger({ item, canEdit, onItemUpdated, onSetCompleted }: ExerciseSetLoggerProps) {
+    const existingLog = item.set_logs.find((log) => log.set_number === 1);
+    const [minutes, setMinutes] = useState(
+        existingLog?.duration_seconds != null ? String(Math.round(existingLog.duration_seconds / 60)) : ''
+    );
+    const [notes, setNotes] = useState(existingLog?.notes ?? '');
+    const [saving, setSaving] = useState(false);
+    const [saveError, setSaveError] = useState<string | undefined>(undefined);
+
+    if (!canEdit) {
+        return (
+            <div className="space-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+                {existingLog?.duration_seconds != null ? (
+                    <span>
+                        <span className="font-semibold">Duration:</span>{' '}
+                        {Math.round(existingLog.duration_seconds / 60)} min
+                    </span>
+                ) : (
+                    <p>No cardio duration logged.</p>
+                )}
+                {existingLog?.notes && <p className="mt-1">{existingLog.notes}</p>}
+            </div>
+        );
+    }
+
+    const save = async () => {
+        setSaving(true);
+        setSaveError(undefined);
+        try {
+            const minutesNum = parseOptionalNumber(minutes);
+            const result = await upsertSetLog(
+                item.id,
+                1,
+                {
+                    duration_seconds: minutesNum != null ? Math.round(minutesNum * 60) : null,
+                    notes: notes.trim() || null,
+                    completed_at: new Date().toISOString(),
+                },
+                supabase
+            );
+            onItemUpdated(result.item);
+            onSetCompleted?.();
+        } catch (e) {
+            setSaveError(e instanceof Error ? e.message : 'Failed to save cardio log');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="space-y-2">
+            <div className="flex flex-wrap items-end gap-2">
+                <label className="text-[11px] text-slate-600 dark:text-slate-300">
+                    Duration (minutes)
+                    <input
+                        type="number"
+                        min={0}
+                        value={minutes}
+                        onChange={(e) => setMinutes(e.target.value)}
+                        className="mt-1 block w-20 rounded border border-slate-300 bg-white px-1.5 py-1 text-[11px] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                </label>
+                <label className="flex-1 text-[11px] text-slate-600 dark:text-slate-300">
+                    Notes
+                    <input
+                        type="text"
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        placeholder="pace, distance…"
+                        className="mt-1 block w-full rounded border border-slate-300 bg-white px-1.5 py-1 text-[11px] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                </label>
+                <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => void save()}
+                    className="whitespace-nowrap rounded bg-emerald-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
+                >
+                    {saving ? '…' : 'Done'}
+                </button>
+            </div>
+            {saveError && <p className="text-[11px] text-red-500 dark:text-red-400">{saveError}</p>}
+        </div>
+    );
+}
+
+function StretchSetLogger({ item, canEdit, onItemUpdated, onSetCompleted }: ExerciseSetLoggerProps) {
+    const targetRounds = item.target_rounds ?? 2;
+    const initialRoundCount = Math.max(targetRounds, item.set_logs.length, 1);
+    const [extraRounds, setExtraRounds] = useState(Math.max(0, item.set_logs.length - targetRounds));
+    const roundNumbers = useMemo(
+        () => Array.from({ length: initialRoundCount + extraRounds }, (_, i) => i + 1),
+        [initialRoundCount, extraRounds]
+    );
+
+    const logsByRound = useMemo(() => {
+        const map = new Map<number, WorkoutSetLog>();
+        for (const log of item.set_logs) {
+            map.set(log.set_number, log);
+        }
+        return map;
+    }, [item.set_logs]);
+
+    const [edits, setEdits] = useState<Record<number, { seconds: string; saving?: boolean; saveError?: string }>>(
+        () => {
+            const initial: Record<number, { seconds: string }> = {};
+            for (const roundNumber of Array.from({ length: initialRoundCount }, (_, i) => i + 1)) {
+                const log = logsByRound.get(roundNumber);
+                initial[roundNumber] = {
+                    seconds:
+                        log?.duration_seconds != null
+                            ? String(log.duration_seconds)
+                            : String(item.target_duration_seconds ?? 30),
+                };
+            }
+            return initial;
+        }
+    );
+
+    const getEdit = useCallback(
+        (roundNumber: number) =>
+            edits[roundNumber] ?? {
+                seconds:
+                    logsByRound.get(roundNumber)?.duration_seconds != null
+                        ? String(logsByRound.get(roundNumber)!.duration_seconds)
+                        : String(item.target_duration_seconds ?? 30),
+            },
+        [edits, logsByRound, item.target_duration_seconds]
+    );
+
+    if (!canEdit) {
+        if (item.set_logs.length === 0) {
+            return <p className="text-[11px] text-slate-500 dark:text-slate-400">No hold data recorded.</p>;
+        }
+        return (
+            <div className="space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                {item.set_logs.map((log) => (
+                    <p key={log.id}>
+                        <span className="font-semibold">Round {log.set_number}:</span>{' '}
+                        {log.duration_seconds ?? '—'} sec
+                    </p>
+                ))}
+            </div>
+        );
+    }
+
+    const saveRound = async (roundNumber: number) => {
+        const edit = getEdit(roundNumber);
+        setEdits((prev) => ({ ...prev, [roundNumber]: { ...edit, saving: true, saveError: undefined } }));
+        try {
+            const seconds = parseOptionalNumber(edit.seconds);
+            const result = await upsertSetLog(
+                item.id,
+                roundNumber,
+                {
+                    duration_seconds: seconds,
+                    completed_at: new Date().toISOString(),
+                },
+                supabase
+            );
+            onItemUpdated(result.item);
+            setEdits((prev) => ({
+                ...prev,
+                [roundNumber]: {
+                    seconds: result.setLog.duration_seconds != null ? String(result.setLog.duration_seconds) : '',
+                    saving: false,
+                },
+            }));
+            onSetCompleted?.();
+        } catch (e) {
+            setEdits((prev) => ({
+                ...prev,
+                [roundNumber]: { ...edit, saving: false, saveError: e instanceof Error ? e.message : 'Failed to save round' },
+            }));
+        }
+    };
+
+    return (
+        <div className="space-y-2">
+            <div className="flex flex-col gap-2">
+                {roundNumbers.map((roundNumber) => {
+                    const edit = getEdit(roundNumber);
+                    return (
+                        <div key={roundNumber} className="flex items-center gap-2">
+                            <span className="inline-flex h-6 min-w-6 items-center justify-center rounded bg-amber-100 px-1 text-[11px] font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                                {roundNumber}
+                            </span>
+                            <input
+                                type="number"
+                                min={0}
+                                value={edit.seconds}
+                                onChange={(e) =>
+                                    setEdits((prev) => ({
+                                        ...prev,
+                                        [roundNumber]: { ...getEdit(roundNumber), seconds: e.target.value, saveError: undefined },
+                                    }))
+                                }
+                                className="w-16 rounded border border-slate-300 bg-white px-1.5 py-1 text-[11px] dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                            />
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400">sec hold</span>
+                            <button
+                                type="button"
+                                disabled={!!edit.saving}
+                                onClick={() => void saveRound(roundNumber)}
+                                className="whitespace-nowrap rounded bg-emerald-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
+                            >
+                                {edit.saving ? '…' : 'Done'}
+                            </button>
+                        </div>
+                    );
+                })}
+            </div>
+            <button
+                type="button"
+                onClick={() => setExtraRounds((prev) => prev + 1)}
+                className="rounded border border-slate-300 px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+                + Add round
+            </button>
+            {roundNumbers.some((n) => getEdit(n).saveError) && (
+                <p className="text-[11px] text-red-500 dark:text-red-400">
+                    {roundNumbers.map((n) => getEdit(n).saveError).find(Boolean)}
+                </p>
+            )}
+        </div>
+    );
+}
+
+export default function ExerciseSetLogger(props: ExerciseSetLoggerProps) {
+    if (props.item.category === 'cardio') return <CardioSetLogger {...props} />;
+    if (props.item.category === 'stretch') return <StretchSetLogger {...props} />;
+    return <StrengthSetLogger {...props} />;
 }

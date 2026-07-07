@@ -2,9 +2,7 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
-import Link from 'next/link';
 import { Outfit } from 'next/font/google';
-import { usePathname } from 'next/navigation';
 import WeeklyPlanView from './WeeklyPlanView';
 import AppSidebar from '@/app/dashboard/components/AppSidebar';
 import { neon } from '@/app/dashboard/neonTheme';
@@ -21,10 +19,7 @@ function IconMenu() {
 }
 
 export default function HabitWeeklyPlanLayout() {
-  const pathname = usePathname();
-  const isPreview = pathname?.startsWith('/preview') === true;
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const todayHref = isPreview ? '/preview/dashboard' : '/dashboard';
 
   return (
     <div className={`${outfit.className} ${neon.pageBg} flex min-h-dvh min-w-0 overflow-x-hidden`}>
@@ -90,12 +85,7 @@ export default function HabitWeeklyPlanLayout() {
                 </div>
               </div>
 
-              <Link
-                href={todayHref}
-                className="flex h-11 shrink-0 items-center justify-center rounded-xl border-2 border-[#ff9d00]/60 bg-black/50 px-3 text-xs font-semibold text-[#ffe066] shadow-[0_0_18px_rgba(255,157,0,0.25)] transition hover:border-[#ff9d00] hover:bg-black/70 sm:px-4 sm:text-sm"
-              >
-                Today
-              </Link>
+              <div className="h-11 w-11 shrink-0" aria-hidden />
             </div>
 
             <p

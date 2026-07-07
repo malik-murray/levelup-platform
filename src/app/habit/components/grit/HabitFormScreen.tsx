@@ -51,24 +51,7 @@ export function HabitFormScreen({
   const returnPath = isEdit && habitId ? `/habit/${habitId}/edit` : '/habit/new';
 
   return (
-    <HabitFlowShell
-      title={isEdit ? 'Edit Habit' : 'New Habit'}
-      onBack={onCancel}
-      headerRight={
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={saving || !draft.name.trim()}
-          className="min-h-[44px] rounded-xl border-2 border-[#ff9d00]/60 bg-[#ff9d00]/15 px-4 py-2 text-sm font-semibold text-[#ffe066] shadow-[0_0_18px_rgba(255,157,0,0.15)] transition hover:bg-[#ff9d00]/25 disabled:pointer-events-none disabled:opacity-40"
-        >
-          {saving ? (
-            <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-[#ff9d00] border-t-transparent" />
-          ) : (
-            'Save'
-          )}
-        </button>
-      }
-    >
+    <HabitFlowShell title={isEdit ? 'Edit Habit' : 'New Habit'} onBack={onCancel} mainClassName="pb-36">
       <div className="mb-8 flex justify-center px-1">
         <div
           className={`${neon.panel} flex max-w-full min-w-0 items-center gap-3 rounded-2xl px-5 py-3`}
@@ -178,6 +161,29 @@ export function HabitFormScreen({
           {deleting ? 'Deleting…' : 'Delete Habit'}
         </button>
       )}
+
+      <div
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-20 px-4 pb-6 pt-10 safe-area-pb sm:px-6"
+        style={{
+          background:
+            'linear-gradient(to top, rgba(1,2,5,0.98) 0%, rgba(1,2,5,0.92) 45%, transparent 100%)',
+        }}
+      >
+        <div className="pointer-events-auto mx-auto w-full max-w-2xl lg:max-w-6xl">
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saving || !draft.name.trim()}
+            className="w-full min-h-[52px] rounded-xl border-2 border-[#ff9d00]/60 bg-[#ff9d00] px-4 py-3 text-base font-bold text-black shadow-[0_0_24px_rgba(255,157,0,0.45)] transition hover:bg-[#ffb020] disabled:pointer-events-none disabled:border-[#ff9d00]/30 disabled:bg-[#ff9d00]/25 disabled:text-[#ffe066]/50"
+          >
+            {saving ? (
+              <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-black/30 border-t-black" />
+            ) : (
+              'Save'
+            )}
+          </button>
+        </div>
+      </div>
     </HabitFlowShell>
   );
 }

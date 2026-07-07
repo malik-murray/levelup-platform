@@ -1,17 +1,10 @@
 import { Suspense } from 'react';
-import WorkoutsClient from './WorkoutsClient';
+import QuickLogClient from './QuickLogClient';
 
-type WorkoutsPageProps = {
-    searchParams: { [key: string]: string | string[] | undefined };
-};
-
-export default function WorkoutsPage({ searchParams }: WorkoutsPageProps) {
-    const addParam = searchParams?.add;
-    const showAddForm = addParam === 'true' || (Array.isArray(addParam) && addParam[0] === 'true');
-
+export default function WorkoutsPage() {
     return (
-        <Suspense fallback={<div className="p-6 text-slate-400">Loading workouts...</div>}>
-            <WorkoutsClient initialShowForm={showAddForm} />
+        <Suspense fallback={<div className="p-6 text-slate-400">Loading quick log...</div>}>
+            <QuickLogClient />
         </Suspense>
     );
 }

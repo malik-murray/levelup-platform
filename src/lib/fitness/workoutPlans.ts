@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { ExerciseDifficulty } from './types';
+import type { ExerciseCategory, ExerciseDifficulty } from './types';
 import type { GeneratedWorkoutItem } from './workoutGenerator';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -28,9 +28,13 @@ export type WorkoutPlanItem = {
     position: number;
     day_index: number;
     exercise_slug: string;
-    sets: number;
-    rep_range: string;
-    rest_seconds: number;
+    category: ExerciseCategory;
+    sets: number | null;
+    rep_range: string | null;
+    rest_seconds: number | null;
+    target_duration_seconds: number | null;
+    target_rounds: number | null;
+    cardio_type: string | null;
     note: string | null;
     movement_pattern: string | null;
     mechanic: string | null;
@@ -104,9 +108,13 @@ export async function createWorkoutPlanFromGeneratedPlan(
         position: index,
         day_index: (index % normalizedDayCount) + 1,
         exercise_slug: item.exercise.slug,
-        sets: item.sets,
-        rep_range: item.repRange,
-        rest_seconds: item.restSeconds,
+        category: item.category ?? 'strength',
+        sets: item.sets ?? null,
+        rep_range: item.repRange ?? null,
+        rest_seconds: item.restSeconds ?? null,
+        target_duration_seconds: item.durationSeconds ?? null,
+        target_rounds: item.rounds ?? null,
+        cardio_type: item.cardioType ?? null,
         note: item.note ?? null,
         movement_pattern: item.exercise.movement_pattern ?? null,
         mechanic: item.exercise.mechanic ?? null,
@@ -347,9 +355,13 @@ export async function addWorkoutPlanItem(
     input: {
         exerciseSlug: string;
         day_index?: number;
+        category?: ExerciseCategory;
         sets?: number;
         rep_range?: string;
         rest_seconds?: number;
+        target_duration_seconds?: number;
+        target_rounds?: number;
+        cardio_type?: string | null;
         note?: string | null;
     },
     supabase?: SupabaseClient
@@ -363,27 +375,50 @@ export async function addWorkoutPlanItem(
         throw new Error('Plan not found or you do not have access to it.');
     }
     const position = plan.items.length;
-    const sets = input.sets ?? 3;
-    const rep_range = (input.rep_range ?? '8–12').trim() || '8–12';
-    const rest_seconds = input.rest_seconds ?? 60;
-    if (sets < 1) throw new Error('Sets must be at least 1');
-    if (rest_seconds < 0) throw new Error('Rest seconds cannot be negative');
+    const category = input.category ?? 'strength';
 
+    let payload: Record<string, unknown>;
     const { getExerciseBySlug } = await import('./exercises');
     const exercise = await getExerciseBySlug(input.exerciseSlug.trim(), client);
 
-    const payload = {
-        plan_id: planId,
-        position,
-        day_index: Math.min(7, Math.max(1, input.day_index ?? 1)),
-        exercise_slug: input.exerciseSlug.trim(),
-        sets,
-        rep_range,
-        rest_seconds,
-        note: input.note ?? null,
-        movement_pattern: exercise?.movement_pattern ?? null,
-        mechanic: exercise?.mechanic ?? null,
-    };
+    if (category === 'strength') {
+        const sets = input.sets ?? 3;
+        const rep_range = (input.rep_range ?? '8–12').trim() || '8–12';
+        const rest_seconds = input.rest_seconds ?? 60;
+        if (sets < 1) throw new Error('Sets must be at least 1');
+        if (rest_seconds < 0) throw new Error('Rest seconds cannot be negative');
+
+        payload = {
+            plan_id: planId,
+            position,
+            day_index: Math.min(7, Math.max(1, input.day_index ?? 1)),
+            exercise_slug: input.exerciseSlug.trim(),
+            category,
+            sets,
+            rep_range,
+            rest_seconds,
+            note: input.note ?? null,
+            movement_pattern: exercise?.movement_pattern ?? null,
+            mechanic: exercise?.mechanic ?? null,
+        };
+    } else {
+        const target_duration_seconds = input.target_duration_seconds ?? (category === 'stretch' ? 30 : 600);
+        if (target_duration_seconds < 0) throw new Error('Duration cannot be negative');
+
+        payload = {
+            plan_id: planId,
+            position,
+            day_index: Math.min(7, Math.max(1, input.day_index ?? 1)),
+            exercise_slug: input.exerciseSlug.trim(),
+            category,
+            target_duration_seconds,
+            target_rounds: input.target_rounds ?? (category === 'stretch' ? 2 : null),
+            cardio_type: input.cardio_type ?? null,
+            note: input.note ?? null,
+            movement_pattern: exercise?.movement_pattern ?? null,
+            mechanic: exercise?.mechanic ?? null,
+        };
+    }
 
     const { data, error } = await client
         .from('fitness_workout_plan_items')

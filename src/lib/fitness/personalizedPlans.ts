@@ -1,7 +1,19 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { FitnessUserProfile } from './profile';
-import { generateWorkoutPlanFromCatalog, type GeneratedWorkoutItem, type WorkoutDifficulty } from './workoutGenerator';
-import { createWorkoutPlanFromGeneratedPlan, listWorkoutPlansForUser, type WorkoutPlanWithItems } from './workoutPlans';
+import {
+    generateCardioBlock,
+    generateStretchCooldown,
+    generateWorkoutPlanFromCatalog,
+    type GeneratedWorkoutItem,
+    type WorkoutDifficulty,
+} from './workoutGenerator';
+import {
+    addWorkoutPlanItem,
+    createWorkoutPlanFromGeneratedPlan,
+    getWorkoutPlanWithItems,
+    listWorkoutPlansForUser,
+    type WorkoutPlanWithItems,
+} from './workoutPlans';
 import { activateProgramForUser } from './programEngine';
 import { getPublishedExercises } from './exercises';
 
@@ -135,6 +147,7 @@ export async function generatePersonalizedStarterPlanForUser(
         throw new Error('Could not generate a plan from your profile yet. Try updating equipment or goals.');
     }
 
+    const dayCount = Math.min(7, Math.max(1, profile.days_per_week));
     const created = await createWorkoutPlanFromGeneratedPlan(
         {
             userId,
@@ -143,10 +156,13 @@ export async function generatePersonalizedStarterPlanForUser(
             muscleSlugs,
             difficulty,
             items: generatedItems,
-            dayCount: Math.min(7, Math.max(1, profile.days_per_week)),
+            dayCount,
         },
         supabase
     );
+
+    await addCardioAndStretchBlocks(created.id, profile, dayCount, supabase);
+
     await activateProgramForUser({
         userId,
         planId: created.id,
@@ -154,5 +170,59 @@ export async function generatePersonalizedStarterPlanForUser(
         trainingLevel: profile.training_level,
         supabase,
     });
-    return created;
+
+    const withExtras = await getWorkoutPlanWithItems(created.id, supabase);
+    return withExtras ?? created;
+}
+
+/**
+ * Adds a cardio block (if the profile's goals/training style call for it) and a stretch
+ * cooldown to every day of a newly generated plan. Additive only — does not touch the
+ * resistance-training item generation above.
+ */
+async function addCardioAndStretchBlocks(
+    planId: string,
+    profile: FitnessUserProfile,
+    dayCount: number,
+    supabase?: SupabaseClient
+): Promise<void> {
+    const wantsCardio =
+        profile.goals.includes('better_cardio') || profile.preferred_training_style === 'cardio_focused';
+
+    if (wantsCardio) {
+        const cardioBlock = await generateCardioBlock({
+            sessionDurationMinutes: profile.session_duration_minutes,
+            supabase,
+        });
+        if (cardioBlock) {
+            await addWorkoutPlanItem(
+                planId,
+                {
+                    exerciseSlug: cardioBlock.exercise.slug,
+                    day_index: dayCount,
+                    category: 'cardio',
+                    target_duration_seconds: cardioBlock.durationSeconds,
+                    cardio_type: cardioBlock.cardioType,
+                },
+                supabase
+            );
+        }
+    }
+
+    const stretchItems = await generateStretchCooldown({ supabase, count: 2 });
+    for (let day = 1; day <= dayCount; day++) {
+        for (const stretchItem of stretchItems) {
+            await addWorkoutPlanItem(
+                planId,
+                {
+                    exerciseSlug: stretchItem.exercise.slug,
+                    day_index: day,
+                    category: 'stretch',
+                    target_duration_seconds: stretchItem.durationSeconds,
+                    target_rounds: stretchItem.rounds,
+                },
+                supabase
+            );
+        }
+    }
 }

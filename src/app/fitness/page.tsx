@@ -498,7 +498,7 @@ export default function FitnessPage() {
 
             <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-500">
                 <Link href="/fitness/workouts" className="text-amber-400/90 hover:text-amber-300">
-                    Workouts
+                    Quick Log
                 </Link>
                 <span aria-hidden className="text-zinc-600">·</span>
                 <Link href="/fitness/progress" className="text-amber-400/90 hover:text-amber-300">

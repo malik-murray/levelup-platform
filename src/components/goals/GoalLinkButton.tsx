@@ -7,8 +7,28 @@ type Props = {
   goals: GoalPickerOption[];
   value: string | null;
   onChange: (goalId: string | null) => void;
+  /** @deprecated prefer `size` */
   compact?: boolean;
+  size?: 'default' | 'compact' | 'xs' | 'xxs';
 };
+
+function resolveSize(compact: boolean, size?: Props['size']): NonNullable<Props['size']> {
+  if (size) return size;
+  return compact ? 'compact' : 'default';
+}
+
+function sizeStyles(size: NonNullable<Props['size']>) {
+  if (size === 'xxs') {
+    return { box: 'h-[18px] w-[18px] min-h-0 min-w-0 rounded', icon: 'h-2.5 w-2.5' };
+  }
+  if (size === 'xs') {
+    return { box: 'min-h-[22px] min-w-[22px] rounded', icon: 'h-3 w-3' };
+  }
+  if (size === 'compact') {
+    return { box: 'min-h-[28px] min-w-[28px] rounded-md', icon: 'h-3.5 w-3.5' };
+  }
+  return { box: 'min-h-[40px] min-w-[40px] rounded-xl', icon: 'h-5 w-5' };
+}
 
 function TargetIcon({ className }: { className?: string }) {
   return (
@@ -20,10 +40,12 @@ function TargetIcon({ className }: { className?: string }) {
   );
 }
 
-export function GoalLinkButton({ goals, value, onChange, compact = false }: Props) {
+export function GoalLinkButton({ goals, value, onChange, compact = false, size }: Props) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const linkedGoal = goals.find((g) => g.id === value);
+  const resolvedSize = resolveSize(compact, size);
+  const { box: sizeClass, icon: iconClass } = sizeStyles(resolvedSize);
 
   useEffect(() => {
     if (!open) return;
@@ -35,11 +57,6 @@ export function GoalLinkButton({ goals, value, onChange, compact = false }: Prop
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
-
-  const sizeClass = compact
-    ? 'min-h-[28px] min-w-[28px] rounded-md'
-    : 'min-h-[40px] min-w-[40px] rounded-xl';
-  const iconClass = compact ? 'h-3.5 w-3.5' : 'h-5 w-5';
 
   return (
     <div ref={rootRef} className="relative shrink-0">

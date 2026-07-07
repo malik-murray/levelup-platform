@@ -7,8 +7,10 @@ import type { WorkoutSession } from '@/lib/fitness/workoutSessions';
 import {
     getProgressPageDataForUser,
     getSessionSummaries,
+    getWeeklyCategoryBreakdownForUser,
     type ProgressSummary,
     type SessionSummary,
+    type WeeklyCategoryBreakdown,
 } from '@/lib/fitness/workoutSessions';
 
 function formatDateTime(value: string | null | undefined): string {
@@ -41,6 +43,7 @@ export default function ProgressClient() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [weeklyAIRecap, setWeeklyAIRecap] = useState<string | null>(null);
+    const [categoryBreakdown, setCategoryBreakdown] = useState<WeeklyCategoryBreakdown | null>(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -60,6 +63,14 @@ export default function ProgressClient() {
                 setSummary(pageData.summary);
                 setRecent(pageData.recentCompletedSessions);
                 setWeeklyAIRecap(pageData.weeklyAIRecap);
+
+                try {
+                    const breakdown = await getWeeklyCategoryBreakdownForUser(user.id, supabase);
+                    if (!cancelled) setCategoryBreakdown(breakdown);
+                } catch (e) {
+                    console.error('Weekly category breakdown error:', e);
+                    if (!cancelled) setCategoryBreakdown(null);
+                }
 
                 if (pageData.recentCompletedSessions.length > 0) {
                     const map = await getSessionSummaries(
@@ -203,6 +214,34 @@ export default function ProgressClient() {
                             </Link>
                         </div>
                     </section>
+
+                    {categoryBreakdown && (
+                        <section className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+                            <h2 className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-3">
+                                This week by category
+                            </h2>
+                            <div className="grid grid-cols-3 gap-3">
+                                <div>
+                                    <div className="text-xs text-slate-500 dark:text-slate-400">Strength sets</div>
+                                    <div className="text-lg font-semibold text-slate-900 dark:text-white">
+                                        {categoryBreakdown.strengthSetsThisWeek}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-xs text-slate-500 dark:text-slate-400">Cardio minutes</div>
+                                    <div className="text-lg font-semibold text-slate-900 dark:text-white">
+                                        {categoryBreakdown.cardioMinutesThisWeek}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-xs text-slate-500 dark:text-slate-400">Stretch sessions</div>
+                                    <div className="text-lg font-semibold text-slate-900 dark:text-white">
+                                        {categoryBreakdown.stretchSessionsThisWeek}
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+                    )}
 
                     {recent.length > 0 && (
                         <section className="space-y-3">

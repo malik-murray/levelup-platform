@@ -5,6 +5,8 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import { supabase } from '@auth/supabaseClient';
 import { playUiSound } from '@/lib/soundEffects';
+import { useAccess } from '@/lib/access/useAccess';
+import type { AppKey } from '@/lib/access/types';
 import {
     type ComingSoonAppKey,
     comingSoonMenuHref,
@@ -14,36 +16,45 @@ type App = {
     name: string;
     href: string;
     icon: string;
+    appKey?: AppKey;
     comingSoonKey?: ComingSoonAppKey;
 };
 
 const primaryNavApps: App[] = [
-    { name: 'Dashboard', href: '/dashboard', icon: '📊' },
-    { name: 'To-Do', href: '/todo', icon: '📝' },
-    { name: 'Goals & Vision', href: '/goals', icon: '🎯' },
-    { name: 'Trends', href: '/trends', icon: '📉' },
-    { name: 'Weekly plan', href: '/habit/weekly-plan', icon: '📅' },
-    { name: 'Settings', href: '/settings', icon: '⚙️' },
+    { name: 'Dashboard', href: '/dashboard', icon: '📊', appKey: 'dashboard' },
+    { name: 'To-Do', href: '/todo', icon: '📝', appKey: 'todo' },
+    { name: 'Goals & Vision', href: '/goals', icon: '🎯', appKey: 'goals' },
+    { name: 'Trends', href: '/trends', icon: '📉', appKey: 'trends' },
+    { name: 'Weekly plan', href: '/habit/weekly-plan', icon: '📅', appKey: 'habit-weekly-plan' },
+    { name: 'Settings', href: '/settings', icon: '⚙️', appKey: 'settings' },
 ];
 
 const otherApps: App[] = [
-    { name: 'Finance Tracker', href: '/finance', icon: '💰' },
-    { name: 'Newsfeed', href: '/newsfeed', icon: '📰' },
-    { name: 'Fitness Tracker', href: '/fitness', icon: '💪' },
-    { name: 'Stock & Crypto Analyzer', href: '/markets', icon: '📈', comingSoonKey: 'markets' },
+    { name: 'Habits Tracker', href: '/habit', icon: '✅', appKey: 'habit' },
+    { name: 'Finance Tracker', href: '/finance', icon: '💰', appKey: 'finance' },
+    { name: 'Newsfeed', href: '/newsfeed', icon: '📰', appKey: 'newsfeed' },
+    { name: 'Fitness Tracker', href: '/fitness', icon: '💪', appKey: 'fitness' },
+    { name: 'Stock & Crypto Analyzer', href: '/markets', icon: '📈', appKey: 'markets', comingSoonKey: 'markets' },
 ];
 
 function renderAppRow(
     app: App,
     onClose: () => void,
     pathname: string,
-    comingSoonActive: string | null
+    comingSoonActive: string | null,
+    canAccessApp: (key: AppKey) => boolean
 ) {
-    const href = app.comingSoonKey ? comingSoonMenuHref(app.comingSoonKey) : app.href;
+    const isComingSoon = Boolean(app.comingSoonKey);
+    const isLocked = app.appKey ? !canAccessApp(app.appKey) && !isComingSoon : false;
+    const href = isComingSoon
+        ? comingSoonMenuHref(app.comingSoonKey!)
+        : isLocked && app.appKey
+          ? `/upgrade?app=${app.appKey}`
+          : app.href;
     const isActive = app.comingSoonKey
         ? comingSoonActive === app.comingSoonKey
-        : pathname === app.href || (app.href !== '/dashboard' && pathname.startsWith(`${app.href}/`));
-    const isComingSoon = Boolean(app.comingSoonKey);
+        : !isLocked &&
+          (pathname === app.href || (app.href !== '/dashboard' && pathname.startsWith(`${app.href}/`)));
 
     const base =
         'flex items-center gap-3 rounded-xl px-4 py-3 transition-colors border-2 border-transparent';
@@ -55,21 +66,21 @@ function renderAppRow(
         'opacity-65 text-slate-500 hover:bg-amber-50/80 hover:text-slate-700 hover:opacity-90 dark:text-slate-500 dark:hover:bg-[#ff9d00]/10 dark:hover:text-slate-200';
 
     const className = `${base} ${
-        isActive ? activeCls : isComingSoon ? comingSoonIdleCls : normalCls
+        isActive ? activeCls : isComingSoon || isLocked ? comingSoonIdleCls : normalCls
     }`;
 
     return (
         <li key={app.comingSoonKey ?? app.href}>
             <Link
                 href={href}
-                aria-label={isComingSoon ? `${app.name} (coming soon)` : app.name}
+                aria-label={isComingSoon || isLocked ? `${app.name} (premium)` : app.name}
                 onClick={() => {
                     playUiSound('tap');
                     onClose();
                 }}
                 className={className}
             >
-                <span className={`text-xl ${isComingSoon && !isActive ? 'grayscale-[0.35]' : ''}`}>
+                <span className={`text-xl ${(isComingSoon || isLocked) && !isActive ? 'grayscale-[0.35]' : ''}`}>
                     {app.icon}
                 </span>
                 <span className="flex min-w-0 flex-1 items-center gap-2 font-medium">
@@ -80,6 +91,13 @@ function renderAppRow(
                             aria-hidden
                         >
                             🔒 Soon
+                        </span>
+                    ) : isLocked ? (
+                        <span
+                            className="shrink-0 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500"
+                            aria-hidden
+                        >
+                            🔒
                         </span>
                     ) : null}
                 </span>
@@ -92,15 +110,17 @@ function AppNavLinksCore({
     onClose,
     pathname,
     comingSoonActive,
+    canAccessApp,
 }: {
     onClose: () => void;
     pathname: string;
     comingSoonActive: string | null;
+    canAccessApp: (key: AppKey) => boolean;
 }) {
     return (
         <div className="space-y-6">
             <ul className="space-y-2">
-                {primaryNavApps.map((app) => renderAppRow(app, onClose, pathname, comingSoonActive))}
+                {primaryNavApps.map((app) => renderAppRow(app, onClose, pathname, comingSoonActive, canAccessApp))}
             </ul>
 
             <section className="space-y-2" aria-labelledby="sidebar-other-apps-heading">
@@ -111,7 +131,7 @@ function AppNavLinksCore({
                     Other apps
                 </h3>
                 <ul className="space-y-2">
-                    {otherApps.map((app) => renderAppRow(app, onClose, pathname, comingSoonActive))}
+                    {otherApps.map((app) => renderAppRow(app, onClose, pathname, comingSoonActive, canAccessApp))}
                 </ul>
             </section>
         </div>
@@ -121,13 +141,29 @@ function AppNavLinksCore({
 function AppNavLinksWithSearch({ onClose }: { onClose: () => void }) {
     const pathname = usePathname();
     const searchParams = useSearchParams();
+    const { canAccessApp } = useAccess();
     const comingSoonActive = pathname === '/coming-soon' ? searchParams.get('app') : null;
-    return <AppNavLinksCore onClose={onClose} pathname={pathname} comingSoonActive={comingSoonActive} />;
+    return (
+        <AppNavLinksCore
+            onClose={onClose}
+            pathname={pathname}
+            comingSoonActive={comingSoonActive}
+            canAccessApp={canAccessApp}
+        />
+    );
 }
 
 function AppNavLinksFallback({ onClose }: { onClose: () => void }) {
     const pathname = usePathname();
-    return <AppNavLinksCore onClose={onClose} pathname={pathname} comingSoonActive={null} />;
+    const { canAccessApp } = useAccess();
+    return (
+        <AppNavLinksCore
+            onClose={onClose}
+            pathname={pathname}
+            comingSoonActive={null}
+            canAccessApp={canAccessApp}
+        />
+    );
 }
 
 export default function AppSidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {

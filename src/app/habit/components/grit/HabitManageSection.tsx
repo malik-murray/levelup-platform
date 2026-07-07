@@ -166,7 +166,7 @@ export function HabitManageSection({
 
   const handleEditHabit = (habit: GritHabitTemplate) => {
     if (habit.id === currentHabitId) return;
-    setReturnPath(getReturnPath() || '/habit/today');
+    setReturnPath(getReturnPath() || '/habit');
     setStoredDraft(initDraftFromHabit(habit));
     router.push(`/habit/${habit.id}/edit`);
   };

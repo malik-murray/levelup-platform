@@ -4,8 +4,28 @@ type TodoDeleteButtonProps = {
   itemLabel: string;
   confirmMessage: string;
   onConfirm: () => void;
+  /** @deprecated prefer `size` */
   compact?: boolean;
+  size?: 'default' | 'compact' | 'xs' | 'xxs';
 };
+
+function resolveSize(compact: boolean, size?: TodoDeleteButtonProps['size']): NonNullable<TodoDeleteButtonProps['size']> {
+  if (size) return size;
+  return compact ? 'compact' : 'default';
+}
+
+function sizeStyles(size: NonNullable<TodoDeleteButtonProps['size']>) {
+  if (size === 'xxs') {
+    return { box: 'h-[18px] w-[18px] min-h-0 min-w-0 rounded', icon: 'h-2.5 w-2.5' };
+  }
+  if (size === 'xs') {
+    return { box: 'min-h-[22px] min-w-[22px] rounded', icon: 'h-3 w-3' };
+  }
+  if (size === 'compact') {
+    return { box: 'min-h-[28px] min-w-[28px] rounded-md', icon: 'h-3.5 w-3.5' };
+  }
+  return { box: 'min-h-[40px] min-w-[40px] rounded-xl', icon: 'h-5 w-5' };
+}
 
 function TrashIcon({ className }: { className?: string }) {
   return (
@@ -25,33 +45,24 @@ export function TodoDeleteButton({
   confirmMessage,
   onConfirm,
   compact = false,
+  size,
 }: TodoDeleteButtonProps) {
   const handleClick = () => {
     const confirmed = window.confirm(confirmMessage);
     if (confirmed) onConfirm();
   };
 
-  if (compact) {
-    return (
-      <button
-        type="button"
-        onClick={handleClick}
-        className="flex min-h-[28px] min-w-[28px] shrink-0 items-center justify-center rounded-md border border-red-400/40 bg-red-500/5 text-red-300 transition hover:border-red-400/65 hover:bg-red-500/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40"
-        aria-label={`Delete ${itemLabel}`}
-      >
-        <TrashIcon className="h-3.5 w-3.5" />
-      </button>
-    );
-  }
+  const resolvedSize = resolveSize(compact, size);
+  const { box: sizeClass, icon: iconClass } = sizeStyles(resolvedSize);
 
   return (
     <button
       type="button"
       onClick={handleClick}
-      className="flex min-h-[40px] min-w-[40px] shrink-0 items-center justify-center rounded-xl border border-red-400/40 bg-red-500/5 text-red-300 transition hover:border-red-400/65 hover:bg-red-500/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40"
+      className={`flex shrink-0 items-center justify-center border border-red-400/40 bg-red-500/5 text-red-300 transition hover:border-red-400/65 hover:bg-red-500/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40 ${sizeClass}`}
       aria-label={`Delete ${itemLabel}`}
     >
-      <TrashIcon className="h-5 w-5" />
+      <TrashIcon className={iconClass} />
     </button>
   );
 }

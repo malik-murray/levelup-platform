@@ -183,7 +183,13 @@ export default function LoginPageClient() {
             </p>
           )}
 
-          <div className="mt-6 border-t border-[#ffb020]/20 pt-6">
+          <div className="mt-6 border-t border-[#ffb020]/20 pt-6 space-y-4">
+            <Link
+              href="/guest/dashboard"
+              className="block w-full rounded-xl border-2 border-[#ffb020]/45 bg-black/25 py-3 text-center text-sm font-semibold text-[#ffc84a] transition hover:bg-[#ffb020]/10"
+            >
+              Continue as guest
+            </Link>
             <button
               type="button"
               className="w-full py-2 text-sm text-slate-300 transition hover:text-[#ffc84a] active:opacity-80 sm:text-xs"

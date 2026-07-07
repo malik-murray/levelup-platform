@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
+import AppSidebar from '@/app/dashboard/components/AppSidebar';
 import { formatLocalDate } from '@/lib/newsfeed/dateRange';
 import { rankArticlesForBriefing } from '@/lib/newsfeed/topStoriesRanking';
 import { getSummaryParagraph, type ArticleSummaryView } from '@/lib/newsfeed/articlePresentation';
@@ -67,6 +68,7 @@ const MARKET_INDICES = [
 ];
 
 export default function NewsfeedPage() {
+    const [sidebarOpen, setSidebarOpen] = useState(false);
     const [articles, setArticles] = useState<Article[]>([]);
     const [loading, setLoading] = useState(true);
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -322,7 +324,7 @@ export default function NewsfeedPage() {
                         href={article.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block text-sm font-semibold leading-snug text-slate-100 hover:text-violet-300"
+                        className="block text-sm font-semibold leading-snug text-slate-100 hover:text-amber-300"
                         title={article.title}
                     >
                         {article.title}
@@ -336,7 +338,7 @@ export default function NewsfeedPage() {
                         <p className="text-xs leading-relaxed text-slate-300">{displaySummary}</p>
                     ) : null}
                     {!compact && article.summary?.why_it_matters ? (
-                        <p className="rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-2 text-xs text-violet-200">
+                        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-200">
                             Why it matters: {article.summary.why_it_matters}
                         </p>
                     ) : null}
@@ -346,7 +348,7 @@ export default function NewsfeedPage() {
                         </p>
                     ) : null}
                     {compact && article.summary?.why_it_matters ? (
-                        <p className="text-[11px] leading-relaxed text-violet-200/90 line-clamp-2">
+                        <p className="text-[11px] leading-relaxed text-amber-100/90 line-clamp-2">
                             {article.summary.why_it_matters}
                         </p>
                     ) : null}
@@ -357,7 +359,7 @@ export default function NewsfeedPage() {
                         aria-label={saveLabel}
                         className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors ${
                             article.user_action.is_saved
-                                ? 'border-violet-400/40 bg-violet-500/20 text-violet-200'
+                                ? 'border-amber-400/40 bg-amber-500/20 text-amber-200'
                                 : 'border-white/15 bg-white/5 text-slate-300 hover:bg-white/10'
                         }`}
                     >
@@ -377,7 +379,7 @@ export default function NewsfeedPage() {
                         href={article.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="rounded-lg border border-white/15 px-2 py-1 text-[11px] font-medium text-slate-200 hover:bg-white/10 hover:text-violet-200"
+                        className="rounded-lg border border-white/15 px-2 py-1 text-[11px] font-medium text-slate-200 hover:bg-white/10 hover:text-amber-200"
                     >
                         Open
                     </a>
@@ -408,7 +410,7 @@ export default function NewsfeedPage() {
                     </p>
                     <Link
                         href="/newsfeed/settings"
-                        className="inline-block rounded-xl bg-violet-500 px-6 py-3 text-sm font-semibold text-white hover:bg-violet-400"
+                        className="inline-block rounded-xl bg-amber-500 px-6 py-3 text-sm font-semibold text-white hover:bg-amber-400"
                     >
                         Set Up Preferences
                     </Link>
@@ -469,14 +471,15 @@ export default function NewsfeedPage() {
 
     return (
         <main className="min-h-screen bg-[#070B17] text-slate-100">
+            <AppSidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
             <div className="mx-auto min-h-screen w-full max-w-md bg-gradient-to-b from-[#0A1022] via-[#0A0F1F] to-[#060A15] pb-20">
                 <header className="sticky top-0 z-20 border-b border-white/10 bg-[#070B17]/95 px-4 pb-3 pt-5 backdrop-blur">
                     <div className="mb-3 flex items-center justify-between">
                         <button
                             type="button"
                             className="rounded-lg border border-white/15 bg-white/5 p-2 text-slate-200 hover:bg-white/10"
-                            aria-label="Open dashboard"
-                            onClick={() => window.location.assign('/dashboard')}
+                            aria-label="Open menu"
+                            onClick={() => setSidebarOpen(true)}
                         >
                             ☰
                         </button>
@@ -484,7 +487,7 @@ export default function NewsfeedPage() {
                         <div className="flex items-center gap-2">
                             <Link
                                 href="/newsfeed/settings"
-                                className="rounded-lg border border-violet-400/30 bg-violet-500/20 px-2 py-1 text-[11px] text-violet-200"
+                                className="rounded-lg border border-amber-400/30 bg-amber-500/20 px-2 py-1 text-[11px] text-amber-200"
                             >
                                 Settings
                             </Link>
@@ -503,7 +506,7 @@ export default function NewsfeedPage() {
                                     type="button"
                                     onClick={() => setActiveCategory(tab.key)}
                                     className={`whitespace-nowrap border-b-2 pb-2 transition-colors ${
-                                        active ? 'border-violet-500 text-violet-300' : 'border-transparent text-slate-400'
+                                        active ? 'border-amber-500 text-amber-300' : 'border-transparent text-slate-400'
                                     }`}
                                 >
                                     {tab.label}
@@ -565,7 +568,7 @@ export default function NewsfeedPage() {
                                 type="button"
                                 onClick={() => setFilter(mode)}
                                 className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-medium capitalize ${
-                                    filter === mode ? 'bg-violet-500/25 text-violet-100' : 'text-slate-400'
+                                    filter === mode ? 'bg-amber-500/25 text-amber-100' : 'text-slate-400'
                                 }`}
                             >
                                 {mode}
@@ -574,7 +577,7 @@ export default function NewsfeedPage() {
                     </div>
 
                     {ingestTriggered && filteredArticles.length === 0 && !loading ? (
-                        <div className="rounded-2xl border border-violet-500/20 bg-violet-500/10 px-4 py-3 text-center text-sm text-violet-200">
+                        <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-center text-sm text-amber-200">
                             Fetching the latest articles. This may take a minute — try Refresh shortly.
                         </div>
                     ) : null}
@@ -587,11 +590,11 @@ export default function NewsfeedPage() {
                             <button
                                 type="button"
                                 onClick={refreshFeed}
-                                className="mt-4 inline-block text-violet-300 hover:text-violet-200"
+                                className="mt-4 inline-block text-amber-300 hover:text-amber-200"
                             >
                                 Refresh feed
                             </button>
-                            <Link href="/newsfeed/settings" className="mt-2 block text-violet-300 hover:text-violet-200">
+                            <Link href="/newsfeed/settings" className="mt-2 block text-amber-300 hover:text-amber-200">
                                 Update preferences
                             </Link>
                         </div>
@@ -620,7 +623,7 @@ export default function NewsfeedPage() {
                                         <button
                                             type="button"
                                             onClick={() => setActiveCategory('top')}
-                                            className="text-xs text-violet-300 hover:text-violet-200"
+                                            className="text-xs text-amber-300 hover:text-amber-200"
                                         >
                                             View All
                                         </button>
@@ -634,7 +637,7 @@ export default function NewsfeedPage() {
                             <section className="rounded-2xl border border-white/10 bg-[#10172B] p-3">
                                 <div className="mb-2 flex items-center justify-between">
                                     <h3 className="text-base font-semibold text-slate-100">Market Snapshot</h3>
-                                    <span className="text-xs text-violet-300">Live</span>
+                                    <span className="text-xs text-amber-300">Live</span>
                                 </div>
                                 <div className="rounded-xl border border-white/10 bg-[#0D1325] p-3">
                                     {MARKET_INDICES.map((index) => (
@@ -657,7 +660,7 @@ export default function NewsfeedPage() {
                 <nav className="fixed bottom-0 left-1/2 z-20 flex w-full max-w-md -translate-x-1/2 items-center justify-around border-t border-white/10 bg-[#070B17]/95 px-3 py-2 text-[11px] text-slate-400 backdrop-blur">
                     <Link href="/" className="rounded-md px-2 py-1 hover:text-slate-200">Home</Link>
                     <Link href="/dashboard" className="rounded-md px-2 py-1 hover:text-slate-200">Dashboard</Link>
-                    <button type="button" className="rounded-md px-2 py-1 text-violet-300">News</button>
+                    <button type="button" className="rounded-md px-2 py-1 text-amber-300">News</button>
                     <button type="button" onClick={() => setFilter('saved')} className="rounded-md px-2 py-1 hover:text-slate-200">Saved</button>
                     <button type="button" onClick={() => setSelectedTopicFilter(null)} className="rounded-md px-2 py-1 hover:text-slate-200">Search</button>
                 </nav>

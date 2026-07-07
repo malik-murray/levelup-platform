@@ -13,6 +13,7 @@ import type {
     ExerciseMovementPattern,
     ExerciseForceType,
     ExerciseMechanic,
+    ExerciseCategory,
 } from './types';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -26,6 +27,7 @@ export interface ExerciseQueryFilters {
     movementPattern?: ExerciseMovementPattern;
     forceType?: ExerciseForceType;
     mechanic?: ExerciseMechanic;
+    category?: ExerciseCategory;
     /** Filter by a single tag contained in exercise.tags */
     tag?: string;
     /** Optional future extension: filter by multiple tags (AND semantics) */
@@ -47,6 +49,7 @@ interface ExerciseRow {
     movement_pattern: ExerciseMovementPattern | null;
     force_type: ExerciseForceType | null;
     mechanic: ExerciseMechanic | null;
+    category: ExerciseCategory;
     short_description: string | null;
     instructions: string[];
     tips: string[];
@@ -370,6 +373,9 @@ export async function getExercisesByFilters(
     if (filters.mechanic != null) {
         query = query.eq('mechanic', filters.mechanic);
     }
+    if (filters.category != null) {
+        query = query.eq('category', filters.category);
+    }
     if (filters.tag && filters.tag.trim()) {
         query = query.contains('tags', [filters.tag.trim()]);
     } else if (filters.tags && filters.tags.length > 0) {
@@ -395,6 +401,17 @@ export async function getExercisesByFilters(
     }
 
     return results;
+}
+
+/**
+ * Returns published exercises of a given category (strength/cardio/stretch), name ascending.
+ * Used by the quick-log picker and exercise catalog category filter.
+ */
+export async function getExercisesByCategory(
+    category: ExerciseCategory,
+    supabase?: SupabaseClient
+): Promise<ExerciseWithRelations[]> {
+    return getExercisesByFilters({ category, publishedOnly: true }, supabase);
 }
 
 // =============================================================================

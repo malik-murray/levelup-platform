@@ -13,6 +13,8 @@ import AppSidebar from './components/AppSidebar';
 import DashboardScoreBars, { type DashboardScores } from './components/DashboardScoreBars';
 import DashboardCalendarOverview from './components/DashboardCalendarOverview';
 import CollapsiblePanel from './components/CollapsiblePanel';
+import LockedAppPreview from '@/components/access/LockedAppPreview';
+import { useAccess } from '@/lib/access/useAccess';
 import { neon } from './neonTheme';
 
 const outfit = Outfit({ subsets: ['latin'], weight: ['400', '600', '700', '800'] });
@@ -126,6 +128,7 @@ function IconCalendar() {
 }
 
 export default function DashboardPage() {
+  const { loading: accessLoading, canUseDashboardFeature } = useAccess();
   const [userDisplayName, setUserDisplayName] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -221,7 +224,7 @@ export default function DashboardPage() {
   const morningFocusOn = activeDayPart === 'morning';
   const eveningFocusOn = activeDayPart === 'evening';
 
-  if (loading) {
+  if (loading || accessLoading) {
     return (
       <main
         className={`${outfit.className} flex min-h-dvh items-center justify-center bg-white text-slate-900 transition-colors dark:bg-[#010205] dark:text-white`}
@@ -453,9 +456,21 @@ export default function DashboardPage() {
                       >
                         <DashboardNotesSection selectedDate={selectedDate} userId={userId} />
                       </div>
-                      <NewsfeedSection selectedDate={selectedDate} timeframe={timeframe} userId={userId} />
-                      <FinanceWidget selectedDate={selectedDate} userId={userId} />
-                      <FitnessWidget selectedDate={selectedDate} userId={userId} />
+                      {canUseDashboardFeature('newsfeed') ? (
+                        <NewsfeedSection selectedDate={selectedDate} timeframe={timeframe} userId={userId} />
+                      ) : (
+                        <LockedAppPreview app="newsfeed" compact />
+                      )}
+                      {canUseDashboardFeature('finance') ? (
+                        <FinanceWidget selectedDate={selectedDate} userId={userId} />
+                      ) : (
+                        <LockedAppPreview app="finance" compact />
+                      )}
+                      {canUseDashboardFeature('fitness') ? (
+                        <FitnessWidget selectedDate={selectedDate} userId={userId} />
+                      ) : (
+                        <LockedAppPreview app="fitness" compact />
+                      )}
                     </div>
                   )}
                 </div>

@@ -134,12 +134,20 @@ export default function FitnessTodayCard({
                 ) : (
                     <div className="rounded-lg border border-zinc-700/50 bg-zinc-800/40 p-3">
                         <p className="text-xs text-zinc-400">No workout scheduled for today.</p>
-                        <Link
-                            href="/fitness/workouts"
-                            className="mt-2 inline-block text-xs font-medium text-amber-400 hover:text-amber-300"
-                        >
-                            Browse workouts →
-                        </Link>
+                        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                            <Link
+                                href="/fitness/workouts"
+                                className="inline-block text-xs font-medium text-amber-400 hover:text-amber-300"
+                            >
+                                Quick log a workout →
+                            </Link>
+                            <Link
+                                href="/fitness/plans"
+                                className="inline-block text-xs font-medium text-amber-400 hover:text-amber-300"
+                            >
+                                Generate a training plan →
+                            </Link>
+                        </div>
                     </div>
                 )}
 

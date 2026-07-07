@@ -31,6 +31,7 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
+.env
 .env.local
 .env*.local
 src/.env.local
@@ -42,3 +43,33 @@ src/.env.local
 *.tsbuildinfo
 next-env.d.ts
 .env.local
+
+# python virtual environments / caches
+.venv/
+venv/
+__pycache__/
+*.pyc
+.cache/
+
+# vendored/reference repos that aren't part of this app
+plaid_quickstart/
+
+# local storage staging area (mirrored into iCloud Drive by
+# scripts/migrate_storage_to_icloud.py - see README "Storage Architecture")
+/storage/
+
+# build tooling caches, logs, temp files
+.swc/
+logs/
+*.log
+tmp/
+/dist/
+
+# local database files - the active dev database always stays local.
+# Only timestamped backups (copied by the migration script) belong in iCloud.
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

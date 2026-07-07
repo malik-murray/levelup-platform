@@ -112,7 +112,7 @@ export default function EditHabitPage() {
         }));
         setStoredDraft(null);
         clearReturnPath();
-        router.push(getReturnPath() || '/habit/today');
+        router.push(getReturnPath() || '/habit');
         return;
       }
 
@@ -136,7 +136,7 @@ export default function EditHabitPage() {
 
       setStoredDraft(null);
       clearReturnPath();
-      router.push(getReturnPath() || '/habit/today');
+      router.push(getReturnPath() || '/habit');
     } catch (e) {
       console.error(e);
     } finally {
@@ -147,7 +147,7 @@ export default function EditHabitPage() {
   const handleCancel = () => {
     setStoredDraft(null);
     clearReturnPath();
-    router.push(getReturnPath() || '/habit/today');
+    router.push(getReturnPath() || '/habit');
   };
 
   const handleDelete = async () => {
@@ -175,7 +175,7 @@ export default function EditHabitPage() {
 
       setStoredDraft(null);
       clearReturnPath();
-      router.push(getReturnPath() || '/habit/today');
+      router.push(getReturnPath() || '/habit');
     } catch (e) {
       console.error(e);
     } finally {

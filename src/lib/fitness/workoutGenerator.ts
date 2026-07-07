@@ -1,10 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
+    ExerciseCategory,
     ExerciseDifficulty,
     ExerciseMovementPattern,
     ExerciseWithRelations,
 } from './types';
-import { getAllExercises, getPublishedExercises } from './exercises';
+import { getAllExercises, getExercisesByCategory, getPublishedExercises } from './exercises';
 import { MUSCLE_CONTENT } from '@/app/fitness/muscles/muscleContent';
 
 /** User-selected difficulty for V1 workout generator. */
@@ -18,12 +19,19 @@ export type GenerateWorkoutOptions = {
     publishedOnly?: boolean;
 };
 
-/** Single exercise with sets/reps prescription. */
+/**
+ * Single exercise with a prescription. Strength items populate sets/repRange/restSeconds;
+ * cardio/stretch items populate durationSeconds (and rounds/cardioType where relevant) instead.
+ */
 export type GeneratedWorkoutItem = {
     exercise: ExerciseWithRelations;
-    sets: number;
-    repRange: string;
-    restSeconds: number;
+    category?: ExerciseCategory;
+    sets?: number;
+    repRange?: string;
+    restSeconds?: number;
+    durationSeconds?: number;
+    rounds?: number;
+    cardioType?: string;
     note?: string;
 };
 
@@ -311,6 +319,56 @@ function getPrescriptionForExercise(
         repRange,
         restSeconds,
     };
+}
+
+/**
+ * Picks one seeded cardio exercise and prescribes a duration.
+ * Duration is ~30% of session length, clamped to 10-20 minutes.
+ */
+export async function generateCardioBlock(options: {
+    preferredCardioType?: string;
+    sessionDurationMinutes: number;
+    supabase?: SupabaseClient;
+}): Promise<GeneratedWorkoutItem | null> {
+    const { preferredCardioType, sessionDurationMinutes, supabase } = options;
+    const cardioExercises = await getExercisesByCategory('cardio', supabase);
+    if (cardioExercises.length === 0) return null;
+
+    const preferred = preferredCardioType
+        ? cardioExercises.find(
+              (ex) => ex.slug === preferredCardioType || ex.name.toLowerCase() === preferredCardioType.toLowerCase()
+          )
+        : undefined;
+    const exercise = preferred ?? cardioExercises[0];
+
+    const durationMinutes = Math.min(20, Math.max(10, Math.round(sessionDurationMinutes * 0.3)));
+
+    return {
+        exercise,
+        category: 'cardio',
+        durationSeconds: durationMinutes * 60,
+        cardioType: exercise.slug,
+    };
+}
+
+/**
+ * Picks a handful of seeded stretch/yoga exercises for a cooldown block.
+ */
+export async function generateStretchCooldown(options: {
+    supabase?: SupabaseClient;
+    count?: number;
+}): Promise<GeneratedWorkoutItem[]> {
+    const { supabase, count = 2 } = options;
+    const stretchExercises = await getExercisesByCategory('stretch', supabase);
+    if (stretchExercises.length === 0) return [];
+
+    const picked = shuffle(stretchExercises).slice(0, Math.max(1, count));
+    return picked.map((exercise) => ({
+        exercise,
+        category: 'stretch' as const,
+        durationSeconds: 30,
+        rounds: 2,
+    }));
 }
 
 

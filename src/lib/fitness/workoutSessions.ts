@@ -1,9 +1,10 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { WorkoutPlanWithItems } from './workoutPlans';
 import { getPlansMuscleSlugs, getWorkoutPlanWithItems } from './workoutPlans';
-import { getPrimaryMuscleSlugsByExerciseSlugs } from './exercises';
+import { formatSlugAsTitle, getExerciseBySlug, getPrimaryMuscleSlugsByExerciseSlugs } from './exercises';
 import { getFitnessUserProfileForUser } from './profile';
 import { markProgramAssignmentCompletedForSession } from './programEngine';
+import type { ExerciseCategory, ExerciseWithRelations } from './types';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -36,14 +37,19 @@ export type WorkoutSessionItem = {
     plan_item_id: string | null;
     position: number;
     exercise_slug: string;
-    target_sets: number;
-    target_rep_range: string;
-    target_rest_seconds: number;
+    category: ExerciseCategory;
+    target_sets: number | null;
+    target_rep_range: string | null;
+    target_rest_seconds: number | null;
+    target_duration_seconds: number | null;
+    target_rounds: number | null;
+    cardio_type: string | null;
     target_note: string | null;
     target_movement_pattern: string | null;
     target_mechanic: string | null;
     actual_sets_completed: number | null;
     actual_avg_reps_per_set: number | null;
+    actual_duration_seconds: number | null;
     actual_notes: string | null;
     created_at: string;
     updated_at: string;
@@ -121,9 +127,13 @@ export async function createSessionFromPlan(
         plan_item_id: item.id,
         position: index,
         exercise_slug: item.exercise_slug,
+        category: item.category,
         target_sets: item.sets,
         target_rep_range: item.rep_range,
         target_rest_seconds: item.rest_seconds,
+        target_duration_seconds: item.target_duration_seconds,
+        target_rounds: item.target_rounds,
+        cardio_type: item.cardio_type,
         target_note: item.note,
         target_movement_pattern: item.movement_pattern,
         target_mechanic: item.mechanic,
@@ -197,9 +207,13 @@ export async function createSessionFromPlanDay(
         plan_item_id: item.id,
         position: index,
         exercise_slug: item.exercise_slug,
+        category: item.category,
         target_sets: item.sets,
         target_rep_range: item.rep_range,
         target_rest_seconds: item.rest_seconds,
+        target_duration_seconds: item.target_duration_seconds,
+        target_rounds: item.target_rounds,
+        cardio_type: item.cardio_type,
         target_note: item.note,
         target_movement_pattern: item.movement_pattern,
         target_mechanic: item.mechanic,
@@ -309,16 +323,23 @@ function isSetLogCompleted(log: Pick<WorkoutSetLog, 'reps' | 'weight_kg' | 'comp
 
 function computeRollupsFromSetLogs(
     logs: WorkoutSetLog[]
-): Pick<WorkoutSessionItem, 'actual_sets_completed' | 'actual_avg_reps_per_set'> {
+): Pick<WorkoutSessionItem, 'actual_sets_completed' | 'actual_avg_reps_per_set' | 'actual_duration_seconds'> {
     const completed = logs.filter(isSetLogCompleted);
     const repsValues = completed
         .map((log) => log.reps)
         .filter((reps): reps is number => reps != null && reps > 0);
+    const durationValues = completed
+        .map((log) => log.duration_seconds)
+        .filter((duration): duration is number => duration != null && duration > 0);
     return {
         actual_sets_completed: completed.length > 0 ? completed.length : null,
         actual_avg_reps_per_set:
             repsValues.length > 0
                 ? repsValues.reduce((sum, reps) => sum + reps, 0) / repsValues.length
+                : null,
+        actual_duration_seconds:
+            durationValues.length > 0
+                ? durationValues.reduce((sum, duration) => sum + duration, 0)
                 : null,
     };
 }
@@ -336,6 +357,7 @@ async function rollupSessionItemActualsFromSetLogs(
         .update({
             actual_sets_completed: rollups.actual_sets_completed,
             actual_avg_reps_per_set: rollups.actual_avg_reps_per_set,
+            actual_duration_seconds: rollups.actual_duration_seconds,
         })
         .eq('id', sessionItemId)
         .select('*')
@@ -1155,14 +1177,19 @@ export async function getPreviousLoggedPerformanceForExercises(
             plan_item_id: row.plan_item_id,
             position: row.position,
             exercise_slug: row.exercise_slug,
+            category: row.category,
             target_sets: row.target_sets,
             target_rep_range: row.target_rep_range,
             target_rest_seconds: row.target_rest_seconds,
+            target_duration_seconds: row.target_duration_seconds,
+            target_rounds: row.target_rounds,
+            cardio_type: row.cardio_type,
             target_note: row.target_note,
             target_movement_pattern: row.target_movement_pattern,
             target_mechanic: row.target_mechanic,
             actual_sets_completed: row.actual_sets_completed,
             actual_avg_reps_per_set: row.actual_avg_reps_per_set,
+            actual_duration_seconds: row.actual_duration_seconds,
             actual_notes: row.actual_notes,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -1370,7 +1397,7 @@ async function applyAdaptiveUpdateAfterCompletion(
         .filter((i) => sessionPlanItemIds.has(i.id))
         .reduce((m, i) => Math.max(m, i.day_index ?? 1), 1);
 
-    const targets = plan.items.filter((i) => (i.day_index ?? 1) > sessionDay && i.sets > 2);
+    const targets = plan.items.filter((i) => (i.day_index ?? 1) > sessionDay && (i.sets ?? 0) > 2);
     if (targets.length === 0) {
         return {
             applied: false,
@@ -1382,7 +1409,7 @@ async function applyAdaptiveUpdateAfterCompletion(
     for (const item of targets) {
         await client
             .from('fitness_workout_plan_items')
-            .update({ sets: Math.max(2, item.sets - 1) })
+            .update({ sets: Math.max(2, (item.sets ?? 3) - 1) })
             .eq('id', item.id);
     }
     await client
@@ -1450,6 +1477,244 @@ export async function getExecutionAdaptiveInsightsForUser(
         missedDaysThisWeek,
         recentAverageCompletionRate,
         suggestions,
+    };
+}
+
+// =============================================================================
+// Quick log (unified strength/cardio/stretch ad-hoc logging)
+// =============================================================================
+
+export type QuickLogEntry =
+    | {
+          category: 'strength';
+          exerciseSlug: string;
+          sets: Array<{ reps?: number | null; weight_kg?: number | null; rpe?: number | null }>;
+          notes?: string | null;
+      }
+    | {
+          category: 'cardio';
+          cardioType: string;
+          durationMinutes: number;
+          notes?: string | null;
+      }
+    | {
+          category: 'stretch';
+          exerciseSlug: string;
+          holdSeconds: number;
+          rounds: number;
+          notes?: string | null;
+      };
+
+function quickLogSessionName(entry: QuickLogEntry, exerciseName: string | null): string {
+    if (entry.category === 'cardio') {
+        return `Quick log: ${exerciseName ?? entry.cardioType}`;
+    }
+    return `Quick log: ${exerciseName ?? formatSlugAsTitle(entry.exerciseSlug)}`;
+}
+
+/**
+ * Creates a one-off, immediately-completed session for ad-hoc logging (strength, cardio,
+ * or stretch) so it counts toward streaks/progress like any plan-driven session.
+ * Replaces the old standalone `fitness_workouts` quick logger.
+ */
+export async function createQuickLogSession(
+    userId: string,
+    entry: QuickLogEntry,
+    supabase?: SupabaseClient
+): Promise<WorkoutSessionWithItems> {
+    const client = getClient(supabase);
+
+    let exercise: ExerciseWithRelations | null = null;
+    if (entry.category === 'cardio') {
+        exercise = await getExerciseBySlug(entry.cardioType, client);
+    } else {
+        exercise = await getExerciseBySlug(entry.exerciseSlug, client);
+        if (!exercise) {
+            throw new Error('Exercise not found.');
+        }
+    }
+
+    const sessionPayload: Omit<WorkoutSession, 'id' | 'started_at' | 'ended_at' | 'created_at' | 'updated_at'> = {
+        user_id: userId,
+        plan_id: null,
+        status: 'in_progress',
+        name: quickLogSessionName(entry, exercise?.name ?? null),
+        notes: null,
+    } as any;
+
+    const { data: sessionData, error: sessionError } = await client
+        .from('fitness_workout_sessions')
+        .insert(sessionPayload)
+        .select('*')
+        .single();
+    if (sessionError) {
+        console.error('createQuickLogSession (session insert):', sessionError);
+        throw sessionError;
+    }
+    const session = sessionData as WorkoutSession;
+
+    const itemPayload =
+        entry.category === 'strength'
+            ? {
+                  session_id: session.id,
+                  plan_item_id: null,
+                  position: 0,
+                  exercise_slug: entry.exerciseSlug,
+                  category: 'strength',
+                  target_sets: Math.max(1, entry.sets.length),
+                  target_rep_range: '—',
+                  target_rest_seconds: 60,
+                  target_note: entry.notes ?? null,
+                  target_movement_pattern: exercise?.movement_pattern ?? null,
+                  target_mechanic: exercise?.mechanic ?? null,
+              }
+            : entry.category === 'cardio'
+              ? {
+                    session_id: session.id,
+                    plan_item_id: null,
+                    position: 0,
+                    exercise_slug: exercise?.slug ?? entry.cardioType,
+                    category: 'cardio',
+                    target_duration_seconds: Math.max(1, Math.round(entry.durationMinutes * 60)),
+                    cardio_type: entry.cardioType,
+                    target_note: entry.notes ?? null,
+                }
+              : {
+                    session_id: session.id,
+                    plan_item_id: null,
+                    position: 0,
+                    exercise_slug: entry.exerciseSlug,
+                    category: 'stretch',
+                    target_duration_seconds: Math.max(1, Math.round(entry.holdSeconds)),
+                    target_rounds: Math.max(1, entry.rounds),
+                    target_note: entry.notes ?? null,
+                };
+
+    const { data: itemData, error: itemError } = await client
+        .from('fitness_workout_session_items')
+        .insert(itemPayload)
+        .select('*')
+        .single();
+    if (itemError) {
+        console.error('createQuickLogSession (item insert):', itemError);
+        throw itemError;
+    }
+    const item = itemData as WorkoutSessionItem;
+
+    if (entry.category === 'strength') {
+        let setNumber = 1;
+        for (const set of entry.sets.length > 0 ? entry.sets : [{}]) {
+            await upsertSetLog(
+                item.id,
+                setNumber,
+                {
+                    reps: set.reps ?? null,
+                    weight_kg: set.weight_kg ?? null,
+                    rpe: set.rpe ?? null,
+                    notes: entry.notes ?? null,
+                    completed_at: new Date().toISOString(),
+                },
+                client
+            );
+            setNumber += 1;
+        }
+    } else if (entry.category === 'cardio') {
+        await upsertSetLog(
+            item.id,
+            1,
+            {
+                duration_seconds: Math.max(1, Math.round(entry.durationMinutes * 60)),
+                notes: entry.notes ?? null,
+                completed_at: new Date().toISOString(),
+            },
+            client
+        );
+    } else {
+        for (let round = 1; round <= Math.max(1, entry.rounds); round++) {
+            await upsertSetLog(
+                item.id,
+                round,
+                {
+                    duration_seconds: Math.max(1, Math.round(entry.holdSeconds)),
+                    notes: entry.notes ?? null,
+                    completed_at: new Date().toISOString(),
+                },
+                client
+            );
+        }
+    }
+
+    await completeWorkoutSession(session.id, client);
+
+    const result = await getSessionWithItems(session.id, client);
+    if (!result) {
+        throw new Error('Quick log session was created but could not be reloaded.');
+    }
+    return result;
+}
+
+export type WeeklyCategoryBreakdown = {
+    strengthSetsThisWeek: number;
+    cardioMinutesThisWeek: number;
+    stretchSessionsThisWeek: number;
+};
+
+/**
+ * Aggregates completed-session activity from the last 7 days, broken down by exercise
+ * category, for the progress page's strength/cardio/stretch stat tiles.
+ */
+export async function getWeeklyCategoryBreakdownForUser(
+    userId: string,
+    supabase?: SupabaseClient
+): Promise<WeeklyCategoryBreakdown> {
+    const client = getClient(supabase);
+    const sessions = await listCompletedSessionsForUser(userId, client, 100);
+
+    const now = Date.now();
+    const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+    const recentSessionIds = sessions
+        .filter((s) => new Date(s.ended_at ?? s.started_at).getTime() >= weekAgo)
+        .map((s) => s.id);
+
+    if (recentSessionIds.length === 0) {
+        return { strengthSetsThisWeek: 0, cardioMinutesThisWeek: 0, stretchSessionsThisWeek: 0 };
+    }
+
+    const { data, error } = await client
+        .from('fitness_workout_session_items')
+        .select('session_id, category, actual_sets_completed, actual_duration_seconds')
+        .in('session_id', recentSessionIds);
+
+    if (error) {
+        console.error('getWeeklyCategoryBreakdownForUser:', error);
+        throw error;
+    }
+
+    const rows = (data ?? []) as {
+        session_id: string;
+        category: string;
+        actual_sets_completed: number | null;
+        actual_duration_seconds: number | null;
+    }[];
+
+    let strengthSetsThisWeek = 0;
+    let cardioSecondsThisWeek = 0;
+    const stretchSessionIds = new Set<string>();
+
+    for (const row of rows) {
+        if (row.category === 'strength') {
+            strengthSetsThisWeek += row.actual_sets_completed ?? 0;
+        } else if (row.category === 'cardio') {
+            cardioSecondsThisWeek += row.actual_duration_seconds ?? 0;
+        } else if (row.category === 'stretch' && row.actual_duration_seconds != null) {
+            stretchSessionIds.add(row.session_id);
+        }
+    }
+
+    return {
+        strengthSetsThisWeek,
+        cardioMinutesThisWeek: Math.round(cardioSecondsThisWeek / 60),
+        stretchSessionsThisWeek: stretchSessionIds.size,
     };
 }
 

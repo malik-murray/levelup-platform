@@ -290,8 +290,8 @@ export function FinanceDashboardShell({
                         {dateRangeLabel}
                     </div>
                     <div
-                        className="flex h-10 w-10 items-center justify-center rounded-full border text-sm font-semibold text-violet-200"
-                        style={{ borderColor: '#6d28d9', backgroundColor: '#4c1d95' }}
+                        className="flex h-10 w-10 items-center justify-center rounded-full border text-sm font-semibold text-[#ffe066]"
+                        style={{ borderColor: '#ff9d00', backgroundColor: 'rgba(255,157,0,0.15)' }}
                         aria-hidden
                     >
                         LU
@@ -779,9 +779,9 @@ export function FinanceDashboardShell({
 
             <div
                 className="flex flex-col gap-3 rounded-xl px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6"
-                style={{ background: 'linear-gradient(90deg, #5b21b6 0%, #6d28d9 50%, #7c3aed 100%)' }}
+                style={{ background: 'linear-gradient(90deg, #7a4a00 0%, #b46e00 50%, #ff9d00 100%)' }}
             >
-                <p className="flex items-start gap-2 text-sm text-violet-100">
+                <p className="flex items-start gap-2 text-sm text-amber-50">
                     <span className="mt-0.5 text-lg" aria-hidden>
                         💡
                     </span>
@@ -790,7 +790,7 @@ export function FinanceDashboardShell({
                         self.
                     </span>
                 </p>
-                <p className="text-right text-sm font-medium italic text-violet-200 sm:max-w-xs">
+                <p className="text-right text-sm font-medium italic text-amber-100 sm:max-w-xs">
                     Financial discipline today = Freedom tomorrow.
                 </p>
             </div>

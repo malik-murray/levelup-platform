@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
 import { usePreview } from '@/lib/previewStore';
 import {
@@ -19,9 +19,11 @@ import { HabitFormScreen } from '../components/grit/HabitFormScreen';
 
 export default function NewHabitClient() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const preview = usePreview();
-  const isPreview = preview.isPreview;
+  const isGuestRoute = pathname?.startsWith('/guest') === true;
+  const isPreview = preview.isPreview || isGuestRoute;
 
   const [draft, setDraft] = useState<GritHabitFormDraft>(DEFAULT_HABIT_FORM);
   const [saving, setSaving] = useState(false);
@@ -74,7 +76,7 @@ export default function NewHabitClient() {
         }));
         setStoredDraft(null);
         clearReturnPath();
-        router.push(getReturnPath() || '/habit/today');
+        router.push(getReturnPath() || '/habit');
         return;
       }
 
@@ -104,7 +106,7 @@ export default function NewHabitClient() {
         await syncHabitCategories(supabase, user.id, data.id, categories);
         setStoredDraft(null);
         clearReturnPath();
-        router.push(getReturnPath() || '/habit/today');
+        router.push(getReturnPath() || '/habit');
       }
     } catch (e) {
       console.error(e);
@@ -116,7 +118,7 @@ export default function NewHabitClient() {
   const handleCancel = () => {
     setStoredDraft(null);
     clearReturnPath();
-    router.push(getReturnPath() || '/habit/today');
+    router.push(getReturnPath() || '/habit');
   };
 
   return (

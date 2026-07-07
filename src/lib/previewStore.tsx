@@ -295,12 +295,16 @@ function getSnapshot(): PreviewData {
   cached = loadFromStorage();
   return cached;
 }
+let cachedServerSnapshot: PreviewData | null = null;
 function getServerSnapshot(): PreviewData {
-  return {
-    habit: defaultHabitData(),
-    finance: defaultFinanceData(),
-    fitness: defaultFitnessData(),
-  };
+  if (!cachedServerSnapshot) {
+    cachedServerSnapshot = {
+      habit: defaultHabitData(),
+      finance: defaultFinanceData(),
+      fitness: defaultFitnessData(),
+    };
+  }
+  return cachedServerSnapshot;
 }
 
 export function getPreviewData(): PreviewData {

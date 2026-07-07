@@ -4,6 +4,7 @@ import type { LinkedItem } from '@/lib/goals/types';
 import { LINKED_ITEM_TYPE_LABELS } from '@/lib/goals/loadLinkedItems';
 import { linkedItemsSummary } from '@/lib/goals/milestoneProgress';
 import { neon } from '@/app/dashboard/neonTheme';
+import CollapsibleSection from '@/components/ui/CollapsibleSection';
 
 type Props = {
   items: LinkedItem[];
@@ -11,8 +12,7 @@ type Props = {
   onToggle: () => void;
 };
 
-const toggleBtnClass =
-  'flex w-full items-center justify-between rounded-lg border border-[#ff9d00]/25 bg-black/20 px-3 py-2 text-left text-sm transition hover:border-[#ff9d00]/45';
+const toggleBtnClass = `${neon.section} flex w-full items-center justify-between px-3 py-2 text-left text-sm transition hover:border-[#ff9d00]/45`;
 
 export default function LinkedItemsPanel({ items, expanded, onToggle }: Props) {
   const summary = linkedItemsSummary(items);
@@ -42,8 +42,8 @@ export default function LinkedItemsPanel({ items, expanded, onToggle }: Props) {
         </span>
       </button>
 
-      {expanded ? (
-        summary.total === 0 ? (
+      <CollapsibleSection open={expanded}>
+        {summary.total === 0 ? (
           <p className="mt-2 px-1 text-xs text-slate-500">
             Link habits, to-dos, priorities, or weekly plan items to track progress here.
           </p>
@@ -73,8 +73,8 @@ export default function LinkedItemsPanel({ items, expanded, onToggle }: Props) {
               </li>
             ))}
           </ul>
-        )
-      ) : null}
+        )}
+      </CollapsibleSection>
     </div>
   );
 }

@@ -377,6 +377,12 @@ export default function LandingPage() {
 
           <div className="mt-12 flex w-full max-w-md flex-col gap-4 sm:flex-row sm:justify-center sm:gap-6">
             <Link
+              href="/guest/dashboard"
+              className={`no-touch-target inline-flex min-h-[52px] flex-1 items-center justify-center rounded-xl border-2 border-[#ffb020]/60 bg-black/25 px-6 py-3 text-center text-sm font-bold uppercase tracking-[0.15em] text-[#ffc84a] backdrop-blur-[2px] transition hover:bg-[#ffb020]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#ffb020] sm:min-w-[160px] sm:flex-none`}
+            >
+              Continue as guest
+            </Link>
+            <Link
               href="/login"
               className={`no-touch-target inline-flex min-h-[52px] flex-1 items-center justify-center rounded-xl border-2 border-[#ffb020] bg-black/35 px-6 py-3 text-center text-sm font-bold uppercase tracking-[0.2em] text-white backdrop-blur-[2px] transition hover:bg-[#ffb020]/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#ffb020] sm:min-w-[160px] sm:flex-none ${reducedMotion ? '' : 'landing-btn-glow-pulse'}`}
               style={

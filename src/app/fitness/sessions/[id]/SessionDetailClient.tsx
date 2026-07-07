@@ -312,8 +312,8 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                     const firstName = formatSlugAsTitle(first.exercise_slug);
                     void fetchCoachCue('session_start', {
                         exerciseName: firstName,
-                        targetSets: first.target_sets,
-                        targetRepRange: first.target_rep_range,
+                        targetSets: first.target_sets ?? undefined,
+                        targetRepRange: first.target_rep_range ?? undefined,
                     });
                 }
             } catch (e) {
@@ -610,8 +610,8 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                     onClick={() =>
                         fetchCoachCue('exercise_start', {
                             exerciseName: leadExerciseName,
-                            targetSets: leadItem?.target_sets,
-                            targetRepRange: leadItem?.target_rep_range,
+                            targetSets: leadItem?.target_sets ?? undefined,
+                            targetRepRange: leadItem?.target_rep_range ?? undefined,
                         })
                     }
                     className="rounded-md border border-amber-500/50 px-3 py-1 text-xs font-medium text-amber-300 hover:bg-amber-950/30 disabled:opacity-60"
@@ -721,16 +721,44 @@ export default function SessionDetailClient({ id }: SessionDetailClientProps) {
                                                 {exerciseNames[item.exercise_slug] ?? formatSlugAsTitle(item.exercise_slug)}
                                             </Link>
                                             <div className="flex flex-wrap gap-2 text-[11px] text-slate-600 dark:text-slate-300">
-                                                <span>
-                                                    <span className="font-semibold">Sets:</span> {item.target_sets}
-                                                </span>
-                                                <span>
-                                                    <span className="font-semibold">Reps:</span> {item.target_rep_range}
-                                                </span>
-                                                <span>
-                                                    <span className="font-semibold">Rest:</span> {item.target_rest_seconds} sec
-                                                </span>
-                                                {canEdit && (
+                                                {item.category === 'cardio' ? (
+                                                    <>
+                                                        <span>
+                                                            <span className="font-semibold">Type:</span>{' '}
+                                                            {item.cardio_type ??
+                                                                exerciseNames[item.exercise_slug] ??
+                                                                formatSlugAsTitle(item.exercise_slug)}
+                                                        </span>
+                                                        <span>
+                                                            <span className="font-semibold">Target duration:</span>{' '}
+                                                            {Math.round((item.target_duration_seconds ?? 0) / 60)} min
+                                                        </span>
+                                                    </>
+                                                ) : item.category === 'stretch' ? (
+                                                    <>
+                                                        <span>
+                                                            <span className="font-semibold">Hold:</span>{' '}
+                                                            {item.target_duration_seconds ?? 30} sec
+                                                        </span>
+                                                        <span>
+                                                            <span className="font-semibold">Rounds:</span>{' '}
+                                                            {item.target_rounds ?? 2}
+                                                        </span>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <span>
+                                                            <span className="font-semibold">Sets:</span> {item.target_sets}
+                                                        </span>
+                                                        <span>
+                                                            <span className="font-semibold">Reps:</span> {item.target_rep_range}
+                                                        </span>
+                                                        <span>
+                                                            <span className="font-semibold">Rest:</span> {item.target_rest_seconds} sec
+                                                        </span>
+                                                    </>
+                                                )}
+                                                {canEdit && item.category === 'strength' && (
                                                     <button
                                                         type="button"
                                                         onClick={() =>

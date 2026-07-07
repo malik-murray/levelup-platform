@@ -10,6 +10,7 @@ import {
 } from '@/lib/goals/milestoneProgress';
 import LinkedItemsPanel from './LinkedItemsPanel';
 import { neon } from '@/app/dashboard/neonTheme';
+import CollapsibleSection from '@/components/ui/CollapsibleSection';
 
 type Props = {
   goal: GoalWithMilestones;
@@ -134,7 +135,7 @@ export default function GoalCard({
           type="button"
           onClick={() => setMilestonesExpanded((v) => !v)}
           aria-expanded={milestonesExpanded}
-          className="flex w-full items-center justify-between rounded-lg border border-[#ff9d00]/25 bg-black/20 px-3 py-2 text-left text-sm transition hover:border-[#ff9d00]/45"
+          className={`${neon.section} flex w-full items-center justify-between px-3 py-2 text-left text-sm transition hover:border-[#ff9d00]/45`}
         >
           <span className="text-slate-300">
             <span className="font-medium text-slate-200">Milestones</span>
@@ -153,8 +154,8 @@ export default function GoalCard({
           </span>
         </button>
 
-        {milestonesExpanded ? (
-          activeMilestones.length === 0 ? (
+        <CollapsibleSection open={milestonesExpanded}>
+          {activeMilestones.length === 0 ? (
             <p className="mt-2 px-1 text-xs text-slate-500">
               Add milestones to break this goal into checkpoints.
             </p>
@@ -215,8 +216,8 @@ export default function GoalCard({
                 );
               })}
             </ul>
-          )
-        ) : null}
+          )}
+        </CollapsibleSection>
       </div>
 
       <LinkedItemsPanel
@@ -226,18 +227,10 @@ export default function GoalCard({
       />
 
       <div className="flex flex-wrap gap-2 border-t border-[#ff9d00]/15 pt-3">
-        <button
-          type="button"
-          onClick={onAddMilestone}
-          className="rounded-lg border border-[#ff9d00]/35 px-3 py-1.5 text-xs font-semibold text-[#ffe066] hover:bg-[#ff9d00]/10"
-        >
+        <button type="button" onClick={onAddMilestone} className={neon.buttonOutline}>
           + Milestone
         </button>
-        <button
-          type="button"
-          onClick={onEdit}
-          className="rounded-lg border border-[#ff9d00]/25 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:border-[#ff9d00]/45"
-        >
+        <button type="button" onClick={onEdit} className={neon.buttonGhost}>
           Edit
         </button>
         {!goal.is_completed ? (

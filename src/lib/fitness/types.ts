@@ -27,6 +27,9 @@ export type ExerciseMechanic = 'compound' | 'isolation' | 'other';
 
 export type MuscleGroupRegion = 'upper' | 'lower' | 'core' | 'full' | 'other';
 
+/** Broad exercise type: strength (resistance training), cardio, or stretch (mobility/yoga). */
+export type ExerciseCategory = 'strength' | 'cardio' | 'stretch';
+
 // =============================================================================
 // Domain entities (match DB tables)
 // =============================================================================
@@ -57,6 +60,7 @@ export interface Exercise {
     movement_pattern: ExerciseMovementPattern | null;
     force_type: ExerciseForceType | null;
     mechanic: ExerciseMechanic | null;
+    category: ExerciseCategory;
     short_description: string | null;
     instructions: string[];
     tips: string[];
@@ -94,6 +98,7 @@ export interface ExerciseFilters {
     movement_pattern?: ExerciseMovementPattern | ExerciseMovementPattern[];
     force_type?: ExerciseForceType | ExerciseForceType[];
     mechanic?: ExerciseMechanic | ExerciseMechanic[];
+    category?: ExerciseCategory | ExerciseCategory[];
     /** Text search on name, short_description (implementation-dependent) */
     search?: string;
     /** Pagination / list limits */

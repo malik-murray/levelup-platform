@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 export default function PreviewEntryPage() {
   const router = useRouter();
   useEffect(() => {
-    router.replace('/preview/dashboard');
+    router.replace('/guest/dashboard');
   }, [router]);
   return (
     <div className="flex min-h-screen items-center justify-center">

@@ -1,7 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
+import { usePreview } from '@/lib/previewStore';
+import { getPreviewDailyNotes, savePreviewDailyNoteField } from '@/lib/preview/habitDashboardPreview';
 import { formatDate } from '@/lib/habitHelpers';
 import { stripNoteImages } from '@/lib/dailyNoteImages';
 import DailyNoteField from '@/components/DailyNoteField';
@@ -42,12 +45,24 @@ export default function DashboardNotesSection({
     });
     const [loading, setLoading] = useState(true);
     const dateStr = formatDate(selectedDate);
+    const pathname = usePathname();
+    const preview = usePreview();
+    const isPreview =
+        preview.isPreview ||
+        pathname?.startsWith('/guest') === true ||
+        pathname?.startsWith('/preview') === true;
 
     useEffect(() => {
+        if (isPreview) {
+            const notes = getPreviewDailyNotes(preview, dateStr);
+            setContent(notes);
+            setLoading(false);
+            return;
+        }
         if (userId) {
             loadContent();
         }
-    }, [selectedDate, userId]);
+    }, [selectedDate, userId, isPreview, dateStr, preview.habit.dailyContent]);
 
     const loadContent = async () => {
         if (!userId) return;
@@ -75,8 +90,15 @@ export default function DashboardNotesSection({
     };
 
     const saveField = async (field: keyof DailyNotesContent, value: string | null) => {
-        if (!userId) return;
         const updated = { ...content, [field]: value ?? null };
+        setContent(updated);
+
+        if (isPreview) {
+            savePreviewDailyNoteField(preview, dateStr, field, value);
+            return;
+        }
+
+        if (!userId) return;
         try {
             const { data: existing } = await supabase
                 .from('habit_daily_content')
@@ -134,7 +156,7 @@ export default function DashboardNotesSection({
         return `${stripped.split(/\s+/).filter(Boolean).length} words${wordSuffix}`;
     };
 
-    if (!userId) return null;
+    if (!isPreview && !userId) return null;
 
     return (
         <div className={`${neon.widget} min-w-0 overflow-hidden p-0`}>
@@ -194,19 +216,34 @@ export default function DashboardNotesSection({
                                             </svg>
                                         </span>
                                     </button>
-                                    {isExpanded && userId ? (
+                                    {isExpanded ? (
                                         <div className="px-4 pb-3 pt-1">
-                                            <DailyNoteField
-                                                sectionKey={section.key}
-                                                value={value}
-                                                placeholder={section.placeholder}
-                                                userId={userId}
-                                                dateStr={dateStr}
-                                                onChange={(nextValue) =>
-                                                    setContent((prev) => ({ ...prev, [section.key]: nextValue }))
-                                                }
-                                                onSave={(nextValue) => void saveField(section.key, nextValue)}
-                                            />
+                                            {isPreview ? (
+                                                <textarea
+                                                    className="min-h-[6rem] w-full resize-y rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
+                                                    value={value}
+                                                    placeholder={section.placeholder}
+                                                    onChange={(e) =>
+                                                        setContent((prev) => ({
+                                                            ...prev,
+                                                            [section.key]: e.target.value,
+                                                        }))
+                                                    }
+                                                    onBlur={(e) => void saveField(section.key, e.target.value || null)}
+                                                />
+                                            ) : userId ? (
+                                                <DailyNoteField
+                                                    sectionKey={section.key}
+                                                    value={value}
+                                                    placeholder={section.placeholder}
+                                                    userId={userId}
+                                                    dateStr={dateStr}
+                                                    onChange={(nextValue) =>
+                                                        setContent((prev) => ({ ...prev, [section.key]: nextValue }))
+                                                    }
+                                                    onSave={(nextValue) => void saveField(section.key, nextValue)}
+                                                />
+                                            ) : null}
                                         </div>
                                     ) : null}
                                 </div>

@@ -2,7 +2,21 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
+import { usePreview } from '@/lib/previewStore';
+import {
+    deletePreviewPriority,
+    deletePreviewTodo,
+    ensureGuestSampleHabits,
+    getPreviewHabitDataForDate,
+    savePreviewDailyScore,
+    togglePreviewPriorityComplete,
+    togglePreviewTodoDone,
+    upsertPreviewHabitEntry,
+    upsertPreviewPriority,
+    upsertPreviewTodo,
+} from '@/lib/preview/habitDashboardPreview';
 import { formatDate, type Category, type TimeOfDay, type HabitStatus } from '@/lib/habitHelpers';
 import { computeDailyScoreSnapshot } from '@/lib/habit/computeDailyScores';
 import { enrichHabitTemplates } from '@/lib/habit/habitTemplateLinks';
@@ -134,9 +148,75 @@ export default function HabitDailyEntrySection({
         bad: true,
     });
     const [eventDisplayMap, setEventDisplayMap] = useState<Record<string, { start_time: string | null; end_time: string | null; title: string }>>({});
-    const goals = useGoalsForPicker(userId);
+    const pathname = usePathname();
+    const preview = usePreview();
+    const isPreview =
+        preview.isPreview ||
+        pathname?.startsWith('/guest') === true ||
+        pathname?.startsWith('/preview') === true;
+    const goals = useGoalsForPicker(isPreview ? null : userId);
+
+    const loadPreviewData = () => {
+        ensureGuestSampleHabits(preview);
+        const dateStr = formatDate(selectedDate);
+        const { templates, entries, priorities, todos, score } = getPreviewHabitDataForDate(preview, dateStr);
+        setHabitTemplates(
+            templates.map((t) => ({
+                id: t.id,
+                name: t.name,
+                icon: t.icon,
+                category: t.category,
+                categories: t.categories ?? [t.category],
+                time_of_day: t.time_of_day,
+                is_active: t.is_active,
+                sort_order: t.sort_order,
+                is_bad_habit: t.is_bad_habit,
+            }))
+        );
+        setHabitEntries(entries);
+        setPriorities(
+            priorities.map((p) => ({
+                id: p.id,
+                text: p.text,
+                category: p.category,
+                completed: p.completed,
+                date: p.date ?? dateStr,
+                completed_at: p.completed_at,
+                sort_order: p.sort_order ?? null,
+                goal_id: p.goal_id,
+            }))
+        );
+        setTodos(
+            todos.map((t) => ({
+                id: t.id,
+                title: t.title,
+                category: t.category,
+                is_done: t.is_done,
+                date: t.date ?? dateStr,
+                completed_at: t.completed_at,
+                goal_id: t.goal_id,
+            }))
+        );
+        setDailyScore(
+            score
+                ? {
+                      score_overall: score.score_overall,
+                      grade: score.grade,
+                      score_habits: score.score_habits,
+                      score_priorities: score.score_priorities,
+                      score_todos: score.score_todos,
+                  }
+                : null
+        );
+        setEventDisplayMap({});
+        setLoading(false);
+    };
 
     useEffect(() => {
+        if (isPreview) {
+            loadPreviewData();
+            return;
+        }
         if (userId) {
             loadData();
             const cleanup = setupRealtime();
@@ -144,7 +224,7 @@ export default function HabitDailyEntrySection({
                 if (cleanup) cleanup();
             };
         }
-    }, [selectedDate, userId]);
+    }, [selectedDate, userId, isPreview, preview.habit]);
 
     const sortedPrioritiesForSlots = useMemo(
         () =>
@@ -407,13 +487,19 @@ export default function HabitDailyEntrySection({
     };
 
     const handleHabitToggle = async (templateId: string) => {
-        if (!userId) return;
-
         const dateStr = formatDate(selectedDate);
         const existingEntry = habitEntries.find(e => e.habit_template_id === templateId);
         const currentStatus = existingEntry?.status || 'missed';
         const nextStatus: HabitStatus = currentStatus === 'missed' ? 'checked' : 'missed';
         const checkedAt = nextStatus === 'checked' ? new Date().toISOString() : null;
+
+        if (isPreview) {
+            upsertPreviewHabitEntry(preview, dateStr, templateId, nextStatus, checkedAt);
+            loadPreviewData();
+            return;
+        }
+
+        if (!userId) return;
 
         try {
             if (existingEntry) {
@@ -473,9 +559,20 @@ export default function HabitDailyEntrySection({
     };
 
     const handlePrioritySlotBlur = async (slotIndex: number, value: string) => {
-        if (!userId) return;
         const dateStr = formatDate(selectedDate);
         const priority = sortedPrioritiesForSlots[slotIndex];
+
+        if (isPreview) {
+            if (value.trim()) {
+                upsertPreviewPriority(preview, dateStr, slotIndex, value.trim(), priority);
+            } else if (priority) {
+                deletePreviewPriority(preview, priority.id);
+            }
+            loadPreviewData();
+            return;
+        }
+
+        if (!userId) return;
         try {
             if (value.trim()) {
                 if (priority) {
@@ -517,6 +614,12 @@ export default function HabitDailyEntrySection({
     };
 
     const handleDeletePriority = async (priority: Priority) => {
+        if (isPreview) {
+            deletePreviewPriority(preview, priority.id);
+            loadPreviewData();
+            return;
+        }
+
         if (!userId) return;
 
         const previousPriorities = priorities;
@@ -536,6 +639,12 @@ export default function HabitDailyEntrySection({
     };
 
     const handleDeleteTodo = async (todo: Todo) => {
+        if (isPreview) {
+            deletePreviewTodo(preview, todo.id);
+            loadPreviewData();
+            return;
+        }
+
         if (!userId) return;
 
         const previousTodos = todos;
@@ -621,17 +730,30 @@ export default function HabitDailyEntrySection({
     };
 
     const handleTodoSlotBlur = async (slotIndex: number, value: string) => {
-        if (!userId) return;
         const dateStr = formatDate(selectedDate);
         const todo = todos[slotIndex];
         const match = value.trim().match(/^\((\d{1,2}(?::\d{2})?\s*[ap]m)(?:\s*-\s*(\d{1,2}(?::\d{2})?\s*[ap]m))?\)\s*(.*)$/i);
         let title = value.trim();
+        if (match) {
+            title = match[3].trim();
+        }
+
+        if (isPreview) {
+            if (title) {
+                upsertPreviewTodo(preview, dateStr, title, todo);
+            } else if (todo) {
+                deletePreviewTodo(preview, todo.id);
+            }
+            loadPreviewData();
+            return;
+        }
+
+        if (!userId) return;
         let start_time: string | null = null;
         let end_time: string | null = null;
         if (match) {
             start_time = parseTimeToDb(match[1]);
             if (match[2]) end_time = parseTimeToDb(match[2]);
-            title = match[3].trim();
         }
         try {
             if (title) {
@@ -665,6 +787,12 @@ export default function HabitDailyEntrySection({
     };
 
     const handleTogglePriority = async (id: string, completed: boolean) => {
+        if (isPreview) {
+            togglePreviewPriorityComplete(preview, id, !completed);
+            loadPreviewData();
+            return;
+        }
+
         if (!userId) return;
 
         const completedAt = !completed ? new Date().toISOString() : null;
@@ -730,6 +858,12 @@ export default function HabitDailyEntrySection({
     };
 
     const handleToggleTodo = async (id: string, isDone: boolean) => {
+        if (isPreview) {
+            togglePreviewTodoDone(preview, id, !isDone);
+            loadPreviewData();
+            return;
+        }
+
         if (!userId) return;
 
         const completedAt = !isDone ? new Date().toISOString() : null;
@@ -828,7 +962,7 @@ export default function HabitDailyEntrySection({
             score_evening: snapshot.scoreEvening,
             grade: snapshot.gradeOverall,
         });
-        if (userId && timeframe === 'daily') {
+        if (userId && timeframe === 'daily' && !isPreview) {
             const dateStr = formatDate(selectedDate);
             supabase
                 .from('habit_daily_scores')
@@ -848,8 +982,21 @@ export default function HabitDailyEntrySection({
                     score_evening: snapshot.scoreEvening,
                 }, { onConflict: 'user_id,date' })
                 .then(() => {});
+        } else if (isPreview && timeframe === 'daily') {
+            const dateStr = formatDate(selectedDate);
+            const existing = preview.habit.dailyScores[dateStr];
+            const unchanged =
+                existing &&
+                existing.score_overall === snapshot.scoreOverall &&
+                existing.grade === snapshot.gradeOverall &&
+                existing.score_habits === snapshot.scoreHabits &&
+                existing.score_priorities === snapshot.scorePriorities &&
+                existing.score_todos === snapshot.scoreTodos;
+            if (!unchanged) {
+                savePreviewDailyScore(preview, dateStr, snapshot);
+            }
         }
-    }, [timeframe, onScoresChange, habitTemplates, habitEntries, priorities, todos, userId, selectedDate]);
+    }, [timeframe, onScoresChange, habitTemplates, habitEntries, priorities, todos, userId, selectedDate, isPreview, preview]);
 
     const categoryColors = {
         physical: 'bg-blue-500/30 text-blue-300 border-blue-500/50',
@@ -933,7 +1080,7 @@ export default function HabitDailyEntrySection({
                         return (
                             <li
                                 key={priority?.id ?? `priority-slot-${slotIndex}`}
-                                className="grid min-w-0 grid-cols-[auto_1fr] grid-rows-[auto_auto] gap-x-2 gap-y-1 sm:grid-cols-[auto_1fr_auto] sm:grid-rows-1"
+                                className="grid min-w-0 grid-cols-[auto_1fr] grid-rows-[auto_auto] gap-x-2 gap-y-1.5"
                             >
                                 {priority ? (
                                     <input
@@ -946,22 +1093,22 @@ export default function HabitDailyEntrySection({
                                     <span className="col-start-1 row-start-1 mt-2.5 w-5 shrink-0" aria-hidden />
                                 )}
                                 <textarea
-                                        value={draftPriorities[slotIndex] ?? ''}
-                                        onChange={(e) =>
-                                            setDraftPriorities((prev) => {
-                                                const next = [...prev];
-                                                next[slotIndex] = e.target.value;
-                                                return next;
-                                            })
-                                        }
-                                        onBlur={(e) => handlePrioritySlotBlur(slotIndex, e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
-                                        placeholder={isAddRow ? 'Add priority' : `Priority ${slotIndex + 1}`}
-                                        rows={2}
-                                        className={`col-start-2 row-start-1 min-h-[2.5rem] min-w-0 w-full resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${priority?.completed ? 'text-slate-500 line-through' : ''}`}
-                                    />
+                                    value={draftPriorities[slotIndex] ?? ''}
+                                    onChange={(e) =>
+                                        setDraftPriorities((prev) => {
+                                            const next = [...prev];
+                                            next[slotIndex] = e.target.value;
+                                            return next;
+                                        })
+                                    }
+                                    onBlur={(e) => handlePrioritySlotBlur(slotIndex, e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
+                                    placeholder={isAddRow ? 'Add priority' : `Priority ${slotIndex + 1}`}
+                                    rows={2}
+                                    className={`col-start-2 row-start-1 min-h-[2.5rem] min-w-0 w-full resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${priority?.completed ? 'text-slate-500 line-through' : ''}`}
+                                />
                                 {priority ? (
-                                    <div className="col-start-2 row-start-2 flex justify-end gap-1 sm:col-start-3 sm:row-start-1 sm:mt-2.5">
+                                    <div className="col-start-2 row-start-2 flex justify-end gap-1.5">
                                         <GoalLinkButton
                                             compact
                                             goals={goals}
@@ -1014,7 +1161,7 @@ export default function HabitDailyEntrySection({
                         return (
                             <li
                                 key={todo?.id ?? `todo-slot-${slotIndex}`}
-                                className="grid min-w-0 grid-cols-[auto_1fr] grid-rows-[auto_auto] gap-x-2 gap-y-1 sm:grid-cols-[auto_1fr_auto] sm:grid-rows-1"
+                                className="grid min-w-0 grid-cols-[auto_1fr] grid-rows-[auto_auto] gap-x-2 gap-y-1.5"
                             >
                                 {todo ? (
                                     <input
@@ -1027,22 +1174,22 @@ export default function HabitDailyEntrySection({
                                     <span className="col-start-1 row-start-1 mt-2.5 w-5 shrink-0" aria-hidden />
                                 )}
                                 <textarea
-                                        value={draftTodos[slotIndex] ?? ''}
-                                        onChange={(e) =>
-                                            setDraftTodos((prev) => {
-                                                const next = [...prev];
-                                                next[slotIndex] = e.target.value;
-                                                return next;
-                                            })
-                                        }
-                                        onBlur={(e) => handleTodoSlotBlur(slotIndex, e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
-                                        placeholder={isAddRow ? 'Add to-do' : `To-do ${slotIndex + 1}`}
-                                        rows={2}
-                                        className={`col-start-2 row-start-1 min-h-[2.5rem] min-w-0 w-full resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${todo?.is_done ? 'text-slate-500 line-through' : ''}`}
-                                    />
+                                    value={draftTodos[slotIndex] ?? ''}
+                                    onChange={(e) =>
+                                        setDraftTodos((prev) => {
+                                            const next = [...prev];
+                                            next[slotIndex] = e.target.value;
+                                            return next;
+                                        })
+                                    }
+                                    onBlur={(e) => handleTodoSlotBlur(slotIndex, e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
+                                    placeholder={isAddRow ? 'Add to-do' : `To-do ${slotIndex + 1}`}
+                                    rows={2}
+                                    className={`col-start-2 row-start-1 min-h-[2.5rem] min-w-0 w-full resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${todo?.is_done ? 'text-slate-500 line-through' : ''}`}
+                                />
                                 {todo ? (
-                                    <div className="col-start-2 row-start-2 flex justify-end gap-1 sm:col-start-3 sm:row-start-1 sm:mt-2.5">
+                                    <div className="col-start-2 row-start-2 flex justify-end gap-1.5">
                                         <GoalLinkButton
                                             compact
                                             goals={goals}
@@ -1072,7 +1219,7 @@ export default function HabitDailyEntrySection({
                         <h3 className="min-w-0 text-base font-bold text-[#93c5fd]">Habits Checklist</h3>
                         {habitsOpen ? (
                             <Link
-                                href="/habit/today"
+                                href="/habit"
                                 className="shrink-0 rounded-lg border border-[#ff9d00]/35 bg-[#060a14]/90 px-3 py-1 text-xs font-medium text-slate-200 transition-colors hover:border-[#ff9d00]/55 hover:text-white sm:py-1.5 sm:text-sm"
                             >
                                 Edit habits

@@ -761,10 +761,10 @@ export default function PlanDetailClient({ id }: PlanDetailClientProps) {
                                         const shouldDeload =
                                             missedDays >= 2 ||
                                             (!!ex?.primary_muscle_group?.slug && soreSet.has(ex.primary_muscle_group.slug));
-                                        if (shouldDeload && item.sets > 2) {
+                                        if (shouldDeload && (item.sets ?? 0) > 2) {
                                             const updated = await updateWorkoutPlanItem(
                                                 item.id,
-                                                { sets: Math.max(2, item.sets - 1) },
+                                                { sets: Math.max(2, (item.sets ?? 3) - 1) },
                                                 supabase
                                             );
                                             setPlan((p) => ({ ...p!, items: p!.items.map((i) => (i.id === item.id ? updated : i)) }));
@@ -854,9 +854,9 @@ export default function PlanDetailClient({ id }: PlanDetailClientProps) {
                                     onEdit={() => {
                                         setEditingItemId(item.id);
                                         setEditItemValues({
-                                            sets: String(item.sets),
-                                            rep_range: item.rep_range,
-                                            rest_seconds: String(item.rest_seconds),
+                                            sets: String(item.sets ?? 3),
+                                            rep_range: item.rep_range ?? '',
+                                            rest_seconds: String(item.rest_seconds ?? 60),
                                             note: item.note ?? '',
                                         });
                                         setItemSaveError(null);

@@ -13,7 +13,7 @@ import {
     unsaveExercise,
 } from '@/lib/fitness/exercises';
 import type { ExerciseWithRelations, MuscleGroup, Equipment } from '@/lib/fitness/types';
-import type { ExerciseDifficulty } from '@/lib/fitness/types';
+import type { ExerciseCategory, ExerciseDifficulty } from '@/lib/fitness/types';
 import { BodyMap } from './components/BodyMap';
 import {
     loadRecentMuscles,
@@ -30,6 +30,13 @@ const DIFFICULTY_OPTIONS: { value: '' | ExerciseDifficulty; label: string }[] = 
     { value: 'all_levels', label: 'All levels' },
 ];
 
+const CATEGORY_OPTIONS: { value: '' | ExerciseCategory; label: string }[] = [
+    { value: '', label: 'All' },
+    { value: 'strength', label: 'Strength' },
+    { value: 'cardio', label: 'Cardio' },
+    { value: 'stretch', label: 'Stretch' },
+];
+
 function formatLabel(value: string | null | undefined): string {
     if (value == null || value === '') return '—';
     return value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -40,8 +47,9 @@ const hasActiveFilters = (
     equipmentSlug: string,
     difficulty: string,
     search: string,
-    tag: string
-) => Boolean(muscleSlug || equipmentSlug || difficulty || search.trim() || tag);
+    tag: string,
+    category: string
+) => Boolean(muscleSlug || equipmentSlug || difficulty || search.trim() || tag || category);
 
 export default function ExercisesClient() {
     const router = useRouter();
@@ -61,6 +69,7 @@ export default function ExercisesClient() {
     const [difficulty, setDifficulty] = useState<'' | ExerciseDifficulty>('');
     const [search, setSearch] = useState('');
     const [tag, setTag] = useState('');
+    const [category, setCategory] = useState<'' | ExerciseCategory>('');
 
     const [recentMuscles, setRecentMuscles] = useState<string[]>([]);
     // Prevent URL-sync effect from firing while we are hydrating initial state from URL
@@ -75,12 +84,14 @@ export default function ExercisesClient() {
         const urlDifficulty = (searchParams.get('difficulty') || '') as '' | ExerciseDifficulty;
         const urlSearch = searchParams.get('search') || '';
         const urlTag = searchParams.get('tag') || '';
+        const urlCategory = (searchParams.get('category') || '') as '' | ExerciseCategory;
 
         if (urlMuscle) setMuscleSlug(urlMuscle);
         if (urlEquipment) setEquipmentSlug(urlEquipment);
         if (urlDifficulty) setDifficulty(urlDifficulty);
         if (urlSearch) setSearch(urlSearch);
         if (urlTag) setTag(urlTag);
+        if (urlCategory) setCategory(urlCategory);
 
         setHydratedFromUrl(true);
         setRecentMuscles(loadRecentMuscles());
@@ -127,6 +138,7 @@ export default function ExercisesClient() {
                     equipmentSlug: equipmentSlug || undefined,
                     difficulty: difficulty || undefined,
                     tag: tag || undefined,
+                    category: category || undefined,
                     search: search.trim() || undefined,
                     publishedOnly: true,
                 },
@@ -140,7 +152,7 @@ export default function ExercisesClient() {
         } finally {
             setLoading(false);
         }
-    }, [muscleSlug, equipmentSlug, difficulty, search, tag]);
+    }, [muscleSlug, equipmentSlug, difficulty, search, tag, category]);
 
     useEffect(() => {
         loadReferenceData();
@@ -161,12 +173,13 @@ export default function ExercisesClient() {
         if (difficulty) params.set('difficulty', difficulty);
         if (search.trim()) params.set('search', search.trim());
         if (tag) params.set('tag', tag);
+        if (category) params.set('category', category);
 
         const query = params.toString();
         const url = query ? `${pathname}?${query}` : pathname;
 
         router.replace(url, { scroll: false });
-    }, [muscleSlug, equipmentSlug, difficulty, search, hydratedFromUrl, pathname, router]);
+    }, [muscleSlug, equipmentSlug, difficulty, search, category, hydratedFromUrl, pathname, router]);
 
     const clearFilters = useCallback(() => {
         setMuscleSlug('');
@@ -174,9 +187,10 @@ export default function ExercisesClient() {
         setDifficulty('');
         setSearch('');
         setTag('');
+        setCategory('');
     }, []);
 
-    const activeFilters = hasActiveFilters(muscleSlug, equipmentSlug, difficulty, search, tag);
+    const activeFilters = hasActiveFilters(muscleSlug, equipmentSlug, difficulty, search, tag, category);
 
     return (
         <div className="space-y-6 pb-8">
@@ -289,6 +303,22 @@ export default function ExercisesClient() {
                                 className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-white min-w-[120px]"
                             >
                                 {DIFFICULTY_OPTIONS.map((opt) => (
+                                    <option key={opt.value || 'all'} value={opt.value}>
+                                        {opt.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                        <label className="flex flex-col gap-1">
+                            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                                Category
+                            </span>
+                            <select
+                                value={category}
+                                onChange={(e) => setCategory(e.target.value as '' | ExerciseCategory)}
+                                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800 dark:text-white min-w-[120px]"
+                            >
+                                {CATEGORY_OPTIONS.map((opt) => (
                                     <option key={opt.value || 'all'} value={opt.value}>
                                         {opt.label}
                                     </option>
