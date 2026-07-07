@@ -13,7 +13,8 @@ export type WorkoutDifficulty = 'beginner' | 'intermediate' | 'advanced';
 
 export type GenerateWorkoutOptions = {
     muscleSlugs: string[];
-    equipmentSlug?: string;
+    /** Allowed equipment slugs (OR-matched). Exercises with no equipment requirement always pass. Omit/empty for unrestricted. */
+    equipmentSlugs?: string[];
     difficulty?: ExerciseDifficulty;
     count?: number;
     publishedOnly?: boolean;
@@ -48,6 +49,7 @@ export type GeneratedWorkout = {
 export async function generateWorkout(options: {
     muscleSlug: string;
     difficulty: WorkoutDifficulty;
+    /** Single equipment slug (e.g. from a dropdown filter). Converted to equipmentSlugs internally. */
     equipmentSlug?: string;
     supabase?: SupabaseClient;
 }): Promise<GeneratedWorkout> {
@@ -56,7 +58,7 @@ export async function generateWorkout(options: {
     const items = await generateWorkoutPlanFromCatalog(
         {
             muscleSlugs: [muscleSlug],
-            equipmentSlug,
+            equipmentSlugs: equipmentSlug ? [equipmentSlug] : undefined,
             difficulty: difficulty as ExerciseDifficulty,
             count: 6, // will be clamped to 4–6 by selection logic
             publishedOnly: true,
@@ -122,7 +124,7 @@ export async function generateWorkoutFromCatalog(
 ): Promise<ExerciseWithRelations[]> {
     const {
         muscleSlugs,
-        equipmentSlug,
+        equipmentSlugs,
         difficulty,
         count = 5,
         publishedOnly = true,
@@ -144,10 +146,12 @@ export async function generateWorkoutFromCatalog(
         );
     }
 
-    // Filter by equipment
-    if (equipmentSlug) {
+    // Filter by equipment: OR-match against the allowed set; exercises with no
+    // equipment requirement (e.g. bodyweight moves with a null relation) always pass.
+    if (equipmentSlugs && equipmentSlugs.length > 0) {
+        const equipmentSet = new Set(equipmentSlugs);
         candidates = candidates.filter(
-            (ex) => ex.equipment && ex.equipment.slug === equipmentSlug
+            (ex) => !ex.equipment || equipmentSet.has(ex.equipment.slug)
         );
     }
 
@@ -328,10 +332,15 @@ function getPrescriptionForExercise(
 export async function generateCardioBlock(options: {
     preferredCardioType?: string;
     sessionDurationMinutes: number;
+    equipmentSlugs?: string[];
     supabase?: SupabaseClient;
 }): Promise<GeneratedWorkoutItem | null> {
-    const { preferredCardioType, sessionDurationMinutes, supabase } = options;
-    const cardioExercises = await getExercisesByCategory('cardio', supabase);
+    const { preferredCardioType, sessionDurationMinutes, equipmentSlugs, supabase } = options;
+    let cardioExercises = await getExercisesByCategory('cardio', supabase);
+    if (equipmentSlugs && equipmentSlugs.length > 0) {
+        const equipmentSet = new Set(equipmentSlugs);
+        cardioExercises = cardioExercises.filter((ex) => !ex.equipment || equipmentSet.has(ex.equipment.slug));
+    }
     if (cardioExercises.length === 0) return null;
 
     const preferred = preferredCardioType
@@ -357,9 +366,14 @@ export async function generateCardioBlock(options: {
 export async function generateStretchCooldown(options: {
     supabase?: SupabaseClient;
     count?: number;
+    equipmentSlugs?: string[];
 }): Promise<GeneratedWorkoutItem[]> {
-    const { supabase, count = 2 } = options;
-    const stretchExercises = await getExercisesByCategory('stretch', supabase);
+    const { supabase, count = 2, equipmentSlugs } = options;
+    let stretchExercises = await getExercisesByCategory('stretch', supabase);
+    if (equipmentSlugs && equipmentSlugs.length > 0) {
+        const equipmentSet = new Set(equipmentSlugs);
+        stretchExercises = stretchExercises.filter((ex) => !ex.equipment || equipmentSet.has(ex.equipment.slug));
+    }
     if (stretchExercises.length === 0) return [];
 
     const picked = shuffle(stretchExercises).slice(0, Math.max(1, count));

@@ -23,6 +23,8 @@ type AppShellProps = {
     subtitle?: string;
     /** App's own secondary nav (tabs/segmented filters), rendered below the header row */
     subnav?: ReactNode;
+    /** Fixed bottom navigation bar (mobile tab bar). When set, main content gets bottom padding to avoid overlap. */
+    bottomNav?: ReactNode;
 };
 
 /**
@@ -30,7 +32,7 @@ type AppShellProps = {
  * + a consistent header. Every route group should wrap its content in this instead of
  * hand-rolling its own header/branding.
  */
-export default function AppShell({ title, children, subtitle, subnav }: AppShellProps) {
+export default function AppShell({ title, children, subtitle, subnav, bottomNav }: AppShellProps) {
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
     return (
@@ -89,11 +91,19 @@ export default function AppShell({ title, children, subtitle, subnav }: AppShell
                         ) : null}
                     </header>
 
-                    <main className="relative mx-auto w-full max-w-6xl min-w-0 flex-1 px-4 py-4 sm:px-6">
+                    <main
+                        className={`relative mx-auto w-full max-w-6xl min-w-0 flex-1 px-4 py-4 sm:px-6 ${
+                            bottomNav ? 'pb-[calc(4.5rem+env(safe-area-inset-bottom,0px))]' : ''
+                        }`}
+                    >
                         {children}
                     </main>
                 </div>
             </div>
+
+            {bottomNav ? (
+                <div className="fixed inset-x-0 bottom-0 z-40">{bottomNav}</div>
+            ) : null}
         </div>
     );
 }

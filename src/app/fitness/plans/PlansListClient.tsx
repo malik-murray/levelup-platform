@@ -6,6 +6,9 @@ import { supabase } from '@auth/supabaseClient';
 import type { WorkoutPlanWithItemCount } from '@/lib/fitness/workoutPlans';
 import { listWorkoutPlansForUserWithItemCounts } from '@/lib/fitness/workoutPlans';
 import { createSessionFromPlan, getInProgressSessionsByPlanForUser } from '@/lib/fitness/workoutSessions';
+import { getFitnessUserProfileForUser, type FitnessEquipmentAccess, type FitnessUserProfile } from '@/lib/fitness/profile';
+import { generatePersonalizedStarterPlanForUser } from '@/lib/fitness/personalizedPlans';
+import { EQUIPMENT_OPTIONS, toggleValue } from '@/lib/fitness/profileFormOptions';
 
 function formatDate(value: string | null | undefined): string {
     if (!value) return '';
@@ -25,6 +28,12 @@ export default function PlansListClient() {
     const [error, setError] = useState<string | null>(null);
     const [startingPlanId, setStartingPlanId] = useState<string | null>(null);
     const [startError, setStartError] = useState<string | null>(null);
+    const [profile, setProfile] = useState<FitnessUserProfile | null>(null);
+    const [showEquipmentPanel, setShowEquipmentPanel] = useState(false);
+    const [selectedEquipment, setSelectedEquipment] = useState<FitnessEquipmentAccess[]>([]);
+    const [regenerating, setRegenerating] = useState(false);
+    const [regenerateError, setRegenerateError] = useState<string | null>(null);
+    const [regenerateSuccess, setRegenerateSuccess] = useState<string | null>(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -39,9 +48,10 @@ export default function PlansListClient() {
                     return;
                 }
 
-                const [plansData, sessionsByPlan] = await Promise.all([
+                const [plansData, sessionsByPlan, profileData] = await Promise.all([
                     listWorkoutPlansForUserWithItemCounts(user.id, supabase),
                     getInProgressSessionsByPlanForUser(user.id, supabase),
+                    getFitnessUserProfileForUser(user.id, supabase),
                 ]);
                 if (!cancelled) {
                     setPlans(plansData);
@@ -50,6 +60,8 @@ export default function PlansListClient() {
                             Object.entries(sessionsByPlan).map(([planId, s]) => [planId, { id: s.id }])
                         )
                     );
+                    setProfile(profileData);
+                    setSelectedEquipment(profileData?.equipment_access ?? []);
                 }
             } catch (e) {
                 console.error('Error loading workout plans list:', e);
@@ -68,16 +80,44 @@ export default function PlansListClient() {
         };
     }, []);
 
+    const handleRegenerateForEquipment = async () => {
+        if (!profile || selectedEquipment.length === 0) return;
+        setRegenerating(true);
+        setRegenerateError(null);
+        setRegenerateSuccess(null);
+        try {
+            const { data: { user }, error: authError } = await supabase.auth.getUser();
+            if (authError || !user) {
+                window.location.href = '/login';
+                return;
+            }
+            const created = await generatePersonalizedStarterPlanForUser(
+                user.id,
+                profile,
+                { equipmentOverride: selectedEquipment },
+                supabase
+            );
+            setRegenerateSuccess(`Created "${created.name}".`);
+            setShowEquipmentPanel(false);
+            const [plansData, sessionsByPlan] = await Promise.all([
+                listWorkoutPlansForUserWithItemCounts(user.id, supabase),
+                getInProgressSessionsByPlanForUser(user.id, supabase),
+            ]);
+            setPlans(plansData);
+            setInProgressByPlan(
+                Object.fromEntries(Object.entries(sessionsByPlan).map(([planId, s]) => [planId, { id: s.id }]))
+            );
+        } catch (err) {
+            setRegenerateError(err instanceof Error ? err.message : 'Failed to regenerate plan');
+        } finally {
+            setRegenerating(false);
+        }
+    };
+
     if (loading) {
         return (
             <div className="space-y-4 pb-8">
                 <header className="space-y-2">
-                    <Link
-                        href="/fitness"
-                        className="inline-block text-sm text-amber-600 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-300"
-                    >
-                        ← Back to Dashboard
-                    </Link>
                     <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
                         Saved Workout Plans
                     </h1>
@@ -90,12 +130,6 @@ export default function PlansListClient() {
     return (
         <div className="space-y-6 pb-8">
             <header className="space-y-2">
-                <Link
-                    href="/fitness"
-                    className="inline-block text-sm text-amber-600 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-300"
-                >
-                    ← Back to Dashboard
-                </Link>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
@@ -105,14 +139,66 @@ export default function PlansListClient() {
                             These are workout plans you&apos;ve saved from the generator.
                         </p>
                     </div>
-                    <Link
-                        href="/fitness/workout-generator"
-                        className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-black hover:bg-amber-400 dark:bg-amber-400 dark:text-black dark:hover:bg-amber-300"
-                    >
-                        + Create workout
-                    </Link>
+                    <div className="flex flex-wrap gap-2">
+                        {profile && (
+                            <button
+                                type="button"
+                                onClick={() => setShowEquipmentPanel((o) => !o)}
+                                className="rounded-md border border-amber-500/60 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 dark:border-amber-400/50 dark:text-amber-300 dark:hover:bg-amber-950/30"
+                            >
+                                Regenerate for different equipment
+                            </button>
+                        )}
+                        <Link
+                            href="/fitness/workout-generator"
+                            className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-black hover:bg-amber-400 dark:bg-amber-400 dark:text-black dark:hover:bg-amber-300"
+                        >
+                            + Create workout
+                        </Link>
+                    </div>
                 </div>
+
+                {showEquipmentPanel && profile && (
+                    <div className="rounded-lg border border-amber-300/60 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-950/20">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                            Adjust for home, gym, or whatever you have access to
+                        </p>
+                        <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                            This creates a new starter plan filtered to the equipment you pick below — your saved
+                            training profile is not changed.
+                        </p>
+                        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            {EQUIPMENT_OPTIONS.map((opt) => (
+                                <label key={opt.value} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedEquipment.includes(opt.value)}
+                                        onChange={() => setSelectedEquipment((prev) => toggleValue(prev, opt.value))}
+                                    />
+                                    {opt.label}
+                                </label>
+                            ))}
+                        </div>
+                        {regenerateError && (
+                            <p className="mt-3 text-xs text-red-600 dark:text-red-400">{regenerateError}</p>
+                        )}
+                        <button
+                            type="button"
+                            disabled={regenerating || selectedEquipment.length === 0}
+                            onClick={handleRegenerateForEquipment}
+                            className="mt-3 rounded-md bg-amber-500 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-amber-400 dark:hover:bg-amber-300"
+                        >
+                            {regenerating ? 'Generating…' : 'Regenerate plan'}
+                        </button>
+                    </div>
+                )}
             </header>
+
+            {regenerateSuccess && (
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200">
+                    {regenerateSuccess}
+                </div>
+            )}
 
             {error && (
                 <div className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">

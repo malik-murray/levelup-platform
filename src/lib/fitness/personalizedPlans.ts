@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { FitnessUserProfile } from './profile';
+import type { FitnessEquipmentAccess, FitnessUserProfile } from './profile';
 import {
     generateCardioBlock,
     generateStretchCooldown,
@@ -16,6 +16,8 @@ import {
 } from './workoutPlans';
 import { activateProgramForUser } from './programEngine';
 import { getPublishedExercises } from './exercises';
+import { resolveEquipmentSlugsForAccess } from './equipmentMapping';
+import { EQUIPMENT_OPTIONS } from './profileFormOptions';
 
 function mapTrainingLevelToDifficulty(level: FitnessUserProfile['training_level']): WorkoutDifficulty {
     if (level === 'advanced') return 'advanced';
@@ -61,6 +63,20 @@ function buildPlanName(profile: FitnessUserProfile): string {
     return `${level} Personalized Starter Plan`;
 }
 
+/** Short label for an equipment set, used to suffix regenerated plan names so variants don't collide. */
+function buildEquipmentLabel(equipmentAccess: FitnessEquipmentAccess[]): string {
+    if (equipmentAccess.length === 1) {
+        const label = EQUIPMENT_OPTIONS.find((o) => o.value === equipmentAccess[0])?.label;
+        if (label) return label;
+    }
+    const labels = equipmentAccess
+        .map((value) => EQUIPMENT_OPTIONS.find((o) => o.value === value)?.label)
+        .filter((label): label is string => Boolean(label));
+    if (labels.length === 0) return 'Custom equipment';
+    if (labels.length <= 2) return labels.join(' + ');
+    return `${labels.slice(0, 2).join(' + ')} + more`;
+}
+
 function buildPlanDescription(profile: FitnessUserProfile): string {
     const goalLabels = profile.goals
         .map((g) =>
@@ -79,36 +95,52 @@ function buildPlanDescription(profile: FitnessUserProfile): string {
 
 /**
  * Generates a single tailored starter plan from onboarding profile.
- * Deterministic rules only; no AI.
+ * Deterministic rules only; no AI, unless AI items are supplied and no equipment
+ * override is requested (see below).
  */
 export async function generatePersonalizedStarterPlanForUser(
     userId: string,
     profile: FitnessUserProfile,
-    options?: { aiItems?: Array<{ exercise_slug: string; sets: number; rep_range: string; rest_seconds: number; note?: string | null }> },
+    options?: {
+        aiItems?: Array<{ exercise_slug: string; sets: number; rep_range: string; rest_seconds: number; note?: string | null }>;
+        /** Regenerate for a different equipment context (e.g. home vs. gym) instead of the profile's saved equipment. */
+        equipmentOverride?: FitnessEquipmentAccess[];
+    },
     supabase?: SupabaseClient
 ): Promise<WorkoutPlanWithItems> {
-    const existingPlans = await listWorkoutPlansForUser(userId, supabase);
-    const existingStarter = existingPlans.find((p) => p.name === buildPlanName(profile));
-    if (existingStarter) {
-        await activateProgramForUser({
-            userId,
-            planId: existingStarter.id,
-            trainingWeekdays: profile.training_weekdays,
-            trainingLevel: profile.training_level,
-            supabase,
-        });
-        // Keep behavior idempotent for repeated CTA clicks.
-        return {
-            ...existingStarter,
-            items: [],
-        };
+    const isEquipmentRegeneration = options?.equipmentOverride !== undefined;
+    const equipmentAccess = options?.equipmentOverride ?? profile.equipment_access;
+    const equipmentSlugs = resolveEquipmentSlugsForAccess(equipmentAccess);
+    const planName = isEquipmentRegeneration
+        ? `${buildPlanName(profile)} — ${buildEquipmentLabel(equipmentAccess)}`
+        : buildPlanName(profile);
+
+    if (!isEquipmentRegeneration) {
+        // Idempotent for repeated onboarding-completion CTA clicks (no equipment override).
+        const existingPlans = await listWorkoutPlansForUser(userId, supabase);
+        const existingStarter = existingPlans.find((p) => p.name === planName);
+        if (existingStarter) {
+            await activateProgramForUser({
+                userId,
+                planId: existingStarter.id,
+                trainingWeekdays: profile.training_weekdays,
+                trainingLevel: profile.training_level,
+                supabase,
+            });
+            return {
+                ...existingStarter,
+                items: [],
+            };
+        }
     }
 
     const difficulty = mapTrainingLevelToDifficulty(profile.training_level);
     const muscleSlugs = pickMusclesFromProfile(profile);
     const count = pickExerciseCount(profile);
     let generatedItems: GeneratedWorkoutItem[] = [];
-    const aiItems = options?.aiItems ?? [];
+    // Explicit equipment regeneration always uses the catalog path so the equipment
+    // filter applies — AI-suggested items bypass that filter entirely.
+    const aiItems = isEquipmentRegeneration ? [] : options?.aiItems ?? [];
     if (aiItems.length > 0) {
         const exercises = await getPublishedExercises(supabase);
         const bySlug = new Map(exercises.map((ex) => [ex.slug, ex]));
@@ -133,6 +165,7 @@ export async function generatePersonalizedStarterPlanForUser(
         generatedItems = await generateWorkoutPlanFromCatalog(
             {
                 muscleSlugs,
+                equipmentSlugs,
                 difficulty,
                 count,
                 publishedOnly: true,
@@ -151,7 +184,7 @@ export async function generatePersonalizedStarterPlanForUser(
     const created = await createWorkoutPlanFromGeneratedPlan(
         {
             userId,
-            name: buildPlanName(profile),
+            name: planName,
             description: buildPlanDescription(profile),
             muscleSlugs,
             difficulty,
@@ -161,7 +194,7 @@ export async function generatePersonalizedStarterPlanForUser(
         supabase
     );
 
-    await addCardioAndStretchBlocks(created.id, profile, dayCount, supabase);
+    await addCardioAndStretchBlocks(created.id, profile, dayCount, equipmentSlugs, supabase);
 
     await activateProgramForUser({
         userId,
@@ -184,6 +217,7 @@ async function addCardioAndStretchBlocks(
     planId: string,
     profile: FitnessUserProfile,
     dayCount: number,
+    equipmentSlugs: string[] | undefined,
     supabase?: SupabaseClient
 ): Promise<void> {
     const wantsCardio =
@@ -192,6 +226,7 @@ async function addCardioAndStretchBlocks(
     if (wantsCardio) {
         const cardioBlock = await generateCardioBlock({
             sessionDurationMinutes: profile.session_duration_minutes,
+            equipmentSlugs,
             supabase,
         });
         if (cardioBlock) {
@@ -209,7 +244,7 @@ async function addCardioAndStretchBlocks(
         }
     }
 
-    const stretchItems = await generateStretchCooldown({ supabase, count: 2 });
+    const stretchItems = await generateStretchCooldown({ supabase, count: 2, equipmentSlugs });
     for (let day = 1; day <= dayCount; day++) {
         for (const stretchItem of stretchItems) {
             await addWorkoutPlanItem(
