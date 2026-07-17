@@ -1,6 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { RemovedTransaction, Transaction } from 'plaid';
-import { categorizeTransaction } from '@/lib/financial-concierge/categoryEngine';
+import {
+    categorizeTransaction,
+    categorizeTransactionsBatch,
+    type TransactionToCategorize,
+} from '@/lib/financial-concierge/categoryEngine';
 import {
     findConfidentPendingMatch,
     mapPlaidAmount,
@@ -240,6 +244,60 @@ async function applyCategorization(
         },
         { supabase, userId, persistToTransaction: true }
     );
+}
+
+/**
+ * Durable safety net: categorize any still-uncategorized synced transactions for an item.
+ * Ingest categorizes on insert, but the "modified" branch preserves the existing category
+ * without re-running categorization — so a row Plaid modifies before it was ever categorized
+ * (or any insert-time miss) can linger with no category, which quietly rots the budget
+ * baseline. Running this after each sync keeps categorization durable. Idempotent: rows that
+ * resolve drop out of future sweeps; the small residue with no usable Plaid label / rule is
+ * retried cheaply. Capped so a huge initial backfill sweeps incrementally across syncs.
+ */
+export async function categorizeUncategorizedSyncedForItem(params: {
+    supabase: SupabaseClient;
+    userId: string;
+    plaidItemDbId: string;
+    limit?: number;
+}): Promise<number> {
+    const { supabase, userId, plaidItemDbId } = params;
+    const limit = params.limit ?? 1000;
+
+    const { data, error } = await supabase
+        .from('transactions')
+        .select('id, name, note, amount, date, plaid_personal_finance_category')
+        .eq('user_id', userId)
+        .eq('plaid_item_id', plaidItemDbId)
+        .eq('synced_from_plaid', true)
+        .is('category_id', null)
+        .is('removed_at', null)
+        .limit(limit);
+
+    if (error || !data || data.length === 0) return 0;
+
+    const toCategorize: TransactionToCategorize[] = data.map((row) => ({
+        id: row.id as string,
+        name: (row.name as string | null) ?? null,
+        note: (row.note as string | null) ?? null,
+        amount: row.amount as number,
+        date: row.date as string,
+        plaid_personal_finance_category:
+            (row.plaid_personal_finance_category as TransactionToCategorize['plaid_personal_finance_category']) ??
+            null,
+    }));
+
+    const results = await categorizeTransactionsBatch(toCategorize, {
+        supabase,
+        userId,
+        persistToTransaction: true,
+    });
+
+    let categorized = 0;
+    for (const result of results.values()) {
+        if (result?.category_id) categorized += 1;
+    }
+    return categorized;
 }
 
 async function notifyIfNeeded(

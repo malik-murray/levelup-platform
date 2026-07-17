@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getPlaidApi } from '@/lib/plaid/plaidApi';
 import {
     buildPlaidAccountIdMap,
+    categorizeUncategorizedSyncedForItem,
     processPlaidSyncBatch,
     syncPlaidAccountsForItem,
 } from '@/lib/plaid/persistPlaidSyncTransactions';
@@ -110,6 +111,9 @@ export async function backfillRecentPlaidTransactionsForItem(params: {
             removed += batch.removed;
             offset += txs.length;
         } while (offset < total);
+
+        // Durable safety net: categorize any rows this backfill left uncategorized.
+        await categorizeUncategorizedSyncedForItem({ supabase, userId, plaidItemDbId: plaidItemId });
 
         await supabase
             .from('plaid_items')
