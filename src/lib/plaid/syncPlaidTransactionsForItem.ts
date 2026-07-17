@@ -3,6 +3,7 @@ import { linkInternalTransferPairsForUser } from '@/lib/financial-concierge/link
 import { getPlaidApi } from '@/lib/plaid/plaidApi';
 import {
     buildPlaidAccountIdMap,
+    categorizeUncategorizedSyncedForItem,
     processPlaidSyncBatch,
     syncPlaidAccountsForItem,
     type PlaidSyncStats,
@@ -27,6 +28,7 @@ export type SyncPlaidTransactionsResult = {
     notifications_sent: number;
     transfer_pairs_linked: number;
     transfer_rows_category_fixed: number;
+    uncategorized_categorized: number;
     cursor_updated: boolean;
 };
 
@@ -107,6 +109,7 @@ export async function syncPlaidTransactionsForItem(params: {
             notifications_sent: 0,
             transfer_pairs_linked: 0,
             transfer_rows_category_fixed: 0,
+            uncategorized_categorized: 0,
             cursor_updated: false,
         };
     }
@@ -205,6 +208,15 @@ export async function syncPlaidTransactionsForItem(params: {
 
         if (!cursorError && cursor) cursorUpdated = true;
 
+        // Durable safety net: catch any synced rows the per-transaction ingest path left
+        // uncategorized (e.g. Plaid "modified" events that skip re-categorization), so the
+        // budget baseline stays clean without a manual re-categorize pass.
+        const uncategorizedCategorized = await categorizeUncategorizedSyncedForItem({
+            supabase,
+            userId,
+            plaidItemDbId: plaidItemId,
+        });
+
         const linkResult = await linkInternalTransferPairsForUser(supabase, userId, {
             sinceDays: 120,
         });
@@ -236,6 +248,7 @@ export async function syncPlaidTransactionsForItem(params: {
             notifications_sent: stats.notifications_sent,
             transfer_pairs_linked: linkResult.pairsLinked,
             transfer_rows_category_fixed: linkResult.transferRowsCategoryFixed,
+            uncategorized_categorized: uncategorizedCategorized,
             cursor_updated: cursorUpdated,
         };
     } catch (err) {
