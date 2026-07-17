@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Configuration, PlaidApi, PlaidEnvironments, type CountryCode } from 'plaid';
 import { registerPlaidItemWebhook } from '@/lib/plaid/registerPlaidItemWebhook';
+import { retirePreviousPlaidItemsForInstitution } from '@/lib/plaid/retirePreviousPlaidItemsForInstitution';
 
 // Initialize Plaid client
 const configuration = new Configuration({
@@ -140,11 +141,27 @@ export async function POST(request: NextRequest) {
 
         const webhookReg = await registerPlaidItemWebhook(accessToken);
 
+        // If this bank was already connected (e.g. the user re-linked it to unlock deeper
+        // history), retire the prior item(s) so their stale ~90-day transactions don't
+        // double-count against this item's deep pull. Best-effort — never fail the link on it.
+        let retired: Awaited<ReturnType<typeof retirePreviousPlaidItemsForInstitution>> = [];
+        try {
+            retired = await retirePreviousPlaidItemsForInstitution({
+                userId: user.id,
+                institutionId,
+                keepPlaidItemDbId: plaidItem.id,
+            });
+        } catch (err) {
+            console.error('Error retiring previous Plaid items:', err);
+        }
+
         return NextResponse.json({
             success: true,
             item_id: itemId,
             plaid_item_id: plaidItem.id,
             webhook_registered: webhookReg.ok,
+            retired_previous_items: retired.length,
+            retired,
             message: webhookReg.ok
                 ? 'Successfully connected bank account. Automatic sync is enabled.'
                 : 'Bank connected. Enable automatic sync from Integrations if transactions do not update on their own.',
