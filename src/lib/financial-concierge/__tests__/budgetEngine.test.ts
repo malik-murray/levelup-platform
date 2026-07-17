@@ -7,6 +7,8 @@ import {
     detectOneOffAmounts,
     normalizeToIncome,
     classifyBudgetLine,
+    median,
+    medianMonthlyTotal,
     type NormalizableLine,
 } from '../budgetEngine';
 
@@ -137,6 +139,42 @@ describe('BudgetEngine', () => {
             expect(r.discretionaryScale).toBeNull();
             expect(r.totalAfter).toBe(4200);
             expect(r.warning).toMatch(/no income/i);
+        });
+    });
+
+    describe('median', () => {
+        it('handles odd, even, and empty', () => {
+            expect(median([3, 1, 2])).toBe(2);
+            expect(median([1, 2, 3, 4])).toBe(2.5);
+            expect(median([])).toBe(0);
+        });
+    });
+
+    describe('medianMonthlyTotal', () => {
+        it('estimates a recurring bill at its typical monthly amount despite capture gaps', () => {
+            // rent present in 3 months (~1950), missing others, one partial month
+            const txns = [
+                { amount: 1950, date: '2023-06-01' },
+                { amount: 1952, date: '2023-07-01' },
+                { amount: 1949, date: '2023-08-01' },
+                { amount: 174, date: '2024-01-15' }, // partial month
+            ];
+            // monthly totals: [1950, 1952, 1949, 174] -> median 1949.5
+            expect(medianMonthlyTotal(txns)).toBeCloseTo(1949.5, 1);
+        });
+
+        it('sums multiple transactions within the same month before taking the median', () => {
+            const txns = [
+                { amount: 20, date: '2024-03-02' },
+                { amount: 30, date: '2024-03-20' }, // March total 50
+                { amount: 40, date: '2024-04-10' }, // April total 40
+                { amount: 60, date: '2024-05-10' }, // May total 60
+            ];
+            expect(medianMonthlyTotal(txns)).toBe(50);
+        });
+
+        it('is empty-safe', () => {
+            expect(medianMonthlyTotal([])).toBe(0);
         });
     });
 
