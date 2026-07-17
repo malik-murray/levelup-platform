@@ -111,6 +111,29 @@ export function detectOneOffAmounts(
     return flags;
 }
 
+/** Median of a numeric list (0 for empty). */
+export function median(values: number[]): number {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+/**
+ * Pure: estimate a category's typical monthly spend as the median of its per-month totals,
+ * across only the months it was actually active. Robust to capture gaps and partial entries
+ * (a bill missing from some months, or logged in pieces) — a recurring ~$1,950 rent lands at
+ * ~$1,950 rather than being diluted by empty months, which total ÷ all-months would do.
+ */
+export function medianMonthlyTotal(txns: { amount: number; date: string | null }[]): number {
+    const byMonth = new Map<string, number>();
+    for (const t of txns) {
+        const month = t.date && /^\d{4}-\d{2}/.test(t.date) ? t.date.slice(0, 7) : 'unknown';
+        byMonth.set(month, (byMonth.get(month) || 0) + t.amount);
+    }
+    return median([...byMonth.values()]);
+}
+
 export interface NormalizableLine {
     category_id: string;
     amount: number;
@@ -356,7 +379,6 @@ async function getCategorySpendSummary(
         });
     }
 
-    const monthsInPeriod = days / 30;
     const summaries: CategorySpendSummary[] = [];
     const oneOffs: OneOffTransaction[] = [];
 
@@ -365,7 +387,7 @@ async function getCategorySpendSummary(
         const oneOffFlags = detectOneOffAmounts(amounts);
 
         let recurringTotal = 0;
-        let recurringCount = 0;
+        const recurringTxns: { amount: number; date: string | null }[] = [];
         for (let i = 0; i < data.txns.length; i++) {
             if (oneOffFlags[i]) {
                 oneOffs.push({
@@ -378,7 +400,7 @@ async function getCategorySpendSummary(
                 });
             } else {
                 recurringTotal += data.txns[i].amount;
-                recurringCount += 1;
+                recurringTxns.push({ amount: data.txns[i].amount, date: data.txns[i].date });
             }
         }
 
@@ -386,8 +408,10 @@ async function getCategorySpendSummary(
             category_id: categoryId,
             category_name: data.name,
             total_spend: recurringTotal,
-            transaction_count: recurringCount,
-            avg_monthly_spend: recurringTotal / monthsInPeriod,
+            transaction_count: recurringTxns.length,
+            // Typical monthly spend = median of per-month totals (active months), so recurring
+            // bills with capture gaps aren't diluted. See medianMonthlyTotal.
+            avg_monthly_spend: medianMonthlyTotal(recurringTxns),
         });
     }
 
@@ -398,8 +422,9 @@ async function getCategorySpendSummary(
 
 /**
  * Determines how many days of usable (non-transfer, non-removed) history exist, so the budget
- * can baseline off "as far back as possible" (capped at Plaid's 730-day max) instead of a
- * fixed window, falling back to a 90-day floor for brand-new connections.
+ * baselines off all available history ("as far back as possible") rather than a fixed window.
+ * The median-of-monthly-totals estimator (see medianMonthlyTotal) keeps a long, uneven history
+ * from skewing recurring lines, so there's no upper cap; a 90-day floor covers brand-new users.
  */
 async function getSpendHistorySpanDays(userId: string): Promise<number> {
     const supabase = getServiceClient();
@@ -417,7 +442,7 @@ async function getSpendHistorySpanDays(userId: string): Promise<number> {
     if (!earliest) return 180;
 
     const spanDays = Math.ceil((Date.now() - new Date(earliest).getTime()) / 86_400_000);
-    return Math.max(90, Math.min(spanDays, 730));
+    return Math.max(90, spanDays);
 }
 
 /**
