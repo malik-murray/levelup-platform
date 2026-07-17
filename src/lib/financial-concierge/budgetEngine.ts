@@ -54,11 +54,152 @@ const ESSENTIAL_GROUPS = new Set([
     'Home Maintenance',
     'Fees & Taxes',
     'Food & Dining', // group name for Groceries
+    'Groceries', // leaf name — the categories table is mostly flat, so protect it directly too
     // Unknown spend - don't guardrail-cut something we can't classify
     'Needs Review',
     'Uncategorized',
 ]);
 const PROTECTED_GROUPS = new Set(['Savings', 'Savings/Investing']);
+
+// Categories that are not real budget lines — spend that lands here is unclassified, so we
+// don't create a budget for it (a "Needs Review: $1,600/mo" line is meaningless).
+const NON_BUDGET_CATEGORY_NAMES = new Set(['Needs Review', 'Uncategorized']);
+
+export type BudgetLineClass = 'essential' | 'savings' | 'discretionary';
+
+/** Classify a category (by its resolved group/leaf name) for income-cap normalization. */
+export function classifyBudgetLine(groupName: string): BudgetLineClass {
+    if (PROTECTED_GROUPS.has(groupName)) return 'savings';
+    if (ESSENTIAL_GROUPS.has(groupName)) return 'essential';
+    return 'discretionary';
+}
+
+export interface OneOffDetectionOptions {
+    /** A transaction must exceed this absolute amount to ever be a one-off. */
+    absMin?: number;
+    /** ...and exceed the category median by this multiple. */
+    mult?: number;
+    /** Categories with fewer than this many transactions can't establish a norm, so nothing is flagged. */
+    minCount?: number;
+}
+
+/**
+ * Pure: given a category's positive expense amounts, return a boolean[] marking one-off
+ * outliers (large, atypical purchases) to exclude from the recurring-spend baseline. A value
+ * is a one-off when it exceeds BOTH an absolute floor and a multiple of the category median,
+ * and only when the category has enough transactions to define "normal". Median-based so a
+ * category that is routinely large (e.g. Rent) has a correspondingly high threshold.
+ */
+export function detectOneOffAmounts(
+    amounts: number[],
+    options: OneOffDetectionOptions = {}
+): boolean[] {
+    const absMin = options.absMin ?? 400;
+    const mult = options.mult ?? 4;
+    const minCount = options.minCount ?? 5;
+
+    const flags = new Array(amounts.length).fill(false);
+    if (amounts.length < minCount) return flags;
+
+    const sorted = [...amounts].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)] || 0;
+    const threshold = Math.max(absMin, median * mult);
+
+    for (let i = 0; i < amounts.length; i++) {
+        if (amounts[i] > threshold) flags[i] = true;
+    }
+    return flags;
+}
+
+export interface NormalizableLine {
+    category_id: string;
+    amount: number;
+    klass: BudgetLineClass;
+}
+
+export interface NormalizedLine extends NormalizableLine {
+    scaled: boolean;
+}
+
+export interface NormalizationResult {
+    lines: NormalizedLine[];
+    totalBefore: number;
+    totalAfter: number;
+    income: number;
+    /** Factor applied to discretionary lines (1 = none, 0 = zeroed). null when income unknown. */
+    discretionaryScale: number | null;
+    warning: string | null;
+}
+
+/**
+ * Pure: enforce the hard rule that a budget never exceeds income. Essentials and savings are
+ * protected (never scaled); only discretionary lines are reduced to make the total fit. If
+ * essentials + savings alone already exceed income, discretionary is zeroed and a warning is
+ * returned (the user genuinely can't hit that savings target at current fixed costs).
+ */
+export function normalizeToIncome(lines: NormalizableLine[], income: number): NormalizationResult {
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const totalBefore = round2(lines.reduce((s, l) => s + l.amount, 0));
+
+    if (!income || income <= 0) {
+        return {
+            lines: lines.map((l) => ({ ...l, scaled: false })),
+            totalBefore,
+            totalAfter: totalBefore,
+            income,
+            discretionaryScale: null,
+            warning: 'No income figure available — budget not capped to income.',
+        };
+    }
+
+    if (totalBefore <= income) {
+        return {
+            lines: lines.map((l) => ({ ...l, scaled: false })),
+            totalBefore,
+            totalAfter: totalBefore,
+            income,
+            discretionaryScale: 1,
+            warning: null,
+        };
+    }
+
+    const fixed = lines
+        .filter((l) => l.klass !== 'discretionary')
+        .reduce((s, l) => s + l.amount, 0);
+    const discretionaryTotal = lines
+        .filter((l) => l.klass === 'discretionary')
+        .reduce((s, l) => s + l.amount, 0);
+
+    const remaining = income - fixed;
+
+    let discretionaryScale: number;
+    let warning: string | null = null;
+
+    if (remaining <= 0) {
+        discretionaryScale = 0;
+        warning = `Essential + savings commitments ($${round2(fixed)}) exceed income ($${income}). Discretionary set to $0; revisit fixed costs or the savings target.`;
+    } else if (discretionaryTotal > 0) {
+        discretionaryScale = Math.min(1, remaining / discretionaryTotal);
+    } else {
+        discretionaryScale = 1;
+    }
+
+    const outLines: NormalizedLine[] = lines.map((l) => {
+        if (l.klass === 'discretionary' && discretionaryScale < 1) {
+            return { ...l, amount: round2(l.amount * discretionaryScale), scaled: true };
+        }
+        return { ...l, scaled: false };
+    });
+
+    return {
+        lines: outLines,
+        totalBefore,
+        totalAfter: round2(outLines.reduce((s, l) => s + l.amount, 0)),
+        income,
+        discretionaryScale,
+        warning,
+    };
+}
 
 /**
  * Finds a leaf category to attach an explicit savings/investing goal budget line to
@@ -135,18 +276,34 @@ async function getCategoryGroupNames(
 export interface CategorySpendSummary {
     category_id: string;
     category_name: string;
-    total_spend: number;
-    transaction_count: number;
-    avg_monthly_spend: number; // Average over the period
+    total_spend: number; // recurring spend only (one-offs excluded)
+    transaction_count: number; // recurring transaction count
+    avg_monthly_spend: number; // Average over the period, one-offs excluded
+}
+
+export interface OneOffTransaction {
+    transaction_id: string;
+    category_id: string;
+    category_name: string;
+    amount: number; // positive
+    date: string | null;
+    name: string | null;
+}
+
+export interface CategorySpendResult {
+    summaries: CategorySpendSummary[];
+    oneOffs: OneOffTransaction[];
 }
 
 /**
- * Gets spend summary by category for the last N days
+ * Gets spend summary by category for the last N days, with one-off large purchases detected
+ * and excluded from each category's recurring average (returned separately for review), and
+ * unclassified "Needs Review"/"Uncategorized" categories left out of the budget entirely.
  */
 async function getCategorySpendSummary(
     userId: string,
     days: number = 180
-): Promise<CategorySpendSummary[]> {
+): Promise<CategorySpendResult> {
     const supabase = getServiceClient();
 
     const endDate = new Date();
@@ -160,6 +317,8 @@ async function getCategorySpendSummary(
             id,
             amount,
             category_id,
+            date,
+            name,
             categories!inner(id, name)
         `)
         .eq('user_id', userId)
@@ -172,41 +331,93 @@ async function getCategorySpendSummary(
 
     if (error) {
         console.error('Error fetching transactions:', error);
-        return [];
+        return { summaries: [], oneOffs: [] };
     }
 
-    // Group by category
-    const categoryMap = new Map<string, { total: number; count: number; name: string }>();
+    type TxLite = { id: string; amount: number; date: string | null; name: string | null };
+    const categoryMap = new Map<string, { name: string; txns: TxLite[] }>();
 
     for (const tx of transactions || []) {
-        const categoryId = tx.category_id;
+        const categoryId = tx.category_id as string;
         const category = (tx.categories as any)?.[0] || tx.categories;
         const categoryName = category?.name || 'Unknown';
 
+        // Skip unclassified buckets — they aren't real budget lines.
+        if (NON_BUDGET_CATEGORY_NAMES.has(categoryName)) continue;
+
         if (!categoryMap.has(categoryId)) {
-            categoryMap.set(categoryId, { total: 0, count: 0, name: categoryName });
+            categoryMap.set(categoryId, { name: categoryName, txns: [] });
         }
-
-        const entry = categoryMap.get(categoryId)!;
-        entry.total += Math.abs(tx.amount); // Convert to positive
-        entry.count += 1;
-    }
-
-    // Calculate average monthly spend
-    const monthsInPeriod = days / 30;
-    const summaries: CategorySpendSummary[] = [];
-
-    for (const [categoryId, data] of categoryMap.entries()) {
-        summaries.push({
-            category_id: categoryId,
-            category_name: data.name,
-            total_spend: data.total,
-            transaction_count: data.count,
-            avg_monthly_spend: data.total / monthsInPeriod,
+        categoryMap.get(categoryId)!.txns.push({
+            id: tx.id as string,
+            amount: Math.abs(tx.amount), // positive
+            date: (tx.date as string | null) ?? null,
+            name: (tx.name as string | null) ?? null,
         });
     }
 
-    return summaries.sort((a, b) => b.avg_monthly_spend - a.avg_monthly_spend);
+    const monthsInPeriod = days / 30;
+    const summaries: CategorySpendSummary[] = [];
+    const oneOffs: OneOffTransaction[] = [];
+
+    for (const [categoryId, data] of categoryMap.entries()) {
+        const amounts = data.txns.map((t) => t.amount);
+        const oneOffFlags = detectOneOffAmounts(amounts);
+
+        let recurringTotal = 0;
+        let recurringCount = 0;
+        for (let i = 0; i < data.txns.length; i++) {
+            if (oneOffFlags[i]) {
+                oneOffs.push({
+                    transaction_id: data.txns[i].id,
+                    category_id: categoryId,
+                    category_name: data.name,
+                    amount: data.txns[i].amount,
+                    date: data.txns[i].date,
+                    name: data.txns[i].name,
+                });
+            } else {
+                recurringTotal += data.txns[i].amount;
+                recurringCount += 1;
+            }
+        }
+
+        summaries.push({
+            category_id: categoryId,
+            category_name: data.name,
+            total_spend: recurringTotal,
+            transaction_count: recurringCount,
+            avg_monthly_spend: recurringTotal / monthsInPeriod,
+        });
+    }
+
+    summaries.sort((a, b) => b.avg_monthly_spend - a.avg_monthly_spend);
+    oneOffs.sort((a, b) => b.amount - a.amount);
+    return { summaries, oneOffs };
+}
+
+/**
+ * Determines how many days of usable (non-transfer, non-removed) history exist, so the budget
+ * can baseline off "as far back as possible" (capped at Plaid's 730-day max) instead of a
+ * fixed window, falling back to a 90-day floor for brand-new connections.
+ */
+async function getSpendHistorySpanDays(userId: string): Promise<number> {
+    const supabase = getServiceClient();
+    const { data } = await supabase
+        .from('transactions')
+        .select('date')
+        .eq('user_id', userId)
+        .eq('is_transfer', false)
+        .is('removed_at', null)
+        .not('date', 'is', null)
+        .order('date', { ascending: true })
+        .limit(1);
+
+    const earliest = data?.[0]?.date as string | undefined;
+    if (!earliest) return 180;
+
+    const spanDays = Math.ceil((Date.now() - new Date(earliest).getTime()) / 86_400_000);
+    return Math.max(90, Math.min(spanDays, 730));
 }
 
 /**
@@ -327,19 +538,19 @@ export async function generateBudgetPlan(
     options: BudgetGenerationOptions
 ): Promise<BudgetPlan & { items: BudgetItem[] }> {
     const supabase = getServiceClient();
-
-    const sourceDataDays = options.sourceDataDays || 180;
     const userId = options.userId;
 
-    // Get user profile
+    // Baseline off as much history as available (capped at Plaid's 730-day max) unless an
+    // explicit window is requested.
+    const sourceDataDays = options.sourceDataDays ?? (await getSpendHistorySpanDays(userId));
+
     const profile = options.profileType
         ? { profile_type: options.profileType, guardrails: {}, preferences: {}, budget_strategy: 'zero_based' } as UserProfile
         : await getUserProfile(userId);
 
-    // Get spend summary, income, and savings target. Transaction-derived income is
-    // unreliable (brokerage transfers, tax refunds, and other one-off inflows all look like
-    // "income"), so a user-declared figure in profile.preferences takes priority when set.
-    const [categorySpends, txAvgIncome, survey] = await Promise.all([
+    // Transaction-derived income is unreliable (brokerage transfers, tax refunds, and other
+    // one-off inflows all look like "income"), so a user-declared figure takes priority.
+    const [spendResult, txAvgIncome, survey] = await Promise.all([
         getCategorySpendSummary(userId, sourceDataDays),
         getAverageMonthlyIncome(userId, sourceDataDays),
         supabase
@@ -349,6 +560,7 @@ export async function generateBudgetPlan(
             .maybeSingle()
             .then((r: any) => r.data),
     ]);
+    const { summaries: categorySpends, oneOffs } = spendResult;
 
     const declaredIncome = (profile?.preferences as any)?.declared_monthly_income;
     const avgIncome = declaredIncome && declaredIncome > 0 ? declaredIncome : txAvgIncome;
@@ -358,8 +570,6 @@ export async function generateBudgetPlan(
             ? survey.target_savings_amount / survey.target_savings_timeline_months
             : null;
 
-    // Override the profile's static minimum_savings_rate with one derived from the actual
-    // goal amount + income, when we have both, instead of the generic per-profile-type default.
     const effectiveProfile: UserProfile | null =
         profile && monthlySavingsGoal && avgIncome > 0
             ? {
@@ -371,10 +581,78 @@ export async function generateBudgetPlan(
               }
             : profile;
 
-    // Calculate start and end dates for source data
+    const categoryGroupNames = await getCategoryGroupNames(
+        supabase,
+        categorySpends.map((c) => c.category_id)
+    );
+
+    // --- Build planned lines in memory (guardrails), then a savings line, then income-cap
+    // normalization — so the final amounts are known before anything is written. ---
+    type PlannedLine = {
+        category_id: string;
+        base_avg: number; // recurring monthly average before adjustments
+        amount: number; // guardrail-adjusted, pre-normalization
+        klass: BudgetLineClass;
+        guardrail_reason: string | null;
+    };
+
+    const plannedLines: PlannedLine[] = categorySpends.map((cs) => {
+        const groupName = categoryGroupNames.get(cs.category_id) || cs.category_name;
+        const { adjustedAmount, guardrailReason } = applyGuardrails(
+            cs.avg_monthly_spend,
+            avgIncome,
+            effectiveProfile,
+            groupName
+        );
+        return {
+            category_id: cs.category_id,
+            base_avg: cs.avg_monthly_spend,
+            amount: adjustedAmount,
+            klass: classifyBudgetLine(groupName),
+            guardrail_reason: guardrailReason,
+        };
+    });
+
+    // Ensure the savings/investing goal is its own line even without spend history (transfers
+    // to external, non-Plaid savings/brokerage accounts never show up as categorized spend).
+    // Categories already under the Savings group count toward the goal rather than stacking.
+    if (monthlySavingsGoal && monthlySavingsGoal > 0) {
+        const savingsCategoryId = await resolveSavingsGoalCategoryId(supabase, userId);
+        if (savingsCategoryId) {
+            const existing = plannedLines.find((l) => l.category_id === savingsCategoryId);
+            const otherTrackedSavings = plannedLines
+                .filter((l) => l.category_id !== savingsCategoryId && l.klass === 'savings')
+                .reduce((sum, l) => sum + l.amount, 0);
+            const targetAmount = Math.max(existing?.amount || 0, monthlySavingsGoal - otherTrackedSavings);
+
+            if (existing) {
+                existing.amount = targetAmount;
+                existing.klass = 'savings';
+                existing.guardrail_reason = 'Savings/investing goal';
+            } else {
+                plannedLines.push({
+                    category_id: savingsCategoryId,
+                    base_avg: 0,
+                    amount: targetAmount,
+                    klass: 'savings',
+                    guardrail_reason: 'Savings/investing goal',
+                });
+            }
+        }
+    }
+
+    // Hard constraint: total budget must not exceed income (protect essentials + savings,
+    // scale discretionary).
+    const normalization = normalizeToIncome(
+        plannedLines.map((l) => ({ category_id: l.category_id, amount: l.amount, klass: l.klass })),
+        avgIncome
+    );
+    const finalAmountByCategory = new Map(normalization.lines.map((l) => [l.category_id, l]));
+
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - sourceDataDays);
+    const oneOffsTotal = oneOffs.reduce((s, o) => s + o.amount, 0);
 
     // Deactivate existing active budget for this month
     await supabase
@@ -384,7 +662,6 @@ export async function generateBudgetPlan(
         .eq('month', options.month)
         .eq('status', 'active');
 
-    // Create budget plan
     const { data: budgetPlan, error: planError } = await supabase
         .from('budget_plans')
         .insert({
@@ -399,7 +676,21 @@ export async function generateBudgetPlan(
                 avg_monthly_income: avgIncome,
                 income_source: declaredIncome && declaredIncome > 0 ? 'declared' : 'transaction_derived',
                 monthly_savings_goal: monthlySavingsGoal,
-                categories_included: categorySpends.length,
+                categories_included: plannedLines.length,
+                source_data_days: sourceDataDays,
+                normalization: {
+                    total_before: normalization.totalBefore,
+                    total_after: normalization.totalAfter,
+                    income: normalization.income,
+                    discretionary_scale: normalization.discretionaryScale,
+                    warning: normalization.warning,
+                },
+                one_offs_excluded: {
+                    count: oneOffs.length,
+                    total: Math.round(oneOffsTotal * 100) / 100,
+                    // Kept for the confirm flow — surface these for the user to re-include if wanted.
+                    items: oneOffs.slice(0, 50),
+                },
             },
         })
         .select()
@@ -409,29 +700,23 @@ export async function generateBudgetPlan(
         throw new Error(`Failed to create budget plan: ${planError.message}`);
     }
 
-    // Create budget items with guardrails
     const budgetItems: BudgetItem[] = [];
-    const categoryGroupNames = await getCategoryGroupNames(
-        supabase,
-        categorySpends.map((c) => c.category_id)
-    );
-
-    for (const categorySpend of categorySpends) {
-        const { adjustedAmount, guardrailReason } = applyGuardrails(
-            categorySpend.avg_monthly_spend,
-            avgIncome,
-            effectiveProfile,
-            categoryGroupNames.get(categorySpend.category_id) || categorySpend.category_name
-        );
+    for (const line of plannedLines) {
+        const normalized = finalAmountByCategory.get(line.category_id);
+        const finalAmount = normalized ? normalized.amount : line.amount;
+        const reason =
+            normalized?.scaled
+                ? [line.guardrail_reason, 'Scaled to fit income'].filter(Boolean).join('; ')
+                : line.guardrail_reason;
 
         const { data: budgetItem, error: itemError } = await supabase
             .from('budget_items')
             .insert({
                 budget_plan_id: budgetPlan.id,
-                category_id: categorySpend.category_id,
-                amount: adjustedAmount,
-                guardrail_adjustment: adjustedAmount - categorySpend.avg_monthly_spend,
-                guardrail_reason: guardrailReason,
+                category_id: line.category_id,
+                amount: finalAmount,
+                guardrail_adjustment: Math.round((finalAmount - line.base_avg) * 100) / 100,
+                guardrail_reason: reason,
                 user_override_amount: null,
                 user_override_reason: null,
             })
@@ -440,59 +725,6 @@ export async function generateBudgetPlan(
 
         if (!itemError && budgetItem) {
             budgetItems.push(budgetItem as BudgetItem);
-        }
-    }
-
-    // Ensure the savings/investing goal shows up as its own budget line, even if there's no
-    // spend history for it yet (e.g. transfers to external savings/brokerage accounts that
-    // aren't Plaid-connected won't show up as categorized transactions). Other categories
-    // already tracked under the Savings/Investing group (e.g. a recurring 529 contribution)
-    // count toward the goal instead of stacking on top of it.
-    if (monthlySavingsGoal && monthlySavingsGoal > 0) {
-        const savingsCategoryId = await resolveSavingsGoalCategoryId(supabase, userId);
-        if (savingsCategoryId) {
-            const existing = budgetItems.find((i) => i.category_id === savingsCategoryId);
-            const otherTrackedSavings = budgetItems
-                .filter(
-                    (i) =>
-                        i.category_id !== savingsCategoryId &&
-                        PROTECTED_GROUPS.has(categoryGroupNames.get(i.category_id) || '')
-                )
-                .reduce((sum, i) => sum + (i.user_override_amount ?? i.amount), 0);
-            const targetAmount = Math.max(
-                existing?.amount || 0,
-                monthlySavingsGoal - otherTrackedSavings
-            );
-
-            if (existing) {
-                const { data: updated } = await supabase
-                    .from('budget_items')
-                    .update({
-                        amount: targetAmount,
-                        guardrail_reason: 'Savings/investing goal',
-                    })
-                    .eq('id', existing.id)
-                    .select()
-                    .single();
-                if (updated) Object.assign(existing, updated);
-            } else {
-                const { data: goalItem, error: goalError } = await supabase
-                    .from('budget_items')
-                    .insert({
-                        budget_plan_id: budgetPlan.id,
-                        category_id: savingsCategoryId,
-                        amount: targetAmount,
-                        guardrail_adjustment: 0,
-                        guardrail_reason: 'Savings/investing goal',
-                        user_override_amount: null,
-                        user_override_reason: null,
-                    })
-                    .select()
-                    .single();
-                if (!goalError && goalItem) {
-                    budgetItems.push(goalItem as BudgetItem);
-                }
-            }
         }
     }
 

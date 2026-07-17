@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
                 await generateBudgetPlan({
                     userId,
                     month: currentMonth,
-                    sourceDataDays: 180,
+                    // Baseline off all available history (capped at Plaid's 730-day max).
                 });
                 budgetResults.push({ userId, success: true });
             } catch (error) {
