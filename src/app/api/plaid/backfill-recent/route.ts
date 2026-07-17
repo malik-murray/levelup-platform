@@ -28,7 +28,8 @@ export async function POST(request: NextRequest) {
         }
 
         const body = (await request.json().catch(() => ({}))) as { days?: number };
-        const days = Math.max(1, Math.min(Number(body.days ?? 14), 90));
+        // Allow up to 730 days (Plaid's max) for a one-time deep backfill after re-linking.
+        const days = Math.max(1, Math.min(Number(body.days ?? 14), 730));
 
         const supabase = createClient(supabaseUrl, supabaseAnonKey, {
             global: { headers: { Authorization: `Bearer ${token}` } },

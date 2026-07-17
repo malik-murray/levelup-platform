@@ -167,6 +167,7 @@ async function getCategorySpendSummary(
         .lt('date', endDate.toISOString().split('T')[0])
         .lt('amount', 0) // Expenses only
         .eq('is_transfer', false) // Exclude money moved between the user's own accounts
+        .is('removed_at', null) // Exclude Plaid-removed / retired-item transactions
         .not('category_id', 'is', null);
 
     if (error) {
@@ -225,7 +226,8 @@ async function getAverageMonthlyIncome(userId: string, days: number = 180): Prom
         .gte('date', startDate.toISOString().split('T')[0])
         .lt('date', endDate.toISOString().split('T')[0])
         .gt('amount', 0) // Income only
-        .eq('is_transfer', false); // Exclude money moved between the user's own accounts
+        .eq('is_transfer', false) // Exclude money moved between the user's own accounts
+        .is('removed_at', null); // Exclude Plaid-removed / retired-item transactions
 
     if (error) {
         console.error('Error fetching income:', error);
@@ -586,7 +588,8 @@ export async function getRemainingBudgetForCategory(
             .gte('date', monthStart)
             .lt('date', nextMonthStart)
             .lt('amount', 0)
-            .eq('is_transfer', false),
+            .eq('is_transfer', false)
+            .is('removed_at', null),
     ]);
 
     const spent = (transactions || []).reduce((sum: number, tx: any) => sum + Math.abs(tx.amount), 0);

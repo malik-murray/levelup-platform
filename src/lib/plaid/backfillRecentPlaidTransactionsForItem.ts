@@ -33,7 +33,9 @@ export async function backfillRecentPlaidTransactionsForItem(params: {
     days?: number;
 }): Promise<BackfillRecentResult> {
     const { supabase, plaidItemId } = params;
-    const days = Math.max(1, Math.min(params.days ?? 14, 90));
+    // Cap at 730 days (Plaid's max history window) so a one-time deep backfill can pull
+    // up to ~24 months; the daily gap-fill still passes a small `days` value.
+    const days = Math.max(1, Math.min(params.days ?? 14, 730));
 
     const { data: plaidItem, error: itemError } = await supabase
         .from('plaid_items')

@@ -120,6 +120,13 @@ export async function POST(request: NextRequest) {
                 country_codes: [CountryCode.Us],
                 language: 'en',
                 webhook: getPlaidWebhookUrl(),
+                // Request the maximum historical window Plaid allows (730 days) so the
+                // budget engine can baseline off up to ~24 months of spend. This only
+                // affects the initial pull for THIS link, so existing items must be
+                // re-linked to unlock the deeper history.
+                transactions: {
+                    days_requested: 730,
+                },
             });
 
             return NextResponse.json({
