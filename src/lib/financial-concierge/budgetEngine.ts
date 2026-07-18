@@ -753,10 +753,40 @@ export async function generateBudgetPlan(
         }
     }
 
+    // Bridge to the YNAB-style /finance/budget page, which reads `category_budgets` rather
+    // than the concierge `budget_items`. Without this the generated plan is invisible there.
+    await syncBudgetItemsToCategoryBudgets(supabase, userId, options.month, budgetItems);
+
     return {
         ...(budgetPlan as BudgetPlan),
         items: budgetItems,
     };
+}
+
+/**
+ * Mirrors a generated plan's amounts into `category_budgets` (the table the main
+ * /finance/budget page reads), for the given month, so the generated budget is visible there.
+ * Replaces the month's rows so a regeneration reflects the latest plan.
+ */
+async function syncBudgetItemsToCategoryBudgets(
+    supabase: SupabaseClient,
+    userId: string,
+    month: string, // YYYY-MM
+    items: BudgetItem[]
+): Promise<void> {
+    await supabase.from('category_budgets').delete().eq('user_id', userId).eq('month', month);
+
+    const rows = items.map((item) => ({
+        user_id: userId,
+        category_id: item.category_id,
+        month,
+        amount: item.user_override_amount ?? item.amount,
+    }));
+
+    if (rows.length > 0) {
+        const { error } = await supabase.from('category_budgets').insert(rows);
+        if (error) console.error('Failed to sync category_budgets:', error.message);
+    }
 }
 
 /**
