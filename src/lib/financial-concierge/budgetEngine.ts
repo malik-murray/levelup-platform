@@ -21,6 +21,29 @@ function getServiceClient() {
     });
 }
 
+/**
+ * Fetches every row for a query, paging past PostgREST's default 1000-row cap. Without this,
+ * budget aggregates over a long history silently drop everything after the first 1000 rows —
+ * undercounting categories and skewing the whole plan.
+ */
+async function fetchAllRows<T>(
+    buildPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
+): Promise<T[]> {
+    const pageSize = 1000;
+    const all: T[] = [];
+    for (let from = 0; ; from += pageSize) {
+        const { data, error } = await buildPage(from, from + pageSize - 1);
+        if (error) {
+            console.error('fetchAllRows error:', (error as { message?: string }).message);
+            break;
+        }
+        if (!data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < pageSize) break;
+    }
+    return all;
+}
+
 export interface BudgetGenerationOptions {
     userId: string;
     month: string; // YYYY-MM format
@@ -132,6 +155,69 @@ export function medianMonthlyTotal(txns: { amount: number; date: string | null }
         byMonth.set(month, (byMonth.get(month) || 0) + t.amount);
     }
     return median([...byMonth.values()]);
+}
+
+export interface MonthlyEstimate {
+    amount: number;
+    basis: 'recurring_monthly' | 'annualized';
+    activeMonths: number;
+}
+
+/**
+ * Pure: estimate a category's monthly budget, distinguishing recurring monthly bills from
+ * genuinely sporadic costs.
+ *
+ * - Recurring (rent, phone, insurance, child support): budget the TYPICAL monthly amount
+ *   (median of active-month totals), so capture gaps don't dilute it.
+ * - Sporadic (taxes, car/home maintenance): spread the cost as a sinking fund
+ *   (total ÷ window months), so an occasional big hit isn't budgeted as if it were monthly.
+ *
+ * A category counts as recurring when it appears in a healthy fraction of all months OR keeps
+ * showing up recently — the latter rescues ongoing bills (phone, child support) whose overall
+ * ratio is low only because older months were captured on a different account.
+ */
+export function estimateMonthlyBudget(
+    txns: { amount: number; date: string | null }[],
+    windowMonths: number,
+    recentMonthKeys: string[],
+    options: { activeRatioThreshold?: number; recentMinActive?: number } = {}
+): MonthlyEstimate {
+    const activeRatioThreshold = options.activeRatioThreshold ?? 0.4;
+    const recentMinActive = options.recentMinActive ?? 3;
+
+    const byMonth = new Map<string, number>();
+    let total = 0;
+    for (const t of txns) {
+        const month = t.date && /^\d{4}-\d{2}/.test(t.date) ? t.date.slice(0, 7) : 'unknown';
+        byMonth.set(month, (byMonth.get(month) || 0) + t.amount);
+        total += t.amount;
+    }
+
+    const activeMonths = byMonth.size;
+    const medianMonthly = median([...byMonth.values()]);
+    const annualized = windowMonths > 0 ? total / windowMonths : total;
+    const recentActive = recentMonthKeys.filter((k) => byMonth.has(k)).length;
+
+    const isRecurring =
+        (windowMonths > 0 && activeMonths / windowMonths >= activeRatioThreshold) ||
+        recentActive >= recentMinActive;
+
+    return {
+        amount: isRecurring ? medianMonthly : annualized,
+        basis: isRecurring ? 'recurring_monthly' : 'annualized',
+        activeMonths,
+    };
+}
+
+/** The last `n` calendar months as YYYY-MM keys, most recent first. */
+export function lastNMonthKeys(n: number, from: Date = new Date()): string[] {
+    const keys: string[] = [];
+    const d = new Date(from.getFullYear(), from.getMonth(), 1);
+    for (let i = 0; i < n; i++) {
+        keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+        d.setMonth(d.getMonth() - 1);
+    }
+    return keys;
 }
 
 export interface NormalizableLine {
@@ -333,29 +419,29 @@ async function getCategorySpendSummary(
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    // Get transactions with categories (expenses only - negative amounts)
-    const { data: transactions, error } = await supabase
-        .from('transactions')
-        .select(`
-            id,
-            amount,
-            category_id,
-            date,
-            name,
-            categories!inner(id, name)
-        `)
-        .eq('user_id', userId)
-        .gte('date', startDate.toISOString().split('T')[0])
-        .lt('date', endDate.toISOString().split('T')[0])
-        .lt('amount', 0) // Expenses only
-        .eq('is_transfer', false) // Exclude money moved between the user's own accounts
-        .is('removed_at', null) // Exclude Plaid-removed / retired-item transactions
-        .not('category_id', 'is', null);
-
-    if (error) {
-        console.error('Error fetching transactions:', error);
-        return { summaries: [], oneOffs: [] };
-    }
+    // Get transactions with categories (expenses only - negative amounts). Paginated so a long
+    // history isn't truncated at PostgREST's 1000-row default.
+    const transactions = await fetchAllRows<any>((from, to) =>
+        supabase
+            .from('transactions')
+            .select(`
+                id,
+                amount,
+                category_id,
+                date,
+                name,
+                categories!inner(id, name)
+            `)
+            .eq('user_id', userId)
+            .gte('date', startDate.toISOString().split('T')[0])
+            .lt('date', endDate.toISOString().split('T')[0])
+            .lt('amount', 0) // Expenses only
+            .eq('is_transfer', false) // Exclude money moved between the user's own accounts
+            .is('removed_at', null) // Exclude Plaid-removed / retired-item transactions
+            .not('category_id', 'is', null)
+            .order('id', { ascending: true })
+            .range(from, to)
+    );
 
     type TxLite = { id: string; amount: number; date: string | null; name: string | null };
     const categoryMap = new Map<string, { name: string; txns: TxLite[] }>();
@@ -381,6 +467,8 @@ async function getCategorySpendSummary(
 
     const summaries: CategorySpendSummary[] = [];
     const oneOffs: OneOffTransaction[] = [];
+    const windowMonths = Math.max(1, Math.round(days / 30.44));
+    const recentMonthKeys = lastNMonthKeys(4);
 
     for (const [categoryId, data] of categoryMap.entries()) {
         const amounts = data.txns.map((t) => t.amount);
@@ -409,9 +497,10 @@ async function getCategorySpendSummary(
             category_name: data.name,
             total_spend: recurringTotal,
             transaction_count: recurringTxns.length,
-            // Typical monthly spend = median of per-month totals (active months), so recurring
-            // bills with capture gaps aren't diluted. See medianMonthlyTotal.
-            avg_monthly_spend: medianMonthlyTotal(recurringTxns),
+            // Recurring bills -> typical monthly amount; sporadic costs -> spread as a sinking
+            // fund. See estimateMonthlyBudget.
+            avg_monthly_spend: estimateMonthlyBudget(recurringTxns, windowMonths, recentMonthKeys)
+                .amount,
         });
     }
 
@@ -455,22 +544,21 @@ async function getAverageMonthlyIncome(userId: string, days: number = 180): Prom
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    const { data: transactions, error } = await supabase
-        .from('transactions')
-        .select('amount')
-        .eq('user_id', userId)
-        .gte('date', startDate.toISOString().split('T')[0])
-        .lt('date', endDate.toISOString().split('T')[0])
-        .gt('amount', 0) // Income only
-        .eq('is_transfer', false) // Exclude money moved between the user's own accounts
-        .is('removed_at', null); // Exclude Plaid-removed / retired-item transactions
+    const transactions = await fetchAllRows<{ amount: number }>((from, to) =>
+        supabase
+            .from('transactions')
+            .select('amount')
+            .eq('user_id', userId)
+            .gte('date', startDate.toISOString().split('T')[0])
+            .lt('date', endDate.toISOString().split('T')[0])
+            .gt('amount', 0) // Income only
+            .eq('is_transfer', false) // Exclude money moved between the user's own accounts
+            .is('removed_at', null) // Exclude Plaid-removed / retired-item transactions
+            .order('id', { ascending: true })
+            .range(from, to)
+    );
 
-    if (error) {
-        console.error('Error fetching income:', error);
-        return 0;
-    }
-
-    const totalIncome = (transactions || []).reduce((sum, tx) => sum + tx.amount, 0);
+    const totalIncome = transactions.reduce((sum, tx) => sum + tx.amount, 0);
     const monthsInPeriod = days / 30;
     return totalIncome / monthsInPeriod;
 }
