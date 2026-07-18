@@ -134,92 +134,6 @@ export function detectOneOffAmounts(
     return flags;
 }
 
-/** Median of a numeric list (0 for empty). */
-export function median(values: number[]): number {
-    if (values.length === 0) return 0;
-    const sorted = [...values].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-}
-
-/**
- * Pure: estimate a category's typical monthly spend as the median of its per-month totals,
- * across only the months it was actually active. Robust to capture gaps and partial entries
- * (a bill missing from some months, or logged in pieces) — a recurring ~$1,950 rent lands at
- * ~$1,950 rather than being diluted by empty months, which total ÷ all-months would do.
- */
-export function medianMonthlyTotal(txns: { amount: number; date: string | null }[]): number {
-    const byMonth = new Map<string, number>();
-    for (const t of txns) {
-        const month = t.date && /^\d{4}-\d{2}/.test(t.date) ? t.date.slice(0, 7) : 'unknown';
-        byMonth.set(month, (byMonth.get(month) || 0) + t.amount);
-    }
-    return median([...byMonth.values()]);
-}
-
-export interface MonthlyEstimate {
-    amount: number;
-    basis: 'recurring_monthly' | 'annualized';
-    activeMonths: number;
-}
-
-/**
- * Pure: estimate a category's monthly budget, distinguishing recurring monthly bills from
- * genuinely sporadic costs.
- *
- * - Recurring (rent, phone, insurance, child support): budget the TYPICAL monthly amount
- *   (median of active-month totals), so capture gaps don't dilute it.
- * - Sporadic (taxes, car/home maintenance): spread the cost as a sinking fund
- *   (total ÷ window months), so an occasional big hit isn't budgeted as if it were monthly.
- *
- * A category counts as recurring when it appears in a healthy fraction of all months OR keeps
- * showing up recently — the latter rescues ongoing bills (phone, child support) whose overall
- * ratio is low only because older months were captured on a different account.
- */
-export function estimateMonthlyBudget(
-    txns: { amount: number; date: string | null }[],
-    windowMonths: number,
-    recentMonthKeys: string[],
-    options: { activeRatioThreshold?: number; recentMinActive?: number } = {}
-): MonthlyEstimate {
-    const activeRatioThreshold = options.activeRatioThreshold ?? 0.4;
-    const recentMinActive = options.recentMinActive ?? 3;
-
-    const byMonth = new Map<string, number>();
-    let total = 0;
-    for (const t of txns) {
-        const month = t.date && /^\d{4}-\d{2}/.test(t.date) ? t.date.slice(0, 7) : 'unknown';
-        byMonth.set(month, (byMonth.get(month) || 0) + t.amount);
-        total += t.amount;
-    }
-
-    const activeMonths = byMonth.size;
-    const medianMonthly = median([...byMonth.values()]);
-    const annualized = windowMonths > 0 ? total / windowMonths : total;
-    const recentActive = recentMonthKeys.filter((k) => byMonth.has(k)).length;
-
-    const isRecurring =
-        (windowMonths > 0 && activeMonths / windowMonths >= activeRatioThreshold) ||
-        recentActive >= recentMinActive;
-
-    return {
-        amount: isRecurring ? medianMonthly : annualized,
-        basis: isRecurring ? 'recurring_monthly' : 'annualized',
-        activeMonths,
-    };
-}
-
-/** The last `n` calendar months as YYYY-MM keys, most recent first. */
-export function lastNMonthKeys(n: number, from: Date = new Date()): string[] {
-    const keys: string[] = [];
-    const d = new Date(from.getFullYear(), from.getMonth(), 1);
-    for (let i = 0; i < n; i++) {
-        keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-        d.setMonth(d.getMonth() - 1);
-    }
-    return keys;
-}
-
 export interface NormalizableLine {
     category_id: string;
     amount: number;
@@ -468,7 +382,6 @@ async function getCategorySpendSummary(
     const summaries: CategorySpendSummary[] = [];
     const oneOffs: OneOffTransaction[] = [];
     const windowMonths = Math.max(1, Math.round(days / 30.44));
-    const recentMonthKeys = lastNMonthKeys(4);
 
     for (const [categoryId, data] of categoryMap.entries()) {
         const amounts = data.txns.map((t) => t.amount);
@@ -497,41 +410,15 @@ async function getCategorySpendSummary(
             category_name: data.name,
             total_spend: recurringTotal,
             transaction_count: recurringTxns.length,
-            // Recurring bills -> typical monthly amount; sporadic costs -> spread as a sinking
-            // fund. See estimateMonthlyBudget.
-            avg_monthly_spend: estimateMonthlyBudget(recurringTxns, windowMonths, recentMonthKeys)
-                .amount,
+            // Recent-history baseline: what this category runs per month over the recent window
+            // (spend ÷ months). One-offs already excluded above so a single big hit doesn't skew it.
+            avg_monthly_spend: recurringTotal / windowMonths,
         });
     }
 
     summaries.sort((a, b) => b.avg_monthly_spend - a.avg_monthly_spend);
     oneOffs.sort((a, b) => b.amount - a.amount);
     return { summaries, oneOffs };
-}
-
-/**
- * Determines how many days of usable (non-transfer, non-removed) history exist, so the budget
- * baselines off all available history ("as far back as possible") rather than a fixed window.
- * The median-of-monthly-totals estimator (see medianMonthlyTotal) keeps a long, uneven history
- * from skewing recurring lines, so there's no upper cap; a 90-day floor covers brand-new users.
- */
-async function getSpendHistorySpanDays(userId: string): Promise<number> {
-    const supabase = getServiceClient();
-    const { data } = await supabase
-        .from('transactions')
-        .select('date')
-        .eq('user_id', userId)
-        .eq('is_transfer', false)
-        .is('removed_at', null)
-        .not('date', 'is', null)
-        .order('date', { ascending: true })
-        .limit(1);
-
-    const earliest = data?.[0]?.date as string | undefined;
-    if (!earliest) return 180;
-
-    const spanDays = Math.ceil((Date.now() - new Date(earliest).getTime()) / 86_400_000);
-    return Math.max(90, spanDays);
 }
 
 /**
@@ -653,9 +540,10 @@ export async function generateBudgetPlan(
     const supabase = getServiceClient();
     const userId = options.userId;
 
-    // Baseline off as much history as available (capped at Plaid's 730-day max) unless an
-    // explicit window is requested.
-    const sourceDataDays = options.sourceDataDays ?? (await getSpendHistorySpanDays(userId));
+    // Baseline off recent history — the last ~6 months reflect current bills rather than a
+    // multi-year average. Callers can override with an explicit window.
+    const RECENT_WINDOW_DAYS = 183;
+    const sourceDataDays = options.sourceDataDays ?? RECENT_WINDOW_DAYS;
 
     const profile = options.profileType
         ? { profile_type: options.profileType, guardrails: {}, preferences: {}, budget_strategy: 'zero_based' } as UserProfile

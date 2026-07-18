@@ -7,10 +7,6 @@ import {
     detectOneOffAmounts,
     normalizeToIncome,
     classifyBudgetLine,
-    median,
-    medianMonthlyTotal,
-    estimateMonthlyBudget,
-    lastNMonthKeys,
     type NormalizableLine,
 } from '../budgetEngine';
 
@@ -141,93 +137,6 @@ describe('BudgetEngine', () => {
             expect(r.discretionaryScale).toBeNull();
             expect(r.totalAfter).toBe(4200);
             expect(r.warning).toMatch(/no income/i);
-        });
-    });
-
-    describe('median', () => {
-        it('handles odd, even, and empty', () => {
-            expect(median([3, 1, 2])).toBe(2);
-            expect(median([1, 2, 3, 4])).toBe(2.5);
-            expect(median([])).toBe(0);
-        });
-    });
-
-    describe('medianMonthlyTotal', () => {
-        it('estimates a recurring bill at its typical monthly amount despite capture gaps', () => {
-            // rent present in 3 months (~1950), missing others, one partial month
-            const txns = [
-                { amount: 1950, date: '2023-06-01' },
-                { amount: 1952, date: '2023-07-01' },
-                { amount: 1949, date: '2023-08-01' },
-                { amount: 174, date: '2024-01-15' }, // partial month
-            ];
-            // monthly totals: [1950, 1952, 1949, 174] -> median 1949.5
-            expect(medianMonthlyTotal(txns)).toBeCloseTo(1949.5, 1);
-        });
-
-        it('sums multiple transactions within the same month before taking the median', () => {
-            const txns = [
-                { amount: 20, date: '2024-03-02' },
-                { amount: 30, date: '2024-03-20' }, // March total 50
-                { amount: 40, date: '2024-04-10' }, // April total 40
-                { amount: 60, date: '2024-05-10' }, // May total 60
-            ];
-            expect(medianMonthlyTotal(txns)).toBe(50);
-        });
-
-        it('is empty-safe', () => {
-            expect(medianMonthlyTotal([])).toBe(0);
-        });
-    });
-
-    describe('estimateMonthlyBudget', () => {
-        const noRecent: string[] = ['9999-01']; // keys that won't match test data
-
-        it('budgets a regularly-recurring bill at its typical monthly amount', () => {
-            // active in 6 of 12 months (ratio 0.5 >= 0.4) at ~$1950
-            const txns = ['2023-06', '2023-07', '2023-08', '2023-09', '2023-10', '2023-11'].map(
-                (m) => ({ amount: 1950, date: `${m}-01` })
-            );
-            const r = estimateMonthlyBudget(txns, 12, noRecent);
-            expect(r.basis).toBe('recurring_monthly');
-            expect(r.amount).toBe(1950);
-        });
-
-        it('spreads a sporadic cost as a sinking fund (annualized)', () => {
-            // 2 tax hits of $600 over a 24-month window, not recent -> 1200/24 = 50
-            const txns = [
-                { amount: 600, date: '2023-04-15' },
-                { amount: 600, date: '2023-11-15' },
-            ];
-            const r = estimateMonthlyBudget(txns, 24, noRecent);
-            expect(r.basis).toBe('annualized');
-            expect(r.amount).toBe(50);
-        });
-
-        it('rescues an ongoing bill with a low overall ratio via recent recurrence', () => {
-            // only 3 of 24 months active (ratio 0.125) but all in the recent window -> monthly
-            const txns = [
-                { amount: 144, date: '2026-05-10' },
-                { amount: 144, date: '2026-06-10' },
-                { amount: 144, date: '2026-07-10' },
-            ];
-            const recent = ['2026-07', '2026-06', '2026-05', '2026-04'];
-            const r = estimateMonthlyBudget(txns, 24, recent);
-            expect(r.basis).toBe('recurring_monthly');
-            expect(r.amount).toBe(144);
-        });
-
-        it('is empty-safe', () => {
-            expect(estimateMonthlyBudget([], 12, noRecent).amount).toBe(0);
-        });
-    });
-
-    describe('lastNMonthKeys', () => {
-        it('returns n most-recent YYYY-MM keys, newest first', () => {
-            expect(lastNMonthKeys(3, new Date(2026, 6, 17))).toEqual(['2026-07', '2026-06', '2026-05']);
-        });
-        it('rolls across year boundaries', () => {
-            expect(lastNMonthKeys(3, new Date(2026, 0, 5))).toEqual(['2026-01', '2025-12', '2025-11']);
         });
     });
 
