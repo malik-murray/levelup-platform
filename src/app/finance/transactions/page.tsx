@@ -3837,7 +3837,16 @@ export default function TransactionsPage() {
                             {displayedTransactions.map(tx => (
                                 <div
                                     key={tx.id}
-                                    className={`flex items-center gap-2 rounded-md border px-3 py-2 ${
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => handleEditTransaction(tx)}
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            handleEditTransaction(tx);
+                                        }
+                                    }}
+                                    className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 hover:border-slate-600 ${
                                         tx.is_transfer
                                             ? 'border-blue-700 bg-slate-950'
                                             : selectedTransactionIds.has(tx.id)
@@ -3849,6 +3858,7 @@ export default function TransactionsPage() {
                                         type="checkbox"
                                         checked={selectedTransactionIds.has(tx.id)}
                                         onChange={() => handleToggleSelectTransaction(tx.id)}
+                                        onClick={e => e.stopPropagation()}
                                         className="rounded border-slate-600"
                                     />
                                     <div className="flex-1">
@@ -3885,22 +3895,16 @@ export default function TransactionsPage() {
                                                 maximumFractionDigits: 2,
                                             }).format(Math.abs(tx.amount))}
                                         </div>
-                                        <div className="flex gap-2 text-[10px] text-slate-400">
-                                            <button
-                                                type="button"
-                                                onClick={() => handleEditTransaction(tx)}
-                                                className="hover:text-amber-300"
-                                            >
-                                                Edit
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleDeleteTransaction(tx.id)}
-                                                className="hover:text-red-400"
-                                            >
-                                                Delete
-                                            </button>
-                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={e => {
+                                                e.stopPropagation();
+                                                handleDeleteTransaction(tx.id);
+                                            }}
+                                            className="text-[10px] text-slate-400 hover:text-red-400"
+                                        >
+                                            Delete
+                                        </button>
                                     </div>
                                 </div>
                             ))}
