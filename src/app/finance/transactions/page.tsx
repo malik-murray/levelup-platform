@@ -118,6 +118,8 @@ export default function TransactionsPage() {
     const [newTransferToAccountName, setNewTransferToAccountName] = useState('');
     const [newTransferFromAccountType, setNewTransferFromAccountType] = useState<AccountType>('checking');
     const [newTransferToAccountType, setNewTransferToAccountType] = useState<AccountType>('checking');
+    /** When true, this transfer counts toward Savings/Investing on the budget. */
+    const [transferIsSavingsInvesting, setTransferIsSavingsInvesting] = useState(false);
     const [creatingTransfer, setCreatingTransfer] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [originalTransactionType, setOriginalTransactionType] = useState<'transaction' | 'transfer' | null>(null);
@@ -279,18 +281,18 @@ export default function TransactionsPage() {
         [categories]
     );
 
-    /** Categories that can budget a transfer as Savings/Investing (plus plain Transfer). */
-    const transferBudgetCategories = useMemo(() => {
-        const leaves = categories.filter(c => c.kind === 'category');
-        const savings = leaves.filter(c => isSavingsInvestingBucket(c.type, c.name));
-        const transferLeaf = leaves.find(
-            c => c.type === 'transfer' || c.name.toLowerCase() === 'transfer'
-        );
-        const byId = new Map<string, (typeof leaves)[0]>();
-        if (transferLeaf) byId.set(transferLeaf.id, transferLeaf);
-        for (const c of savings) byId.set(c.id, c);
-        return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
-    }, [categories]);
+    /** Savings/Investing leaf categories (excludes the plain Transfer category). */
+    const savingsInvestingCategories = useMemo(
+        () =>
+            categories
+                .filter(
+                    c =>
+                        c.kind === 'category' &&
+                        isSavingsInvestingBucket(c.type, c.name)
+                )
+                .sort((a, b) => a.name.localeCompare(b.name)),
+        [categories]
+    );
 
     const bulkCategoryIsTransfer = Boolean(
         selectedBulkCategory &&
@@ -643,6 +645,7 @@ export default function TransactionsPage() {
         setNewTransferToAccountName('');
         setNewTransferFromAccountType('checking');
         setNewTransferToAccountType('checking');
+        setTransferIsSavingsInvesting(false);
         setApplyCategoryToMatchingDescriptions(false);
     };
 
@@ -726,29 +729,41 @@ export default function TransactionsPage() {
 
     const handleEditTransaction = (tx: Transaction) => {
         if (tx.is_transfer) {
-            // For transfers, find both transactions in the group
-            const transferGroup = transactions.filter(
-                t => t.transfer_group_id === tx.transfer_group_id && t.is_transfer
+            // Only match on a real group id — `null === null` would otherwise pull in every
+            // unpaired transfer and prefill the wrong amount (e.g. someone else's $20).
+            const transferGroup = tx.transfer_group_id
+                ? transactions.filter(
+                      t => t.transfer_group_id === tx.transfer_group_id && t.is_transfer
+                  )
+                : [tx];
+            const fromTx =
+                transferGroup.find(t => t.amount < 0) || (tx.amount < 0 ? tx : undefined);
+            const toTx =
+                transferGroup.find(t => t.amount > 0) || (tx.amount > 0 ? tx : undefined);
+
+            setEditingId(tx.id);
+            setOriginalTransactionType('transfer');
+            setTransactionType('transfer');
+            setDate(tx.date.slice(0, 10));
+            // Always use the row the user clicked so a broken pair can't swap in another amount.
+            setAmount(Math.abs(tx.amount).toString());
+            setNote(tx.name || tx.note || '');
+            setTransferFromAccount(fromTx?.accountId ?? '');
+            setTransferToAccount(toTx?.accountId ?? '');
+            setAccountId(fromTx?.accountId ?? tx.accountId ?? '');
+            const catId = fromTx?.categoryId ?? tx.categoryId ?? '';
+            setCategoryId(catId);
+            const cat = categories.find(c => c.id === catId);
+            setTransferIsSavingsInvesting(
+                Boolean(cat && isSavingsInvestingBucket(cat.type, cat.name))
             );
-            const fromTx = transferGroup.find(t => t.amount < 0);
-            const toTx = transferGroup.find(t => t.amount > 0);
-            
-            if (fromTx && toTx) {
-                setEditingId(tx.id); // Store the ID of the transaction being edited
-                setOriginalTransactionType('transfer'); // Track original type
-                setTransactionType('transfer');
-                setDate(tx.date.slice(0, 10));
-                setAmount(Math.abs(fromTx.amount).toString()); // Use absolute value for amount input
-                setNote(tx.name || tx.note || '');
-                setTransferFromAccount(fromTx.accountId ?? '');
-                setTransferToAccount(toTx.accountId ?? '');
-                // Pre-fill regular transaction fields in case user switches to transaction type
-                setAccountId(fromTx.accountId ?? '');
-                setCategoryId(fromTx.categoryId ?? '');
-                setIsAddingFormCategory(false);
-                setShowTransactionForm(true);
-            } else {
-                setNotification('Could not find both sides of transfer. Please delete and recreate.');
+            setIsAddingFormCategory(false);
+            setShowTransactionForm(true);
+
+            if (!fromTx || !toTx) {
+                setNotification(
+                    'Could not find both sides of this transfer. Amount is from the selected transaction — check From/To accounts before saving.'
+                );
             }
         } else {
             // Regular transaction
@@ -1552,8 +1567,20 @@ export default function TransactionsPage() {
             return;
         }
 
-        // Savings/Investing pick from the form, else plain Transfer category.
-        const budgetCatId = categoryId || transferCategoryId;
+        // Checkbox on: savings/investing category. Off: plain Transfer.
+        let budgetCatId: string | null = transferCategoryId;
+        if (transferIsSavingsInvesting) {
+            const selectedIsSavings = savingsInvestingCategories.some(c => c.id === categoryId);
+            budgetCatId = selectedIsSavings
+                ? categoryId
+                : savingsInvestingCategories[0]?.id ?? null;
+            if (!budgetCatId) {
+                setNotification(
+                    'Add a Savings/Investing category on the Budget page before marking a transfer as savings.'
+                );
+                return;
+            }
+        }
 
         setCreatingTransfer(true);
         setNotification(null);
@@ -2914,35 +2941,65 @@ export default function TransactionsPage() {
                         </div>
                         {transactionType === 'transfer' && (
                             <>
-                                <div className="space-y-1">
-                                    <label className="block text-slate-300">
-                                        Budget as (Savings/Investing)
-                                    </label>
-                                    <select
-                                        className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
-                                        value={categoryId || transferCategoryId || ''}
-                                        onChange={e => setCategoryId(e.target.value)}
-                                    >
-                                        {transferBudgetCategories.length === 0 ? (
-                                            <option value="">Transfer</option>
-                                        ) : (
-                                            transferBudgetCategories.map(c => (
-                                                <option key={c.id} value={c.id}>
-                                                    {c.name}
-                                                    {isSavingsInvestingBucket(c.type, c.name) &&
-                                                    c.name.toLowerCase() !== 'transfer'
-                                                        ? ' (counts toward savings budget)'
-                                                        : ''}
-                                                </option>
-                                            ))
-                                        )}
-                                    </select>
-                                    <p className="text-[10px] text-slate-500">
-                                        Pick a Savings/Investing category so this move shows on your
-                                        budget. Leave as Transfer for account-to-account moves that
-                                        are not savings goals.
-                                    </p>
-                                </div>
+                                <label className="flex cursor-pointer items-start gap-2 rounded-md border border-slate-800 bg-slate-950/80 px-3 py-2 text-sm text-slate-300">
+                                    <input
+                                        type="checkbox"
+                                        className="mt-0.5 shrink-0"
+                                        checked={transferIsSavingsInvesting}
+                                        onChange={e => {
+                                            const checked = e.target.checked;
+                                            setTransferIsSavingsInvesting(checked);
+                                            if (checked) {
+                                                if (
+                                                    !savingsInvestingCategories.some(
+                                                        c => c.id === categoryId
+                                                    )
+                                                ) {
+                                                    setCategoryId(
+                                                        savingsInvestingCategories[0]?.id ?? ''
+                                                    );
+                                                }
+                                            } else {
+                                                setCategoryId(transferCategoryId ?? '');
+                                            }
+                                        }}
+                                    />
+                                    <span>
+                                        <span className="font-medium text-slate-200">
+                                            Savings/Investing
+                                        </span>
+                                        <span className="mt-0.5 block text-[11px] text-slate-500">
+                                            Checked: counts toward your savings budget. Unchecked:
+                                            treated as a regular account transfer.
+                                        </span>
+                                    </span>
+                                </label>
+                                {transferIsSavingsInvesting &&
+                                    savingsInvestingCategories.length > 1 && (
+                                        <div className="space-y-1">
+                                            <label className="block text-slate-300">
+                                                Savings category
+                                            </label>
+                                            <select
+                                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
+                                                value={categoryId || ''}
+                                                onChange={e => setCategoryId(e.target.value)}
+                                            >
+                                                {savingsInvestingCategories.map(c => (
+                                                    <option key={c.id} value={c.id}>
+                                                        {c.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
+                                {transferIsSavingsInvesting &&
+                                    savingsInvestingCategories.length === 0 && (
+                                        <p className="text-[11px] text-amber-400">
+                                            No Savings/Investing categories yet. Create one on the
+                                            Budget page (type Savings/Investing).
+                                        </p>
+                                    )}
                                 <div className="space-y-1">
                                     <label className="block text-slate-300">Memo (optional)</label>
                                     <input
