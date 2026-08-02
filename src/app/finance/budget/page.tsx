@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { supabase } from '@auth/supabaseClient';
-import { getBudgetGroupsForMonth, getBudgetSummaryForMonth, saveCategoryBudget, deleteCategoryBudget, duplicateBudgets, getNextMonthStr, reorderCategories } from '@/lib/budgetGroups';
+import { getBudgetDataForMonth, saveCategoryBudget, deleteCategoryBudget, duplicateBudgets, getNextMonthStr, reorderCategories } from '@/lib/budgetGroups';
+import { computeTotalBudgeted } from '@/lib/budgetOverview';
 import type { BudgetGroup, Category, BudgetSummary } from '@/lib/types';
 
 export default function BudgetPage() {
@@ -87,10 +88,7 @@ export default function BudgetPage() {
     const loadBudgetData = async () => {
         setLoading(true);
         try {
-            const [groups, summaryData] = await Promise.all([
-                getBudgetGroupsForMonth(monthStr),
-                getBudgetSummaryForMonth(monthStr),
-            ]);
+            const { groups, summary: summaryData } = await getBudgetDataForMonth(monthStr);
             setBudgetGroups(groups);
             setSummary(summaryData);
         } catch (error) {
@@ -265,16 +263,20 @@ export default function BudgetPage() {
                     };
                 });
                 
-                // Recalculate summary from updated groups
+                // Recalculate summary from updated groups (preserve cashflow totals)
                 const totalAssigned = updatedGroups.reduce((sum, group) => sum + group.totalAssigned, 0);
                 const totalActivity = updatedGroups.reduce((sum, group) => sum + group.totalActivity, 0);
                 const totalAvailable = totalAssigned - totalActivity;
-                
-                setSummary({
+                const totalBudgeted = computeTotalBudgeted(updatedGroups);
+
+                setSummary((prev) => ({
                     totalAssigned,
                     totalActivity,
                     totalAvailable,
-                });
+                    totalBudgeted,
+                    totalIncome: prev?.totalIncome ?? 0,
+                    totalExpenses: prev?.totalExpenses ?? 0,
+                }));
                 
                 return updatedGroups;
             });
@@ -1056,25 +1058,22 @@ export default function BudgetPage() {
 
             {/* Summary Section */}
             {summary && (() => {
-                // Calculate income and expense totals separately
-                const incomeGroups = budgetGroups.filter(g => g.type === 'income');
-                const expenseGroups = budgetGroups.filter(g => g.type === 'expense');
+                // Income/Expenses use all non-transfer transactions (same as transactions page),
+                // not only amounts sitting in income-/expense-typed categories.
                 const transferGroups = budgetGroups.filter(g => g.type === 'transfer');
-                
-                const incomeAssigned = incomeGroups.reduce((sum, g) => sum + g.totalAssigned, 0);
-                const incomeActivity = incomeGroups.reduce((sum, g) => sum + g.totalActivity, 0);
-                const incomeAvailable = incomeAssigned - incomeActivity;
-                
-                const expenseAssigned = expenseGroups.reduce((sum, g) => sum + Math.abs(g.totalAssigned), 0);
-                const expenseActivity = expenseGroups.reduce((sum, g) => sum + Math.abs(g.totalActivity), 0);
-                const expenseAvailable = expenseAssigned - expenseActivity;
-                
+
+                const totalIncome = summary.totalIncome;
+                const totalExpenses = summary.totalExpenses;
+                const totalBudgeted = summary.totalBudgeted;
+                const incomeAvailable = totalIncome - totalBudgeted;
+                const expenseAvailable = totalBudgeted - totalExpenses;
+
                 const savingsAssigned = transferGroups.reduce((sum, g) => sum + Math.abs(g.totalAssigned), 0);
                 const savingsActivity = transferGroups.reduce((sum, g) => sum + Math.abs(g.totalActivity), 0);
                 const savingsAvailable = savingsAssigned - savingsActivity;
-                
-                // Net available = Income - Expenses - Savings
-                const netIncome = incomeAvailable - expenseAvailable - savingsActivity;
+
+                // Ready to assign after expense + savings budgets
+                const netIncome = totalIncome - totalBudgeted - savingsAssigned;
                 
                 return (
                     <div className="space-y-3">
@@ -1085,10 +1084,7 @@ export default function BudgetPage() {
                                 <div className="rounded-md border border-emerald-700/50 bg-emerald-950/30 p-3">
                                     <div className="text-emerald-400 text-[10px] font-semibold uppercase mb-1">⬆️ Income</div>
                                     <div className="text-lg font-semibold text-emerald-300 mb-1">
-                                        {formatCurrency(incomeAssigned)}
-                                    </div>
-                                    <div className="text-[10px] text-slate-400">
-                                        Activity: {formatCurrency(incomeActivity)}
+                                        {formatCurrency(totalIncome)}
                                     </div>
                                     <div className={`text-[10px] font-medium mt-1 ${
                                         incomeAvailable >= 0 ? 'text-emerald-300' : 'text-red-400'
@@ -1099,10 +1095,7 @@ export default function BudgetPage() {
                                 <div className="rounded-md border border-red-700/50 bg-red-950/30 p-3">
                                     <div className="text-red-400 text-[10px] font-semibold uppercase mb-1">⬇️ Expenses</div>
                                     <div className="text-lg font-semibold text-red-300 mb-1">
-                                        {formatCurrency(expenseAssigned)}
-                                    </div>
-                                    <div className="text-[10px] text-slate-400">
-                                        Activity: {formatCurrency(expenseActivity)}
+                                        {formatCurrency(totalExpenses)}
                                     </div>
                                     <div className={`text-[10px] font-medium mt-1 ${
                                         expenseAvailable >= 0 ? 'text-emerald-300' : 'text-red-400'

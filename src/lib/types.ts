@@ -25,6 +25,7 @@ export type Transaction = {
     date: string; // ISO format: YYYY-MM-DD
     amount: number; // positive for inflow, negative for outflow
     category_id: string | null; // Can reference either group or category, but activity is typically on categories
+    is_transfer?: boolean; // Internal account moves — excluded from income/expense cashflow
 };
 
 /**
@@ -60,6 +61,12 @@ export type BudgetSummary = {
     totalAssigned: number; // sum of all subcategory assigned
     totalActivity: number; // sum of all activity
     totalAvailable: number; // money left for the month
+    /** All positive non-transfer inflows (matches transactions page Income). */
+    totalIncome: number;
+    /** All negative non-transfer outflows as a positive total (matches transactions page Expenses). */
+    totalExpenses: number;
+    /** Sum of amounts budgeted to expense categories. */
+    totalBudgeted: number;
 };
 
 

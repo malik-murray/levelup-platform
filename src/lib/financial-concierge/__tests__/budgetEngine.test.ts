@@ -7,6 +7,7 @@ import {
     detectOneOffAmounts,
     normalizeToIncome,
     classifyBudgetLine,
+    buildGoalLines,
     type NormalizableLine,
 } from '../budgetEngine';
 
@@ -137,6 +138,79 @@ describe('BudgetEngine', () => {
             expect(r.discretionaryScale).toBeNull();
             expect(r.totalAfter).toBe(4200);
             expect(r.warning).toMatch(/no income/i);
+        });
+    });
+
+    describe('buildGoalLines', () => {
+        const savingsCat = { categoryId: 'save', existingAmount: 0 };
+        const investCat = { categoryId: 'invest', existingAmount: 0 };
+
+        it('creates two distinct protected lines for savings and investing', () => {
+            const lines = buildGoalLines(
+                { ...savingsCat, goal: 500 },
+                { ...investCat, goal: 300 }
+            );
+            expect(lines).toHaveLength(2);
+            const byId = Object.fromEntries(lines.map((l) => [l.category_id, l]));
+            expect(byId.save.amount).toBe(500);
+            expect(byId.save.reason).toBe('Savings goal');
+            expect(byId.invest.amount).toBe(300);
+            expect(byId.invest.reason).toBe('Investing goal');
+        });
+
+        it('only emits a savings line when investing goal is zero', () => {
+            const lines = buildGoalLines(
+                { ...savingsCat, goal: 500 },
+                { ...investCat, goal: 0 }
+            );
+            expect(lines).toHaveLength(1);
+            expect(lines[0].category_id).toBe('save');
+        });
+
+        it('nets already-tracked savings-class spend off the savings goal only', () => {
+            const lines = buildGoalLines(
+                { ...savingsCat, goal: 500 },
+                { ...investCat, goal: 300 },
+                200 // e.g. a real transfer already categorized as savings
+            );
+            const byId = Object.fromEntries(lines.map((l) => [l.category_id, l]));
+            expect(byId.save.amount).toBe(300); // 500 - 200
+            expect(byId.invest.amount).toBe(300); // investing untouched by the offset
+        });
+
+        it('never reduces an amount already planned from history (floor)', () => {
+            const lines = buildGoalLines(
+                { categoryId: 'save', goal: 500, existingAmount: 700 },
+                { categoryId: 'invest', goal: 0, existingAmount: 0 }
+            );
+            expect(lines[0].amount).toBe(700);
+        });
+
+        it('merges into one line when both goals resolve to the same category', () => {
+            const lines = buildGoalLines(
+                { categoryId: 'both', goal: 500, existingAmount: 0 },
+                { categoryId: 'both', goal: 300, existingAmount: 0 }
+            );
+            expect(lines).toHaveLength(1);
+            expect(lines[0].amount).toBe(800);
+            expect(lines[0].reason).toBe('Savings & investing goal');
+        });
+
+        it('emits nothing when there are no goals and no existing amounts', () => {
+            const lines = buildGoalLines(
+                { categoryId: 'save', goal: 0, existingAmount: 0 },
+                { categoryId: 'invest', goal: 0, existingAmount: 0 }
+            );
+            expect(lines).toHaveLength(0);
+        });
+
+        it('skips a goal whose category could not be resolved', () => {
+            const lines = buildGoalLines(
+                { categoryId: null, goal: 500, existingAmount: 0 },
+                { ...investCat, goal: 300 }
+            );
+            expect(lines).toHaveLength(1);
+            expect(lines[0].category_id).toBe('invest');
         });
     });
 

@@ -49,6 +49,16 @@ export interface BudgetGenerationOptions {
     month: string; // YYYY-MM format
     sourceDataDays?: number; // Default: 180 days (~6 months)
     profileType?: string; // Override profile type
+    /**
+     * Explicit monthly savings goal (from the generate form). Overrides the survey-derived
+     * figure. Omit to fall back to the survey (target_savings_amount / timeline).
+     */
+    savingsGoal?: number;
+    /**
+     * Explicit monthly investing goal (from the generate form). The survey has no investing
+     * amount, so this is the only source for a distinct investing line. Omit for none.
+     */
+    investingGoal?: number;
 }
 
 // Category/group names used to classify spend for guardrail purposes. The live `categories`
@@ -225,11 +235,17 @@ export function normalizeToIncome(lines: NormalizableLine[], income: number): No
 }
 
 /**
- * Finds a leaf category to attach an explicit savings/investing goal budget line to
- * (under a "Savings"/"Savings/Investing" group). Prefers a user-owned category named
- * "Investments" as a general catch-all, falling back to the first leaf under that group.
+ * Finds a leaf category to attach a savings or investing goal budget line to (under a
+ * "Savings"/"Savings/Investing" group). Investing prefers a leaf named like Investments /
+ * Retirement / Brokerage / IRA / 401k; savings prefers Savings / Emergency and otherwise
+ * takes the first leaf that isn't the investing one, so the two goals resolve to distinct
+ * categories when possible. Returns null if no savings/investing group or leaf exists.
  */
-async function resolveSavingsGoalCategoryId(supabase: any, userId: string): Promise<string | null> {
+async function resolveGoalCategoryId(
+    supabase: any,
+    userId: string,
+    kind: 'savings' | 'investing'
+): Promise<string | null> {
     const { data: userGroups } = await supabase
         .from('categories')
         .select('id, name')
@@ -257,7 +273,98 @@ async function resolveSavingsGoalCategoryId(supabase: any, userId: string): Prom
 
     if (!leaves || leaves.length === 0) return null;
 
-    return (leaves.find((c: any) => c.name === 'Investments') || leaves[0]).id;
+    const investingRe = /invest|retire|brokerage|401|ira/i;
+    const investing = (leaves as any[]).find((c) => investingRe.test(c.name)) || null;
+
+    if (kind === 'investing') {
+        return (investing || leaves[0]).id;
+    }
+
+    // savings: prefer an explicit savings/emergency leaf, else the first leaf that isn't
+    // the investing one (so savings and investing don't collapse onto the same category).
+    const savings =
+        (leaves as any[]).find((c) => /saving|emergency/i.test(c.name)) ||
+        (leaves as any[]).find((c) => !investing || c.id !== investing.id) ||
+        leaves[0];
+    return savings.id;
+}
+
+export interface GoalSpec {
+    /** Resolved leaf category for this goal, or null if none could be resolved. */
+    categoryId: string | null;
+    /** Desired monthly contribution. 0 / undefined means "no explicit goal". */
+    goal: number;
+    /** Amount already planned on this category from spend history (kept as a floor). */
+    existingAmount: number;
+}
+
+export interface GoalLine {
+    category_id: string;
+    amount: number;
+    reason: string;
+}
+
+/**
+ * Pure: turn savings + investing goal specs into the protected budget lines to upsert.
+ *  - A goal never reduces an amount already planned from history (max with existingAmount).
+ *  - `otherTrackedSavings` (savings-class spend already categorized elsewhere) is netted off
+ *    the savings goal only, so a declared goal isn't double-counted on top of real transfers.
+ *  - If both goals resolve to the SAME category they're merged into one line so neither
+ *    overwrites the other.
+ */
+export function buildGoalLines(
+    savings: GoalSpec,
+    investing: GoalSpec,
+    otherTrackedSavings: number = 0
+): GoalLine[] {
+    const hasSavings = savings.categoryId != null && savings.goal > 0;
+    const hasInvesting = investing.categoryId != null && investing.goal > 0;
+
+    // Both goals point at the same leaf: fund the combined target on one line.
+    if (
+        hasSavings &&
+        hasInvesting &&
+        savings.categoryId === investing.categoryId
+    ) {
+        const combined = savings.goal + investing.goal;
+        const existing = Math.max(savings.existingAmount, investing.existingAmount);
+        const amount = Math.max(existing, combined - otherTrackedSavings);
+        return [
+            {
+                category_id: savings.categoryId as string,
+                amount,
+                reason: 'Savings & investing goal',
+            },
+        ];
+    }
+
+    const lines: GoalLine[] = [];
+
+    if (savings.categoryId != null) {
+        if (savings.goal > 0) {
+            lines.push({
+                category_id: savings.categoryId,
+                amount: Math.max(savings.existingAmount, savings.goal - otherTrackedSavings),
+                reason: 'Savings goal',
+            });
+        } else if (savings.existingAmount > 0) {
+            lines.push({
+                category_id: savings.categoryId,
+                amount: savings.existingAmount,
+                reason: 'Savings goal',
+            });
+        }
+    }
+
+    if (investing.categoryId != null && investing.goal > 0) {
+        lines.push({
+            category_id: investing.categoryId,
+            amount: Math.max(investing.existingAmount, investing.goal),
+            reason: 'Investing goal',
+        });
+    }
+
+    return lines;
 }
 
 /**
@@ -566,18 +673,30 @@ export async function generateBudgetPlan(
     const declaredIncome = (profile?.preferences as any)?.declared_monthly_income;
     const avgIncome = declaredIncome && declaredIncome > 0 ? declaredIncome : txAvgIncome;
 
-    const monthlySavingsGoal =
+    const surveySavingsGoal =
         survey?.target_savings_amount && survey?.target_savings_timeline_months
             ? survey.target_savings_amount / survey.target_savings_timeline_months
             : null;
 
+    // Explicit goals from the generate form take priority over the survey. Savings and
+    // investing are tracked as two distinct goals; the survey only supplies a savings figure.
+    const savingsGoal =
+        options.savingsGoal != null && options.savingsGoal >= 0
+            ? options.savingsGoal
+            : surveySavingsGoal ?? 0;
+    const investingGoal =
+        options.investingGoal != null && options.investingGoal >= 0 ? options.investingGoal : 0;
+    const totalGoal = savingsGoal + investingGoal;
+
     const effectiveProfile: UserProfile | null =
-        profile && monthlySavingsGoal && avgIncome > 0
+        profile && totalGoal > 0 && avgIncome > 0
             ? {
                   ...profile,
                   guardrails: {
                       ...profile.guardrails,
-                      minimum_savings_rate: monthlySavingsGoal / avgIncome,
+                      // Both savings and investing pull income away from discretionary, so the
+                      // guardrail's target savings rate reflects the combined goal.
+                      minimum_savings_rate: totalGoal / avgIncome,
                   },
               }
             : profile;
@@ -614,29 +733,49 @@ export async function generateBudgetPlan(
         };
     });
 
-    // Ensure the savings/investing goal is its own line even without spend history (transfers
-    // to external, non-Plaid savings/brokerage accounts never show up as categorized spend).
-    // Categories already under the Savings group count toward the goal rather than stacking.
-    if (monthlySavingsGoal && monthlySavingsGoal > 0) {
-        const savingsCategoryId = await resolveSavingsGoalCategoryId(supabase, userId);
-        if (savingsCategoryId) {
-            const existing = plannedLines.find((l) => l.category_id === savingsCategoryId);
-            const otherTrackedSavings = plannedLines
-                .filter((l) => l.category_id !== savingsCategoryId && l.klass === 'savings')
-                .reduce((sum, l) => sum + l.amount, 0);
-            const targetAmount = Math.max(existing?.amount || 0, monthlySavingsGoal - otherTrackedSavings);
+    // Ensure the savings + investing goals are their own protected lines even without spend
+    // history (transfers to external, non-Plaid savings/brokerage accounts never show up as
+    // categorized spend). Savings-class spend already categorized elsewhere counts toward the
+    // savings goal rather than stacking on top of it.
+    if (totalGoal > 0) {
+        const [savingsCategoryId, investingCategoryId] = await Promise.all([
+            savingsGoal > 0 ? resolveGoalCategoryId(supabase, userId, 'savings') : Promise.resolve(null),
+            investingGoal > 0 ? resolveGoalCategoryId(supabase, userId, 'investing') : Promise.resolve(null),
+        ]);
 
+        const goalCategoryIds = new Set(
+            [savingsCategoryId, investingCategoryId].filter(Boolean) as string[]
+        );
+        // Existing savings-class spend that isn't one of the goal categories — netted off the
+        // savings goal so a declared goal isn't double-counted on top of real transfers.
+        const otherTrackedSavings = plannedLines
+            .filter((l) => l.klass === 'savings' && !goalCategoryIds.has(l.category_id))
+            .reduce((sum, l) => sum + l.amount, 0);
+
+        const existingAmountFor = (categoryId: string | null) =>
+            categoryId
+                ? plannedLines.find((l) => l.category_id === categoryId)?.amount || 0
+                : 0;
+
+        const goalLines = buildGoalLines(
+            { categoryId: savingsCategoryId, goal: savingsGoal, existingAmount: existingAmountFor(savingsCategoryId) },
+            { categoryId: investingCategoryId, goal: investingGoal, existingAmount: existingAmountFor(investingCategoryId) },
+            otherTrackedSavings
+        );
+
+        for (const goalLine of goalLines) {
+            const existing = plannedLines.find((l) => l.category_id === goalLine.category_id);
             if (existing) {
-                existing.amount = targetAmount;
+                existing.amount = goalLine.amount;
                 existing.klass = 'savings';
-                existing.guardrail_reason = 'Savings/investing goal';
+                existing.guardrail_reason = goalLine.reason;
             } else {
                 plannedLines.push({
-                    category_id: savingsCategoryId,
+                    category_id: goalLine.category_id,
                     base_avg: 0,
-                    amount: targetAmount,
+                    amount: goalLine.amount,
                     klass: 'savings',
-                    guardrail_reason: 'Savings/investing goal',
+                    guardrail_reason: goalLine.reason,
                 });
             }
         }
@@ -676,7 +815,11 @@ export async function generateBudgetPlan(
             metadata: {
                 avg_monthly_income: avgIncome,
                 income_source: declaredIncome && declaredIncome > 0 ? 'declared' : 'transaction_derived',
-                monthly_savings_goal: monthlySavingsGoal,
+                // monthly_savings_goal kept for backward compatibility (= combined goal); the
+                // form reads savings_goal / investing_goal to prefill the two distinct fields.
+                monthly_savings_goal: totalGoal > 0 ? totalGoal : null,
+                savings_goal: savingsGoal,
+                investing_goal: investingGoal,
                 categories_included: plannedLines.length,
                 source_data_days: sourceDataDays,
                 normalization: {

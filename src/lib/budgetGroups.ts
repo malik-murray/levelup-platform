@@ -4,6 +4,9 @@
 
 import { supabase } from '@auth/supabaseClient';
 import type { Category, CategoryBudget, Transaction, BudgetGroup, BudgetCategoryRow, BudgetSummary } from './types';
+import { computeMonthCashflow, computeTotalBudgeted } from './budgetOverview';
+
+export { computeMonthCashflow, computeTotalBudgeted } from './budgetOverview';
 
 /**
  * Fetches categories, budgets, and transactions for a given month and returns grouped structure
@@ -11,6 +14,23 @@ import type { Category, CategoryBudget, Transaction, BudgetGroup, BudgetCategory
 export async function getBudgetGroupsForMonth(
     monthStr: string // Format: YYYY-MM
 ): Promise<BudgetGroup[]> {
+    const { groups } = await loadBudgetMonthData(monthStr);
+    return groups;
+}
+
+/**
+ * Single fetch for the budget page: groups + summary (including cashflow totals).
+ */
+export async function getBudgetDataForMonth(
+    monthStr: string
+): Promise<{ groups: BudgetGroup[]; summary: BudgetSummary }> {
+    const { groups, transactions } = await loadBudgetMonthData(monthStr);
+    return { groups, summary: buildBudgetSummary(groups, transactions) };
+}
+
+async function loadBudgetMonthData(
+    monthStr: string
+): Promise<{ groups: BudgetGroup[]; transactions: Transaction[] }> {
     // Calculate date range for the month
     const [year, month] = monthStr.split('-').map(Number);
     const startOfMonth = new Date(year, month - 1, 1);
@@ -120,7 +140,7 @@ export async function getBudgetGroupsForMonth(
     // Fetch transactions for the month
     const { data: transactionsData, error: transactionsError } = await supabase
         .from('transactions')
-        .select('id, date, amount, category_id')
+        .select('id, date, amount, category_id, is_transfer')
         .eq('user_id', user.id)
         .gte('date', startStr)
         .lt('date', endStr);
@@ -133,6 +153,7 @@ export async function getBudgetGroupsForMonth(
     const transactions = ((transactionsData as Transaction[]) ?? []).map(tx => ({
         ...tx,
         amount: Number(tx.amount),
+        is_transfer: Boolean(tx.is_transfer),
     }));
 
     // Build maps for quick lookup
@@ -349,12 +370,34 @@ export async function getBudgetGroupsForMonth(
     });
 
     // Sort groups by sort_order, then by name
-    return budgetGroups.sort((a, b) => {
+    const sortedGroups = budgetGroups.sort((a, b) => {
         const orderA = a.sort_order ?? 999999;
         const orderB = b.sort_order ?? 999999;
         if (orderA !== orderB) return orderA - orderB;
         return a.name.localeCompare(b.name); // Fallback to name sorting
     });
+
+    return { groups: sortedGroups, transactions };
+}
+
+function buildBudgetSummary(
+    groups: BudgetGroup[],
+    transactions: Array<{ amount: number; is_transfer?: boolean | null }>
+): BudgetSummary {
+    const totalAssigned = groups.reduce((sum, group) => sum + group.totalAssigned, 0);
+    const totalActivity = groups.reduce((sum, group) => sum + group.totalActivity, 0);
+    const totalAvailable = totalAssigned - totalActivity;
+    const { totalIncome, totalExpenses } = computeMonthCashflow(transactions);
+    const totalBudgeted = computeTotalBudgeted(groups);
+
+    return {
+        totalAssigned,
+        totalActivity,
+        totalAvailable,
+        totalIncome,
+        totalExpenses,
+        totalBudgeted,
+    };
 }
 
 /**
@@ -363,17 +406,8 @@ export async function getBudgetGroupsForMonth(
 export async function getBudgetSummaryForMonth(
     monthStr: string
 ): Promise<BudgetSummary> {
-    const groups = await getBudgetGroupsForMonth(monthStr);
-
-    const totalAssigned = groups.reduce((sum, group) => sum + group.totalAssigned, 0);
-    const totalActivity = groups.reduce((sum, group) => sum + group.totalActivity, 0);
-    const totalAvailable = totalAssigned - totalActivity;
-
-    return {
-        totalAssigned,
-        totalActivity,
-        totalAvailable,
-    };
+    const { summary } = await getBudgetDataForMonth(monthStr);
+    return summary;
 }
 
 /**

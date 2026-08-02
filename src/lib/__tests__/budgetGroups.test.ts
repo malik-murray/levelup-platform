@@ -4,8 +4,69 @@
  */
 
 import type { BudgetGroup } from '../types';
+import { computeMonthCashflow, computeTotalBudgeted } from '../budgetOverview';
 
 describe('budgetGroups', () => {
+    describe('computeMonthCashflow', () => {
+        it('sums all income and expenses regardless of category, excluding transfers', () => {
+            const { totalIncome, totalExpenses } = computeMonthCashflow([
+                { amount: 5000, is_transfer: false }, // uncategorized income
+                { amount: 1972.65, is_transfer: false },
+                { amount: -1200, is_transfer: false }, // uncategorized expense
+                { amount: -4294.72, is_transfer: false },
+                { amount: -500, is_transfer: true }, // internal transfer — ignored
+                { amount: 500, is_transfer: true },
+            ]);
+
+            expect(totalIncome).toBeCloseTo(6972.65, 2);
+            expect(totalExpenses).toBeCloseTo(5494.72, 2);
+        });
+
+        it('treats missing is_transfer as non-transfer', () => {
+            const { totalIncome, totalExpenses } = computeMonthCashflow([
+                { amount: 100 },
+                { amount: -40 },
+            ]);
+            expect(totalIncome).toBe(100);
+            expect(totalExpenses).toBe(40);
+        });
+    });
+
+    describe('computeTotalBudgeted', () => {
+        it('sums only expense-group assigned amounts', () => {
+            const groups: BudgetGroup[] = [
+                {
+                    id: 'inc',
+                    name: 'Income',
+                    type: 'income',
+                    categories: [],
+                    totalAssigned: 0,
+                    totalActivity: 0,
+                    totalAvailable: 0,
+                },
+                {
+                    id: 'exp',
+                    name: 'Expenses',
+                    type: 'expense',
+                    categories: [],
+                    totalAssigned: 1959.55,
+                    totalActivity: 0,
+                    totalAvailable: 1959.55,
+                },
+                {
+                    id: 'sav',
+                    name: 'Savings',
+                    type: 'transfer',
+                    categories: [],
+                    totalAssigned: 300,
+                    totalActivity: 0,
+                    totalAvailable: 300,
+                },
+            ];
+            expect(computeTotalBudgeted(groups)).toBeCloseTo(1959.55, 2);
+        });
+    });
+
     describe('Group totals consistency', () => {
         it('should calculate group totals as sum of children', () => {
             const mockGroups: BudgetGroup[] = [

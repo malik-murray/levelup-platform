@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { month, source_data_days } = body;
+        const { month, source_data_days, savings_goal, investing_goal } = body;
 
         if (!month) {
             return NextResponse.json(
@@ -54,12 +54,20 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        const toGoal = (v: unknown): number | undefined => {
+            const n = typeof v === 'number' ? v : parseFloat(String(v));
+            return Number.isFinite(n) && n >= 0 ? n : undefined;
+        };
+
         const budgetPlan = await generateBudgetPlan({
             userId: user.id,
             month,
-            // Omit to baseline off all available history (capped at Plaid's 730-day max);
-            // only pass an explicit window when the caller requests one.
+            // Omit to baseline off the recent ~6-month window (engine default); only pass an
+            // explicit window when the caller requests one.
             sourceDataDays: source_data_days || undefined,
+            // Explicit monthly goals from the generate form; omitted values fall back to the survey.
+            savingsGoal: toGoal(savings_goal),
+            investingGoal: toGoal(investing_goal),
         });
 
         return NextResponse.json({
