@@ -884,16 +884,16 @@ export async function generateBudgetPlan(
 
 /**
  * Mirrors a generated plan's amounts into `category_budgets` (the table the main
- * /finance/budget page reads), for the given month, so the generated budget is visible there.
- * Replaces the month's rows so a regeneration reflects the latest plan.
+ * /finance/budget page reads). Assigned amounts are sticky across months, so this
+ * replaces the user's entire sticky set (not just one month).
  */
 async function syncBudgetItemsToCategoryBudgets(
     supabase: SupabaseClient,
     userId: string,
-    month: string, // YYYY-MM
+    month: string, // YYYY-MM — anchor month for the new rows
     items: BudgetItem[]
 ): Promise<void> {
-    await supabase.from('category_budgets').delete().eq('user_id', userId).eq('month', month);
+    await supabase.from('category_budgets').delete().eq('user_id', userId);
 
     const rows = items.map((item) => ({
         user_id: userId,

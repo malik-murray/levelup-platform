@@ -16,7 +16,7 @@ export type Category = {
 export type CategoryBudget = {
     id: string;
     category_id: string; // Must reference a kind='category' item
-    month: string; // Format: YYYY-MM
+    month: string; // Format: YYYY-MM — storage anchor; assigned amounts are sticky across months
     amount: number;
 };
 

@@ -1,5 +1,5 @@
 /**
- * Pure helpers for Budget Overview cashflow totals.
+ * Pure helpers for Budget Overview cashflow totals and sticky assigned amounts.
  * Kept separate from budgetGroups.ts so unit tests don't need a Supabase client.
  */
 
@@ -28,4 +28,41 @@ export function computeTotalBudgeted(groups: BudgetGroup[]): number {
     return groups
         .filter((g) => g.type === 'expense')
         .reduce((sum, g) => sum + Math.abs(g.totalAssigned), 0);
+}
+
+/**
+ * Resolve one sticky assigned amount per category from month-keyed rows.
+ * Latest YYYY-MM wins so the budget carries forward until manually changed.
+ */
+export function resolveStickyBudgetAmounts(
+    budgets: Array<{ category_id: string; month: string; amount: number }>
+): Map<string, number> {
+    // Track best month seen per category so a later month always replaces an earlier one.
+    const bestMonth = new Map<string, string>();
+    const amounts = new Map<string, number>();
+
+    for (const b of budgets) {
+        const prev = bestMonth.get(b.category_id);
+        if (prev == null || b.month > prev) {
+            bestMonth.set(b.category_id, b.month);
+            amounts.set(b.category_id, Number(b.amount));
+        }
+    }
+    return amounts;
+}
+
+/**
+ * True when a category/group should appear under Savings/Investing on the budget page.
+ * Matches explicit `type: 'transfer'` or common savings/investing names (seeded Savings
+ * groups historically used type `expense`). The plain "Transfer" leaf is excluded — that
+ * is for account-to-account moves, not savings goals.
+ */
+export function isSavingsInvestingBucket(
+    type: string | null | undefined,
+    name: string | null | undefined
+): boolean {
+    const n = (name || '').trim().toLowerCase();
+    if (n === 'transfer') return false;
+    if (type === 'transfer') return true;
+    return /saving|invest/i.test(n);
 }

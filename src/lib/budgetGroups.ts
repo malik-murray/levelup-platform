@@ -4,9 +4,14 @@
 
 import { supabase } from '@auth/supabaseClient';
 import type { Category, CategoryBudget, Transaction, BudgetGroup, BudgetCategoryRow, BudgetSummary } from './types';
-import { computeMonthCashflow, computeTotalBudgeted } from './budgetOverview';
+import { computeMonthCashflow, computeTotalBudgeted, resolveStickyBudgetAmounts, isSavingsInvestingBucket } from './budgetOverview';
 
-export { computeMonthCashflow, computeTotalBudgeted } from './budgetOverview';
+export {
+    computeMonthCashflow,
+    computeTotalBudgeted,
+    resolveStickyBudgetAmounts,
+    isSavingsInvestingBucket,
+} from './budgetOverview';
 
 /**
  * Fetches categories, budgets, and transactions for a given month and returns grouped structure
@@ -111,12 +116,12 @@ async function loadBudgetMonthData(
     
     const categories = (sortedCategories as Category[]) ?? [];
 
-    // Fetch budgets for the month
+    // Sticky budget: assigned amounts carry across months. Load every row for the user and
+    // keep the latest month's amount per category. Activity below stays scoped to monthStr.
     const { data: budgetsData, error: budgetsError } = await supabase
         .from('category_budgets')
         .select('id, category_id, month, amount')
-        .eq('user_id', user.id)
-        .eq('month', monthStr);
+        .eq('user_id', user.id);
 
     if (budgetsError) {
         console.error('Error fetching budgets:', budgetsError);
@@ -156,11 +161,7 @@ async function loadBudgetMonthData(
         is_transfer: Boolean(tx.is_transfer),
     }));
 
-    // Build maps for quick lookup
-    const budgetsByCategoryId = new Map<string, number>();
-    budgets.forEach(b => {
-        budgetsByCategoryId.set(b.category_id, b.amount);
-    });
+    const budgetsByCategoryId = resolveStickyBudgetAmounts(budgets);
 
     // Calculate activity per category
     // Activity should be positive for both expenses (spent) and income (earned)
@@ -173,7 +174,14 @@ async function loadBudgetMonthData(
         const category = categories.find(c => c.id === tx.category_id);
         
         if (category) {
-            if (category.type === 'expense') {
+            if (isSavingsInvestingBucket(category.type, category.name)) {
+                // Savings/investing: count the outflow leg only (money leaving checking → savings).
+                // Avoids double-counting when both transfer legs share the same category.
+                activityByCategoryId.set(
+                    tx.category_id,
+                    current + Math.abs(Math.min(0, tx.amount))
+                );
+            } else if (category.type === 'expense') {
                 // For expenses, negative amounts represent spending
                 // Activity = absolute value of negative amounts (money spent)
                 activityByCategoryId.set(tx.category_id, current + Math.abs(Math.min(0, tx.amount)));
@@ -181,10 +189,6 @@ async function loadBudgetMonthData(
                 // For income, positive amounts represent earnings
                 // Activity = positive amounts (money earned)
                 activityByCategoryId.set(tx.category_id, current + Math.max(0, tx.amount));
-            } else if (category.type === 'transfer') {
-                // For savings/investing: use absolute value (positive amount saved)
-                // Transfers to savings accounts are typically negative (money leaving), but we want positive "saved"
-                activityByCategoryId.set(tx.category_id, current + Math.abs(tx.amount));
             } else {
                 // For unknown, use absolute value
                 activityByCategoryId.set(tx.category_id, current + Math.abs(tx.amount));
@@ -212,6 +216,10 @@ async function loadBudgetMonthData(
     const budgetGroups: BudgetGroup[] = groups.map(group => {
         // Find all categories that belong to this group
         const groupCategories = groupedCategories.filter(c => c.parent_id === group.id);
+        // Seeded "Savings" groups were type=expense; treat them as savings/investing for the UI.
+        const effectiveType: BudgetGroup['type'] = isSavingsInvestingBucket(group.type, group.name)
+            ? 'transfer'
+            : group.type;
 
         // Build BudgetCategoryRow array for this group's categories
         const categoryRows: BudgetCategoryRow[] = groupCategories.map(cat => {
@@ -224,18 +232,18 @@ async function loadBudgetMonthData(
             let assigned: number;
             let available: number;
             
-            if (group.type === 'expense') {
+            if (effectiveType === 'expense') {
                 // For expenses: assigned is stored as negative, but we calculate using absolute value
                 // Example: budget -$950, spent $950 → available = 950 - 950 = 0
                 assigned = rawAssigned; // Keep as negative for storage consistency
                 const assignedAbs = Math.abs(rawAssigned);
                 available = assignedAbs - activity;
-            } else if (group.type === 'income') {
+            } else if (effectiveType === 'income') {
                 // For income: assigned is positive, activity is positive
                 // Example: budget $1000, earned $500 → available = 1000 - 500 = 500
                 assigned = rawAssigned;
                 available = assigned - activity;
-            } else if (group.type === 'transfer') {
+            } else if (effectiveType === 'transfer') {
                 // For savings/investing: assigned can be positive or negative, but we treat as positive savings
                 // Activity is positive (amount saved this month)
                 assigned = Math.abs(rawAssigned); // Always positive for savings
@@ -260,10 +268,10 @@ async function loadBudgetMonthData(
         // For income, we sum positive values
         // For transfers/savings, we sum absolute values (savings are positive)
         const totalAssigned = categoryRows.reduce((sum, row) => {
-            if (group.type === 'expense') {
+            if (effectiveType === 'expense') {
                 // For expenses, assigned is negative, but we want to show positive total
                 return sum + Math.abs(row.assigned);
-            } else if (group.type === 'transfer') {
+            } else if (effectiveType === 'transfer') {
                 // For savings/investing, use absolute values
                 return sum + Math.abs(row.assigned);
             } else {
@@ -289,7 +297,7 @@ async function loadBudgetMonthData(
             totalAssigned,
             totalActivity,
             totalAvailable,
-            type: group.type,
+            type: effectiveType,
             sort_order: group.sort_order ?? 999999,
         };
     });
@@ -297,7 +305,9 @@ async function loadBudgetMonthData(
     // Create virtual groups for standalone categories (grouped by type)
     const standaloneByType = new Map<string, Category[]>();
     standaloneCategories.forEach(cat => {
-        const type = cat.type || 'other';
+        const type = isSavingsInvestingBucket(cat.type, cat.name)
+            ? 'transfer'
+            : cat.type || 'other';
         if (!standaloneByType.has(type)) {
             standaloneByType.set(type, []);
         }
@@ -320,6 +330,9 @@ async function loadBudgetMonthData(
             } else if (type === 'income') {
                 assigned = rawAssigned;
                 available = assigned - activity;
+            } else if (type === 'transfer') {
+                assigned = Math.abs(rawAssigned);
+                available = assigned - activity;
             } else {
                 assigned = rawAssigned;
                 available = Math.abs(assigned) - activity;
@@ -335,7 +348,7 @@ async function loadBudgetMonthData(
         });
         
         const totalAssigned = categoryRows.reduce((sum, row) => {
-            if (type === 'expense') {
+            if (type === 'expense' || type === 'transfer') {
                 return sum + Math.abs(row.assigned);
             } else {
                 return sum + row.assigned;
@@ -351,7 +364,7 @@ async function loadBudgetMonthData(
             id: virtualGroupId,
             name: type === 'income' ? '⬆️ Standalone Income Categories' 
                  : type === 'expense' ? '⬇️ Standalone Expense Categories'
-                 : type === 'transfer' ? '💱 Standalone Transfer Categories'
+                 : type === 'transfer' ? '💰 Standalone Savings/Investing'
                  : '📋 Standalone Categories',
             categories: categoryRows.sort((a, b) => {
                 const catA = cats.find(c => c.id === a.id);
@@ -411,8 +424,9 @@ export async function getBudgetSummaryForMonth(
 }
 
 /**
- * Helper to save or update a budget for a category
- * Throws an error if trying to save a budget on a group category
+ * Save a sticky budget amount for a category.
+ * Updates every month-row for that category so assigned amounts stay in sync;
+ * inserts an anchor row for `monthStr` when none exist yet.
  */
 export async function saveCategoryBudget(
     categoryId: string,
@@ -445,32 +459,44 @@ export async function saveCategoryBudget(
         throw new Error('Cannot assign budget to a group category. Budgets can only be assigned to subcategories.');
     }
 
-    // Check if budget exists
-    const { data: existing, error: fetchError } = await supabase
+    // Update every existing row for this category (keeps historical months in sync).
+    const { data: existingRows, error: fetchError } = await supabase
         .from('category_budgets')
-        .select('id')
+        .select('id, month')
         .eq('user_id', user.id)
-        .eq('category_id', categoryId)
-        .eq('month', monthStr)
-        .single();
+        .eq('category_id', categoryId);
 
-    if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 = not found
+    if (fetchError) {
         throw new Error(`Failed to check existing budget: ${fetchError.message}`);
     }
 
-    if (existing) {
-        // Update existing
+    if (existingRows && existingRows.length > 0) {
         const { error: updateError } = await supabase
             .from('category_budgets')
             .update({ amount })
-            .eq('id', existing.id)
-            .eq('user_id', user.id);
+            .eq('user_id', user.id)
+            .eq('category_id', categoryId);
 
         if (updateError) {
             throw new Error(`Failed to update budget: ${updateError.message}`);
         }
+
+        // Ensure the viewed month has a row so month-scoped readers still see the amount.
+        const hasCurrentMonth = existingRows.some((r) => r.month === monthStr);
+        if (!hasCurrentMonth) {
+            const { error: insertError } = await supabase
+                .from('category_budgets')
+                .insert({
+                    category_id: categoryId,
+                    month: monthStr,
+                    amount,
+                    user_id: user.id,
+                });
+            if (insertError) {
+                throw new Error(`Failed to create budget: ${insertError.message}`);
+            }
+        }
     } else {
-        // Insert new
         const { error: insertError } = await supabase
             .from('category_budgets')
             .insert({
@@ -487,11 +513,11 @@ export async function saveCategoryBudget(
 }
 
 /**
- * Helper to delete a budget for a category
+ * Clear the sticky budget for a category (all months).
  */
 export async function deleteCategoryBudget(
     categoryId: string,
-    monthStr: string
+    _monthStr: string
 ): Promise<void> {
     // Get authenticated user
     const { data: { user } } = await supabase.auth.getUser();
@@ -503,8 +529,7 @@ export async function deleteCategoryBudget(
         .from('category_budgets')
         .delete()
         .eq('user_id', user.id)
-        .eq('category_id', categoryId)
-        .eq('month', monthStr);
+        .eq('category_id', categoryId);
 
     if (error) {
         throw new Error(`Failed to delete budget: ${error.message}`);

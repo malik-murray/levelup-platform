@@ -4,7 +4,12 @@
  */
 
 import type { BudgetGroup } from '../types';
-import { computeMonthCashflow, computeTotalBudgeted } from '../budgetOverview';
+import {
+    computeMonthCashflow,
+    computeTotalBudgeted,
+    resolveStickyBudgetAmounts,
+    isSavingsInvestingBucket,
+} from '../budgetOverview';
 
 describe('budgetGroups', () => {
     describe('computeMonthCashflow', () => {
@@ -64,6 +69,42 @@ describe('budgetGroups', () => {
                 },
             ];
             expect(computeTotalBudgeted(groups)).toBeCloseTo(1959.55, 2);
+        });
+    });
+
+    describe('resolveStickyBudgetAmounts', () => {
+        it('uses the latest month per category so budgets carry forward', () => {
+            const sticky = resolveStickyBudgetAmounts([
+                { category_id: 'groceries', month: '2026-06', amount: -400 },
+                { category_id: 'groceries', month: '2026-07', amount: -450 },
+                { category_id: 'rent', month: '2026-06', amount: -2000 },
+                // No July rent row — June should still stick
+            ]);
+
+            expect(sticky.get('groceries')).toBe(-450);
+            expect(sticky.get('rent')).toBe(-2000);
+        });
+
+        it('ignores an older month when a newer amount exists', () => {
+            const sticky = resolveStickyBudgetAmounts([
+                { category_id: 'fun', month: '2026-08', amount: -100 },
+                { category_id: 'fun', month: '2026-05', amount: -50 },
+            ]);
+            expect(sticky.get('fun')).toBe(-100);
+        });
+    });
+
+    describe('isSavingsInvestingBucket', () => {
+        it('matches savings/investing names even when typed as expense', () => {
+            expect(isSavingsInvestingBucket('expense', 'Savings')).toBe(true);
+            expect(isSavingsInvestingBucket('expense', 'Investments')).toBe(true);
+            expect(isSavingsInvestingBucket('transfer', 'Emergency Fund')).toBe(true);
+        });
+
+        it('excludes the plain Transfer category', () => {
+            expect(isSavingsInvestingBucket('transfer', 'Transfer')).toBe(false);
+            expect(isSavingsInvestingBucket('expense', 'Transfer')).toBe(false);
+            expect(isSavingsInvestingBucket('expense', 'Groceries')).toBe(false);
         });
     });
 

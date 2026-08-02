@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate } from '@/lib/habitHelpers';
+import { resolveStickyBudgetAmounts } from '@/lib/budgetOverview';
 import DashboardCollapsibleSection from './DashboardCollapsibleSection';
 
 const PREVIEW_LIMIT = 6;
@@ -110,13 +111,13 @@ export default function FinanceWidget({
 
             const { data: budgets } = await supabase
                 .from('category_budgets')
-                .select('amount')
-                .eq('user_id', userId)
-                .eq('month', monthStr);
+                .select('category_id, month, amount')
+                .eq('user_id', userId);
 
             setDayExpenses((todayRows as DayExpenseRow[] | null) ?? []);
             const monthTotal = Math.abs(monthTx?.reduce((sum, tx) => sum + tx.amount, 0) || 0);
-            const budgetTotal = budgets?.reduce((sum, b) => sum + b.amount, 0) || 0;
+            const sticky = resolveStickyBudgetAmounts(budgets ?? []);
+            const budgetTotal = [...sticky.values()].reduce((sum, amount) => sum + amount, 0);
 
             setMonthSpending(monthTotal);
             setMonthBudget(budgetTotal);

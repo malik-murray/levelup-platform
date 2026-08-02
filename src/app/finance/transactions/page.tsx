@@ -6,6 +6,7 @@ import {
     learnMerchantMappingFromUserCategory,
     merchantKeyFromNameNote,
 } from '@/lib/financial-concierge/categoryEngine';
+import { isSavingsInvestingBucket } from '@/lib/budgetOverview';
 
 type AccountType = 'checking' | 'savings' | 'credit' | 'cash' | 'investment' | 'other';
 
@@ -277,6 +278,19 @@ export default function TransactionsPage() {
             )?.id ?? null,
         [categories]
     );
+
+    /** Categories that can budget a transfer as Savings/Investing (plus plain Transfer). */
+    const transferBudgetCategories = useMemo(() => {
+        const leaves = categories.filter(c => c.kind === 'category');
+        const savings = leaves.filter(c => isSavingsInvestingBucket(c.type, c.name));
+        const transferLeaf = leaves.find(
+            c => c.type === 'transfer' || c.name.toLowerCase() === 'transfer'
+        );
+        const byId = new Map<string, (typeof leaves)[0]>();
+        if (transferLeaf) byId.set(transferLeaf.id, transferLeaf);
+        for (const c of savings) byId.set(c.id, c);
+        return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+    }, [categories]);
 
     const bulkCategoryIsTransfer = Boolean(
         selectedBulkCategory &&
@@ -1538,6 +1552,9 @@ export default function TransactionsPage() {
             return;
         }
 
+        // Savings/Investing pick from the form, else plain Transfer category.
+        const budgetCatId = categoryId || transferCategoryId;
+
         setCreatingTransfer(true);
         setNotification(null);
 
@@ -1631,7 +1648,7 @@ export default function TransactionsPage() {
                             person: transferLabel,
                             note: note || null,
                             account_id: resolvedFromAccountId,
-                            category_id: transferCategoryId,
+                            category_id: budgetCatId,
                             is_transfer: true,
                             transfer_group_id: transferGroupId,
                             user_id: user.id,
@@ -1642,7 +1659,7 @@ export default function TransactionsPage() {
                             person: transferLabel,
                             note: note || null,
                             account_id: resolvedToAccountId,
-                            category_id: transferCategoryId,
+                            category_id: budgetCatId,
                             is_transfer: true,
                             transfer_group_id: transferGroupId,
                             user_id: user.id,
@@ -1656,10 +1673,10 @@ export default function TransactionsPage() {
                     }
 
                 // Learn from user conversion so similar descriptions map to Transfer next time.
-                if (transferCategoryId) {
+                if (budgetCatId) {
                     void learnMerchantMappingFromUserCategory(supabase, {
                         userId: user.id,
-                        categoryId: transferCategoryId,
+                        categoryId: budgetCatId,
                         name: editingTx.name || note || null,
                         note: editingTx.note || note || null,
                     });
@@ -1709,7 +1726,7 @@ export default function TransactionsPage() {
                             person: transferLabel,
                             note: note || null,
                             account_id: resolvedFromAccountId,
-                            category_id: transferCategoryId,
+                            category_id: budgetCatId,
                             is_transfer: true,
                             transfer_group_id: editingTx.transfer_group_id, // Keep same group ID
                             user_id: user.id,
@@ -1720,7 +1737,7 @@ export default function TransactionsPage() {
                             person: transferLabel,
                             note: note || null,
                             account_id: resolvedToAccountId,
-                            category_id: transferCategoryId,
+                            category_id: budgetCatId,
                             is_transfer: true,
                             transfer_group_id: editingTx.transfer_group_id, // Keep same group ID
                             user_id: user.id,
@@ -1733,10 +1750,10 @@ export default function TransactionsPage() {
                         return;
                     }
 
-                    if (transferCategoryId) {
+                    if (budgetCatId) {
                         void learnMerchantMappingFromUserCategory(supabase, {
                             userId: user.id,
-                            categoryId: transferCategoryId,
+                            categoryId: budgetCatId,
                             name: editingTx.name || note || null,
                             note: editingTx.note || note || null,
                         });
@@ -1763,7 +1780,7 @@ export default function TransactionsPage() {
                         person: transferLabel,
                         note: note || null,
                         account_id: resolvedFromAccountId,
-                        category_id: transferCategoryId,
+                        category_id: budgetCatId,
                         is_transfer: true,
                         transfer_group_id: transferGroupId,
                         user_id: user.id,
@@ -1774,7 +1791,7 @@ export default function TransactionsPage() {
                         person: transferLabel,
                         note: note || null,
                         account_id: resolvedToAccountId,
-                        category_id: transferCategoryId,
+                        category_id: budgetCatId,
                         is_transfer: true,
                         transfer_group_id: transferGroupId,
                         user_id: user.id,
@@ -1787,10 +1804,10 @@ export default function TransactionsPage() {
                     return;
                 }
 
-                if (transferCategoryId) {
+                if (budgetCatId) {
                     void learnMerchantMappingFromUserCategory(supabase, {
                         userId: user.id,
-                        categoryId: transferCategoryId,
+                        categoryId: budgetCatId,
                         name: note || null,
                         note: note || null,
                     });
@@ -2896,15 +2913,46 @@ export default function TransactionsPage() {
                             )}
                         </div>
                         {transactionType === 'transfer' && (
-                            <div className="space-y-1">
-                                <label className="block text-slate-300">Memo (optional)</label>
-                                <input
-                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
-                                    value={note}
-                                    onChange={e => setNote(e.target.value)}
-                                    placeholder="e.g. Rent, credit card payment"
-                                />
-                            </div>
+                            <>
+                                <div className="space-y-1">
+                                    <label className="block text-slate-300">
+                                        Budget as (Savings/Investing)
+                                    </label>
+                                    <select
+                                        className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
+                                        value={categoryId || transferCategoryId || ''}
+                                        onChange={e => setCategoryId(e.target.value)}
+                                    >
+                                        {transferBudgetCategories.length === 0 ? (
+                                            <option value="">Transfer</option>
+                                        ) : (
+                                            transferBudgetCategories.map(c => (
+                                                <option key={c.id} value={c.id}>
+                                                    {c.name}
+                                                    {isSavingsInvestingBucket(c.type, c.name) &&
+                                                    c.name.toLowerCase() !== 'transfer'
+                                                        ? ' (counts toward savings budget)'
+                                                        : ''}
+                                                </option>
+                                            ))
+                                        )}
+                                    </select>
+                                    <p className="text-[10px] text-slate-500">
+                                        Pick a Savings/Investing category so this move shows on your
+                                        budget. Leave as Transfer for account-to-account moves that
+                                        are not savings goals.
+                                    </p>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="block text-slate-300">Memo (optional)</label>
+                                    <input
+                                        className="w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-base"
+                                        value={note}
+                                        onChange={e => setNote(e.target.value)}
+                                        placeholder="e.g. Monthly IRA contribution"
+                                    />
+                                </div>
+                            </>
                         )}
                         {transactionType === 'transaction' && (
                             <>

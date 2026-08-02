@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { supabase } from '@auth/supabaseClient';
-import { getBudgetDataForMonth, saveCategoryBudget, deleteCategoryBudget, duplicateBudgets, getNextMonthStr, reorderCategories } from '@/lib/budgetGroups';
+import { getBudgetDataForMonth, saveCategoryBudget, deleteCategoryBudget, reorderCategories } from '@/lib/budgetGroups';
 import { computeTotalBudgeted } from '@/lib/budgetOverview';
 import type { BudgetGroup, Category, BudgetSummary } from '@/lib/types';
 
@@ -34,11 +34,6 @@ export default function BudgetPage() {
     
     // Track editing state for category types (categoryId -> type)
     const [editingCategoryTypes, setEditingCategoryTypes] = useState<Record<string, 'income' | 'expense' | 'transfer'>>({});
-    
-    // Budget duplication state
-    const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
-    const [duplicateTargetMonth, setDuplicateTargetMonth] = useState<string>('');
-    const [duplicating, setDuplicating] = useState(false);
     
     // Category management modal state
     const [showManageCategories, setShowManageCategories] = useState(false);
@@ -617,18 +612,6 @@ export default function BudgetPage() {
         }).format(amount);
     };
 
-    // Generate available months for duplication (next 12 months, excluding current)
-    const getAvailableMonths = () => {
-        const months: string[] = [];
-        const current = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
-        for (let i = 1; i <= 12; i++) {
-            const date = new Date(current.getFullYear(), current.getMonth() + i, 1);
-            const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-            months.push(monthStr);
-        }
-        return months;
-    };
-
     const handleUpdateCategoryName = async (categoryId: string, newName: string) => {
         if (!newName.trim()) {
             setNotification('Category name cannot be empty.');
@@ -945,58 +928,15 @@ export default function BudgetPage() {
         }
     };
 
-    const handleDuplicateBudget = async () => {
-        if (!duplicateTargetMonth) {
-            setNotification('Please select a target month.');
-            return;
-        }
-
-        if (duplicateTargetMonth === monthStr) {
-            setNotification('Cannot duplicate to the same month.');
-            return;
-        }
-
-        const targetDate = new Date(
-            parseInt(duplicateTargetMonth.split('-')[0]),
-            parseInt(duplicateTargetMonth.split('-')[1]) - 1,
-            1
-        );
-        const targetMonthLabel = targetDate.toLocaleString('default', {
-            month: 'long',
-            year: 'numeric',
-        });
-
-        if (!confirm(`Copy all budgets from ${monthLabel} to ${targetMonthLabel}?`)) {
-            return;
-        }
-
-        setDuplicating(true);
-        setNotification(null);
-
-        try {
-            const count = await duplicateBudgets(monthStr, duplicateTargetMonth);
-            setNotification(
-                `Successfully copied ${count} budget${count !== 1 ? 's' : ''} to ${targetMonthLabel}.`
-            );
-            setShowDuplicateDialog(false);
-            setDuplicateTargetMonth('');
-        } catch (error) {
-            console.error('Error duplicating budgets:', error);
-            setNotification(
-                error instanceof Error ? error.message : 'Failed to duplicate budgets'
-            );
-        } finally {
-            setDuplicating(false);
-        }
-    };
-
     return (
         <section className="space-y-4 px-6 py-4">
             <div className="flex items-center justify-between">
                 <div>
                     <h2 className="text-lg font-semibold">Budget</h2>
                     <p className="text-xs text-slate-400">
-                        Plan how every dollar will be used this month.
+                        One set of assigned amounts that carries month to month. Use the arrows to
+                        review spending for a month — edit assigned amounts only when you want to
+                        change the budget itself.
                     </p>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-slate-300">
@@ -1039,14 +979,6 @@ export default function BudgetPage() {
                     }`}
                 >
                     {editMode ? 'Done Editing' : 'Edit Budget'}
-                </button>
-                <button
-                    type="button"
-                    onClick={() => setShowDuplicateDialog(true)}
-                    disabled={duplicating || loading || editMode}
-                    className="rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-[11px] font-semibold text-slate-200 hover:bg-slate-700 disabled:opacity-50"
-                >
-                    Duplicate Budget
                 </button>
             </div>
 
@@ -1164,81 +1096,6 @@ export default function BudgetPage() {
                     </div>
                 );
             })()}
-
-            {/* Duplicate Budget Dialog */}
-            {showDuplicateDialog && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-                    <div className="rounded-lg border border-slate-800 bg-slate-900 p-6 text-xs max-w-md w-full mx-4">
-                        <div className="mb-4 flex items-center justify-between">
-                            <h3 className="text-sm font-semibold">Duplicate Budget</h3>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setShowDuplicateDialog(false);
-                                    setDuplicateTargetMonth('');
-                                }}
-                                className="text-slate-400 hover:text-slate-200"
-                            >
-                                ✕
-                            </button>
-                        </div>
-                        <p className="mb-4 text-slate-300">
-                            Copy all budgets from <strong>{monthLabel}</strong> to another month.
-                        </p>
-                        <div className="space-y-3">
-                            <div>
-                                <label className="block text-slate-300 mb-1">
-                                    Target Month
-                                </label>
-                                <select
-                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1"
-                                    value={duplicateTargetMonth}
-                                    onChange={e => setDuplicateTargetMonth(e.target.value)}
-                                    required
-                                >
-                                    <option value="">Select a month</option>
-                                    {getAvailableMonths().map(monthStr => {
-                                        const date = new Date(
-                                            parseInt(monthStr.split('-')[0]),
-                                            parseInt(monthStr.split('-')[1]) - 1,
-                                            1
-                                        );
-                                        const label = date.toLocaleString('default', {
-                                            month: 'long',
-                                            year: 'numeric',
-                                        });
-                                        return (
-                                            <option key={monthStr} value={monthStr}>
-                                                {label}
-                                            </option>
-                                        );
-                                    })}
-                                </select>
-                            </div>
-                            <div className="flex gap-2 pt-2">
-                                <button
-                                    type="button"
-                                    onClick={handleDuplicateBudget}
-                                    disabled={duplicating || !duplicateTargetMonth}
-                                    className="flex-1 rounded-md bg-amber-400 px-3 py-2 text-[11px] font-semibold text-black hover:bg-amber-300 disabled:opacity-50"
-                                >
-                                    {duplicating ? 'Copying...' : 'Copy Budgets'}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setShowDuplicateDialog(false);
-                                        setDuplicateTargetMonth('');
-                                    }}
-                                    className="rounded-md border border-slate-600 px-3 py-2 text-[11px] font-semibold text-slate-200 hover:bg-slate-800"
-                                >
-                                    Cancel
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* Add Category Section */}
             <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">

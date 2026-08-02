@@ -134,9 +134,8 @@ async function resolveTransferCategoryId(
 
 /**
  * Links same-day, opposite-sign, equal-magnitude transactions on different accounts into
- * `is_transfer` groups (two legs), assigns the canonical **Transfer** category, and normalizes
- * labels like manual transfers. Rows already `is_transfer` get the Transfer category when missing
- * or different.
+ * `is_transfer` groups (two legs). Assigns the canonical **Transfer** category only when a
+ * leg has no category yet — never overwrites a user (or savings/investing) categorization.
  */
 export async function linkInternalTransferPairsForUser(
     supabase: SupabaseClient,
@@ -183,29 +182,47 @@ export async function linkInternalTransferPairsForUser(
         const toName = accountName.get(pos.account_id!) || 'Unknown';
         const transferLabel = `Transfer: ${fromName} → ${toName}`;
         const mergedNote = mergeNotes(neg.note, pos.note);
+        // Prefer an existing user category (e.g. Investments) over blanking to Transfer.
+        const preservedCategory =
+            neg.category_id || pos.category_id || transferCategoryId || null;
 
-        const patch = {
+        const basePatch = {
             is_transfer: true,
             transfer_group_id: groupId,
-            category_id: transferCategoryId ?? null,
             person: transferLabel,
             name: null as string | null,
             note: mergedNote,
         };
 
-        const { error: e1 } = await supabase.from('transactions').update(patch).eq('id', neg.id).eq('user_id', userId);
-        const { error: e2 } = await supabase.from('transactions').update(patch).eq('id', pos.id).eq('user_id', userId);
+        const { error: e1 } = await supabase
+            .from('transactions')
+            .update({
+                ...basePatch,
+                category_id: neg.category_id || preservedCategory,
+            })
+            .eq('id', neg.id)
+            .eq('user_id', userId);
+        const { error: e2 } = await supabase
+            .from('transactions')
+            .update({
+                ...basePatch,
+                category_id: pos.category_id || preservedCategory,
+            })
+            .eq('id', pos.id)
+            .eq('user_id', userId);
         if (!e1 && !e2) pairsLinked++;
         else {
             console.error('linkInternalTransferPairsForUser pair update', e1 || e2);
         }
     }
 
-    const transferRows = rows.filter(r => r.is_transfer);
-    if (transferCategoryId && transferRows.length > 0) {
+    // Only fill missing categories on transfer rows — never clobber Savings/Investing picks.
+    const transferRowsNeedingCategory = rows.filter(
+        r => r.is_transfer && !r.category_id
+    );
+    if (transferCategoryId && transferRowsNeedingCategory.length > 0) {
         const results = await Promise.all(
-            transferRows.map(async r => {
-                if (r.category_id === transferCategoryId) return false;
+            transferRowsNeedingCategory.map(async r => {
                 const { error } = await supabase
                     .from('transactions')
                     .update({ category_id: transferCategoryId })

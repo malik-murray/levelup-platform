@@ -11,6 +11,8 @@ import {
     getAccountGroup,
     type AccountType,
 } from '@/lib/finance/accountBalances';
+import { saveCategoryBudget } from '@/lib/budgetGroups';
+import { resolveStickyBudgetAmounts } from '@/lib/budgetOverview';
 
 console.log('FINANCE PAGE LOADED, URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
 
@@ -302,7 +304,14 @@ export default function FinancePage() {
                 const f = preview.finance;
                 setAccounts(f.accounts);
                 setCategories(f.categories);
-                setBudgets(f.budgets.filter(b => b.month === monthStr));
+                setBudgets(
+                    [...resolveStickyBudgetAmounts(f.budgets)].map(([category_id, amount]) => ({
+                        id: category_id,
+                        category_id,
+                        month: monthStr,
+                        amount,
+                    }))
+                );
                 const monthTx = f.transactions.filter(tx => tx.date.startsWith(monthStr));
                 const txWithNames: Transaction[] = monthTx.map(tx => ({
                     id: tx.id,
@@ -380,18 +389,25 @@ export default function FinancePage() {
 
             console.log('CATEGORIES RESULT:', { categoriesData, categoriesError });
 
-            // 3) BUDGETS - filter by user_id
+            // 3) BUDGETS — sticky across months (latest amount per category)
             const { data: budgetsData, error: budgetsError } = await supabase
                 .from('category_budgets')
                 .select('id, category_id, month, amount')
-                .eq('user_id', user.id)
-                .eq('month', monthStr);
+                .eq('user_id', user.id);
 
             console.log('BUDGETS RESULT:', { budgetsData, budgetsError });
 
             setAccounts(accountsData ?? []);
             setCategories(categoriesData ?? []);
-            setBudgets(budgetsData ?? []);
+            const sticky = resolveStickyBudgetAmounts(budgetsData ?? []);
+            setBudgets(
+                [...sticky.entries()].map(([category_id, amount]) => ({
+                    id: category_id, // display/lookup key; sticky map has no single row id
+                    category_id,
+                    month: monthStr,
+                    amount,
+                }))
+            );
 
             // 4) TRANSACTIONS scoped to selected month
             await reloadTransactionsForMonth();
@@ -1081,82 +1097,49 @@ export default function FinancePage() {
 
         setNotification(null);
 
-        // Get authenticated user
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-            setNotification('You must be logged in to save budgets.');
-            return;
-        }
+        try {
+            await saveCategoryBudget(budgetCategoryId, monthStr, numAmount);
 
-        // Check if a budget already exists for this category + month
-        const { data: existingRows, error: fetchError } = await supabase
-            .from('category_budgets')
-            .select('id')
-            .eq('user_id', user.id)
-            .eq('category_id', budgetCategoryId)
-            .eq('month', monthStr)
-            .limit(1);
-
-        if (fetchError) {
-            console.error(fetchError);
-            setNotification('Error loading existing budget. Check console/logs.');
-            return;
-        }
-
-        if (existingRows && existingRows.length > 0) {
-            // Update existing
-            const id = existingRows[0].id;
-            const { error: updateError } = await supabase
-                .from('category_budgets')
-                .update({ amount: numAmount })
-                .eq('id', id)
-                .eq('user_id', user.id); // Ensure user can only update their own budgets
-
-            if (updateError) {
-                console.error(updateError);
-                setNotification('Error updating budget. Check console/logs.');
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                setNotification('Budget saved, but failed to reload budgets.');
                 return;
             }
-        } else {
-            // Insert new
-            const { error: insertError } = await supabase
+
+            const { data: budgetsData, error: budgetsError } = await supabase
                 .from('category_budgets')
-                .insert({
-                    category_id: budgetCategoryId,
-                    month: monthStr,
-                    amount: numAmount,
-                    user_id: user.id,
-                });
+                .select('id, category_id, month, amount')
+                .eq('user_id', user.id);
 
-            if (insertError) {
-                console.error(insertError);
-                setNotification('Error creating budget. Check console/logs.');
-                return;
-            }
-        }
-
-        // Reload budgets for this month
-        const { data: budgetsData, error: budgetsError } = await supabase
-            .from('category_budgets')
-            .select('id, category_id, month, amount')
-            .eq('user_id', user.id)
-            .eq('month', monthStr);
-
-        if (budgetsError) {
-            console.error(budgetsError);
-            setNotification('Budget saved, but failed to reload budgets.');
-        } else {
-            setBudgets(budgetsData || []);
-            const catName =
-                categories.find(c => c.id === budgetCategoryId)?.name ||
-                'This category';
+            if (budgetsError) {
+                console.error(budgetsError);
+                setNotification('Budget saved, but failed to reload budgets.');
+            } else {
+                const sticky = resolveStickyBudgetAmounts(budgetsData ?? []);
+                setBudgets(
+                    [...sticky.entries()].map(([category_id, amount]) => ({
+                        id: category_id,
+                        category_id,
+                        month: monthStr,
+                        amount,
+                    }))
+                );
+                const catName =
+                    categories.find(c => c.id === budgetCategoryId)?.name ||
+                    'This category';
                 setNotification(
-                    `Budget set for ${catName} in ${monthLabel}: ${new Intl.NumberFormat('en-US', {
+                    `Budget set for ${catName}: ${new Intl.NumberFormat('en-US', {
                         style: 'currency',
                         currency: 'USD',
                         minimumFractionDigits: 2,
-                    }).format(numAmount)}.`
+                    }).format(numAmount)} (applies every month until you change it).`
                 );
+            }
+        } catch (error) {
+            console.error(error);
+            setNotification(
+                error instanceof Error ? error.message : 'Error saving budget. Check console/logs.'
+            );
         }
     };
 
