@@ -1717,35 +1717,36 @@ export default function TransactionsPage() {
                         }).format(numAmount)})`
                     );
                 } else {
-                    // UPDATE existing transfer - find both transactions in the group
-                    if (!editingTx.transfer_group_id) {
-                        setNotification('Could not find transfer to update.');
-                        return;
+                    // UPDATE existing transfer — replace both legs (or the orphan row) with a fresh pair.
+                    const groupId = editingTx.transfer_group_id || crypto.randomUUID();
+
+                    if (editingTx.transfer_group_id) {
+                        const { error: deleteError } = await supabase
+                            .from('transactions')
+                            .delete()
+                            .eq('user_id', user.id)
+                            .eq('transfer_group_id', editingTx.transfer_group_id);
+
+                        if (deleteError) {
+                            console.error('Error deleting old transfer:', deleteError);
+                            setNotification('Error updating transfer. Check console/logs.');
+                            return;
+                        }
+                    } else {
+                        // Orphan is_transfer row (no group id) — remove just this leg, then recreate a proper pair.
+                        const { error: deleteError } = await supabase
+                            .from('transactions')
+                            .delete()
+                            .eq('id', editingTx.id)
+                            .eq('user_id', user.id);
+
+                        if (deleteError) {
+                            console.error('Error deleting old transfer:', deleteError);
+                            setNotification('Error updating transfer. Check console/logs.');
+                            return;
+                        }
                     }
 
-                    // Find both transactions in the transfer group
-                    const transferGroup = transactions.filter(
-                        t => t.transfer_group_id === editingTx.transfer_group_id && t.is_transfer
-                    );
-                    
-                    if (transferGroup.length !== 2) {
-                        setNotification('Transfer group is incomplete. Please delete and recreate.');
-                        return;
-                    }
-
-                    // Delete old transactions and create new ones (simpler than updating individual fields)
-                    const { error: deleteError } = await supabase
-                        .from('transactions')
-                        .delete()
-                        .in('id', transferGroup.map(t => t.id));
-
-                    if (deleteError) {
-                        console.error('Error deleting old transfer:', deleteError);
-                        setNotification('Error updating transfer. Check console/logs.');
-                        return;
-                    }
-
-                    // Create updated transfer transactions with same group ID
                     const { error: insertError } = await supabase.from('transactions').insert([
                         {
                             date,
@@ -1755,7 +1756,7 @@ export default function TransactionsPage() {
                             account_id: resolvedFromAccountId,
                             category_id: budgetCatId,
                             is_transfer: true,
-                            transfer_group_id: editingTx.transfer_group_id, // Keep same group ID
+                            transfer_group_id: groupId,
                             user_id: user.id,
                         },
                         {
@@ -1766,7 +1767,7 @@ export default function TransactionsPage() {
                             account_id: resolvedToAccountId,
                             category_id: budgetCatId,
                             is_transfer: true,
-                            transfer_group_id: editingTx.transfer_group_id, // Keep same group ID
+                            transfer_group_id: groupId,
                             user_id: user.id,
                         },
                     ]);
