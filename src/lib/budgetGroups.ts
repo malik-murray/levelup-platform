@@ -4,13 +4,14 @@
 
 import { supabase } from '@auth/supabaseClient';
 import type { Category, CategoryBudget, Transaction, BudgetGroup, BudgetCategoryRow, BudgetSummary } from './types';
-import { computeMonthCashflow, computeTotalBudgeted, resolveStickyBudgetAmounts, isSavingsInvestingBucket } from './budgetOverview';
+import { computeMonthCashflow, computeTotalBudgeted, resolveStickyBudgetAmounts, isSavingsInvestingBucket, isPlainTransferCategory } from './budgetOverview';
 
 export {
     computeMonthCashflow,
     computeTotalBudgeted,
     resolveStickyBudgetAmounts,
     isSavingsInvestingBucket,
+    isPlainTransferCategory,
 } from './budgetOverview';
 
 /**
@@ -174,8 +175,11 @@ async function loadBudgetMonthData(
         const category = categories.find(c => c.id === tx.category_id);
         
         if (category) {
-            if (isSavingsInvestingBucket(category.type, category.name)) {
-                // Savings/investing: count the outflow leg only (money leaving checking → savings).
+            if (
+                isSavingsInvestingBucket(category.type, category.name) ||
+                isPlainTransferCategory(category.type, category.name)
+            ) {
+                // Savings/investing and plain Transfer: count the outflow leg only.
                 // Avoids double-counting when both transfer legs share the same category.
                 activityByCategoryId.set(
                     tx.category_id,
@@ -217,9 +221,12 @@ async function loadBudgetMonthData(
         // Find all categories that belong to this group
         const groupCategories = groupedCategories.filter(c => c.parent_id === group.id);
         // Seeded "Savings" groups were type=expense; treat them as savings/investing for the UI.
+        // Plain Transfer groups stay expense-typed so they remain budgetable categories.
         const effectiveType: BudgetGroup['type'] = isSavingsInvestingBucket(group.type, group.name)
             ? 'transfer'
-            : group.type;
+            : isPlainTransferCategory(group.type, group.name)
+              ? 'expense'
+              : group.type;
 
         // Build BudgetCategoryRow array for this group's categories
         const categoryRows: BudgetCategoryRow[] = groupCategories.map(cat => {
@@ -307,7 +314,9 @@ async function loadBudgetMonthData(
     standaloneCategories.forEach(cat => {
         const type = isSavingsInvestingBucket(cat.type, cat.name)
             ? 'transfer'
-            : cat.type || 'other';
+            : isPlainTransferCategory(cat.type, cat.name)
+              ? 'expense'
+              : cat.type || 'other';
         if (!standaloneByType.has(type)) {
             standaloneByType.set(type, []);
         }

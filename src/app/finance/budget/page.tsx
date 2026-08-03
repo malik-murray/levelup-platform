@@ -1052,7 +1052,16 @@ export default function BudgetPage() {
                     const standaloneGroups = budgetGroups.filter(g => g.id.startsWith('__standalone_'));
                     
                     const incomeGroups = realGroups.filter(g => g.type === 'income');
-                    const expenseGroups = realGroups.filter(g => g.type === 'expense');
+                    const plainTransferGroups = realGroups.filter(g =>
+                        g.name.trim().toLowerCase() === 'transfer' ||
+                        g.name.trim().toLowerCase() === 'transfers'
+                    );
+                    const expenseGroups = realGroups.filter(
+                        g =>
+                            g.type === 'expense' &&
+                            g.name.trim().toLowerCase() !== 'transfer' &&
+                            g.name.trim().toLowerCase() !== 'transfers'
+                    );
                     const transferGroups = realGroups.filter(g => g.type === 'transfer' || g.type === null);
                     
                     const renderGroup = (group: BudgetGroup, groupIndex: number, totalInSection: number, allGroups: BudgetGroup[]) => {
@@ -1133,7 +1142,15 @@ export default function BudgetPage() {
                                                             }}
                                                             className={editMode ? 'cursor-pointer hover:text-amber-400' : ''}
                                                         >
-                                                            {group.type === 'income' ? '⬆️' : group.type === 'transfer' ? '💰' : '⬇️'} {group.name}
+                                                            {group.name.trim().toLowerCase() === 'transfer' ||
+                                                            group.name.trim().toLowerCase() === 'transfers'
+                                                                ? '↔'
+                                                                : group.type === 'income'
+                                                                  ? '⬆️'
+                                                                  : group.type === 'transfer'
+                                                                    ? '💰'
+                                                                    : '⬇️'}{' '}
+                                                            {group.name}
                                                         </span>
                                                     )}
                                                     {editMode && editingCategoryNames[group.id] === undefined && (
@@ -1597,14 +1614,64 @@ export default function BudgetPage() {
                                         </span>
                                     </div>
                                     {expenseGroups.map((group, idx) => renderGroup(group, idx, expenseGroups.length, budgetGroups))}
-                                    {standaloneGroups.filter(g => g.type === 'expense').map((group, idx) => renderGroup(group, idx, standaloneGroups.filter(g => g.type === 'expense').length, budgetGroups))}
+                                    {standaloneGroups.filter(g => g.type === 'expense' && g.name.trim().toLowerCase() !== 'transfer' && g.name.trim().toLowerCase() !== 'transfers').map((group, idx) => renderGroup(group, idx, standaloneGroups.filter(g => g.type === 'expense').length, budgetGroups))}
+                                </div>
+                            )}
+
+                            {/* Transfer Section — account-to-account moves as budget categories */}
+                            {(plainTransferGroups.length > 0 ||
+                                standaloneGroups.some(
+                                    g =>
+                                        g.name.trim().toLowerCase() === 'transfer' ||
+                                        g.name.trim().toLowerCase() === 'transfers'
+                                )) && (
+                                <div className="space-y-1">
+                                    {(incomeGroups.length > 0 || expenseGroups.length > 0) && (
+                                        <div className="h-4" />
+                                    )}
+                                    <div className="flex items-center gap-2 mb-2 pb-1 border-b border-slate-600/50">
+                                        <span className="text-slate-300 text-[11px] font-semibold">
+                                            ↔ TRANSFERS
+                                        </span>
+                                        <span className="text-[10px] text-slate-500">
+                                            (
+                                            {formatCurrency(
+                                                plainTransferGroups.reduce(
+                                                    (sum, g) => sum + Math.abs(g.totalActivity),
+                                                    0
+                                                )
+                                            )}{' '}
+                                            moved)
+                                        </span>
+                                    </div>
+                                    {plainTransferGroups.map((group, idx) =>
+                                        renderGroup(group, idx, plainTransferGroups.length, budgetGroups)
+                                    )}
+                                    {standaloneGroups
+                                        .filter(
+                                            g =>
+                                                g.name.trim().toLowerCase() === 'transfer' ||
+                                                g.name.trim().toLowerCase() === 'transfers'
+                                        )
+                                        .map((group, idx) =>
+                                            renderGroup(
+                                                group,
+                                                idx,
+                                                standaloneGroups.filter(
+                                                    g =>
+                                                        g.name.trim().toLowerCase() === 'transfer' ||
+                                                        g.name.trim().toLowerCase() === 'transfers'
+                                                ).length,
+                                                budgetGroups
+                                            )
+                                        )}
                                 </div>
                             )}
                             
                             {/* Savings/Investing Section */}
                             {transferGroups.length > 0 && (
                                 <div className="space-y-1">
-                                    {(incomeGroups.length > 0 || expenseGroups.length > 0) && <div className="h-4" />}
+                                    {(incomeGroups.length > 0 || expenseGroups.length > 0 || plainTransferGroups.length > 0) && <div className="h-4" />}
                                     <div className="flex items-center gap-2 mb-2 pb-1 border-b border-slate-700/50">
                                         <span className="text-slate-400 text-[11px] font-semibold">💰 SAVINGS/INVESTING</span>
                                     </div>
@@ -1612,6 +1679,59 @@ export default function BudgetPage() {
                                     {standaloneGroups.filter(g => g.type === 'transfer' || g.type === null).map((group, idx) => renderGroup(group, idx, standaloneGroups.filter(g => g.type === 'transfer' || g.type === null).length, budgetGroups))}
                                 </div>
                             )}
+
+                            {(() => {
+                                const totalAssigned = budgetGroups.reduce(
+                                    (sum, g) => sum + Math.abs(g.totalAssigned),
+                                    0
+                                );
+                                const totalActivity = budgetGroups.reduce(
+                                    (sum, g) => sum + g.totalActivity,
+                                    0
+                                );
+                                const totalAvailable = totalAssigned - totalActivity;
+                                return (
+                                    <div className="mt-4 border-t border-slate-700 pt-3">
+                                        <div className="flex flex-col sm:grid sm:grid-cols-[1fr_100px_100px_100px] gap-2 items-center px-2 py-1">
+                                            <div className="text-sm font-semibold text-slate-100">
+                                                Totals
+                                            </div>
+                                            <div className="flex sm:contents w-full justify-between text-xs gap-4">
+                                                <div className="flex flex-col sm:block text-right">
+                                                    <span className="sm:hidden text-slate-400 text-[10px]">
+                                                        Total Assigned
+                                                    </span>
+                                                    <span className="font-semibold text-slate-100">
+                                                        {formatCurrency(totalAssigned)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex flex-col sm:block text-right">
+                                                    <span className="sm:hidden text-slate-400 text-[10px]">
+                                                        Total Activity
+                                                    </span>
+                                                    <span className="font-semibold text-slate-100">
+                                                        {formatCurrency(totalActivity)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex flex-col sm:block text-right">
+                                                    <span className="sm:hidden text-slate-400 text-[10px]">
+                                                        Total Available
+                                                    </span>
+                                                    <span
+                                                        className={`font-semibold ${
+                                                            totalAvailable >= 0
+                                                                ? 'text-emerald-400'
+                                                                : 'text-red-400'
+                                                        }`}
+                                                    >
+                                                        {formatCurrency(totalAvailable)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
                         </div>
                     );
                 })()}

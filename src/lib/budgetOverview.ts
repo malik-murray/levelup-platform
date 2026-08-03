@@ -38,10 +38,15 @@ export function computeMonthCashflow(
     return { totalIncome, totalExpenses };
 }
 
-/** Expense-category assigned total (absolute), used as "Total Amount Budgeted". */
+/** Expense-category assigned total (absolute), used as "Total Amount Budgeted".
+ * Excludes plain Transfer groups — account moves aren't spending targets.
+ */
 export function computeTotalBudgeted(groups: BudgetGroup[]): number {
     return groups
-        .filter((g) => g.type === 'expense')
+        .filter(
+            (g) =>
+                g.type === 'expense' && !isPlainTransferCategory(g.type, g.name)
+        )
         .reduce((sum, g) => sum + Math.abs(g.totalAssigned), 0);
 }
 
@@ -67,6 +72,17 @@ export function resolveStickyBudgetAmounts(
 }
 
 /**
+ * True for the plain account-to-account Transfer group/leaf (not Savings/Investing).
+ */
+export function isPlainTransferCategory(
+    type: string | null | undefined,
+    name: string | null | undefined
+): boolean {
+    const n = (name || '').trim().toLowerCase();
+    return n === 'transfer' || n === 'transfers';
+}
+
+/**
  * True when a category/group should appear under Savings/Investing on the budget page.
  * Matches explicit `type: 'transfer'` or common savings/investing names (seeded Savings
  * groups historically used type `expense`). The plain "Transfer" leaf is excluded — that
@@ -78,7 +94,7 @@ export function isSavingsInvestingBucket(
     name: string | null | undefined
 ): boolean {
     const n = (name || '').trim().toLowerCase();
-    if (n === 'transfer') return false;
+    if (isPlainTransferCategory(type, name)) return false;
     if (type === 'transfer') return true;
     // Income → Investments is a revenue leaf, not a savings contribution bucket.
     if (type === 'income') return false;

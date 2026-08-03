@@ -9,6 +9,7 @@ import {
     computeTotalBudgeted,
     resolveStickyBudgetAmounts,
     isSavingsInvestingBucket,
+    isPlainTransferCategory,
 } from '../budgetOverview';
 
 describe('budgetGroups', () => {
@@ -129,6 +130,41 @@ describe('budgetGroups', () => {
             expect(isSavingsInvestingBucket('expense', 'Groceries')).toBe(false);
             expect(isSavingsInvestingBucket('income', 'Investments')).toBe(false);
             expect(isSavingsInvestingBucket('income', 'Dividend/Interest')).toBe(false);
+        });
+    });
+
+    describe('isPlainTransferCategory', () => {
+        it('matches Transfer / Transfers by name', () => {
+            expect(isPlainTransferCategory('expense', 'Transfer')).toBe(true);
+            expect(isPlainTransferCategory('transfer', 'Transfers')).toBe(true);
+            expect(isPlainTransferCategory('expense', 'Groceries')).toBe(false);
+            expect(isPlainTransferCategory('transfer', 'Savings')).toBe(false);
+        });
+    });
+
+    describe('computeTotalBudgeted', () => {
+        it('excludes plain Transfer groups from expense budgeted total', () => {
+            const total = computeTotalBudgeted([
+                {
+                    id: 'bills',
+                    name: 'Bills',
+                    type: 'expense',
+                    categories: [],
+                    totalAssigned: -500,
+                    totalActivity: 0,
+                    totalAvailable: 500,
+                },
+                {
+                    id: 'xfer',
+                    name: 'Transfer',
+                    type: 'expense',
+                    categories: [],
+                    totalAssigned: -200,
+                    totalActivity: 100,
+                    totalAvailable: 100,
+                },
+            ]);
+            expect(total).toBe(500);
         });
     });
 
