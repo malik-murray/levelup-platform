@@ -1685,11 +1685,12 @@ export default function BudgetPage() {
                             )}
 
                             {(() => {
-                                const totalAssigned = budgetGroups.reduce(
+                                const totalsGroups = budgetGroups.filter(g => g.type !== 'income');
+                                const totalAssigned = totalsGroups.reduce(
                                     (sum, g) => sum + Math.abs(g.totalAssigned),
                                     0
                                 );
-                                const totalActivity = budgetGroups.reduce(
+                                const totalActivity = totalsGroups.reduce(
                                     (sum, g) => sum + g.totalActivity,
                                     0
                                 );
