@@ -5,18 +5,33 @@
 
 import type { BudgetGroup } from './types';
 
+export type CashflowCategoryRef = {
+    type?: string | null;
+    name?: string | null;
+};
+
 /**
  * Month cashflow from raw transactions — same rules as the transactions page:
- * positive non-transfer amounts = income, negative non-transfer amounts = expenses.
- * Category assignment does not matter.
+ * positive amounts = income, negative amounts = expenses.
+ * Excludes internal transfers (`is_transfer`) and Savings/Investing categories so
+ * contributions to savings never inflate Expenses.
  */
 export function computeMonthCashflow(
-    transactions: Array<{ amount: number; is_transfer?: boolean | null }>
+    transactions: Array<{
+        amount: number;
+        is_transfer?: boolean | null;
+        category_id?: string | null;
+    }>,
+    categoryById?: Map<string, CashflowCategoryRef>
 ): { totalIncome: number; totalExpenses: number } {
     let totalIncome = 0;
     let totalExpenses = 0;
     for (const tx of transactions) {
         if (tx.is_transfer) continue;
+        if (tx.category_id && categoryById) {
+            const cat = categoryById.get(tx.category_id);
+            if (cat && isSavingsInvestingBucket(cat.type, cat.name)) continue;
+        }
         if (tx.amount > 0) totalIncome += tx.amount;
         else if (tx.amount < 0) totalExpenses += Math.abs(tx.amount);
     }
@@ -55,7 +70,8 @@ export function resolveStickyBudgetAmounts(
  * True when a category/group should appear under Savings/Investing on the budget page.
  * Matches explicit `type: 'transfer'` or common savings/investing names (seeded Savings
  * groups historically used type `expense`). The plain "Transfer" leaf is excluded — that
- * is for account-to-account moves, not savings goals.
+ * is for account-to-account moves, not savings goals. Income leaves named Investments are
+ * also excluded (revenue, not contributions).
  */
 export function isSavingsInvestingBucket(
     type: string | null | undefined,
@@ -64,5 +80,7 @@ export function isSavingsInvestingBucket(
     const n = (name || '').trim().toLowerCase();
     if (n === 'transfer') return false;
     if (type === 'transfer') return true;
-    return /saving|invest/i.test(n);
+    // Income → Investments is a revenue leaf, not a savings contribution bucket.
+    if (type === 'income') return false;
+    return /saving|invest|emergency/i.test(n);
 }

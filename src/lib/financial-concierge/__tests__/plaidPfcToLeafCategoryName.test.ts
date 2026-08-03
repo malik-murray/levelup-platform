@@ -1,9 +1,13 @@
 import { leafCategoryNameFromPlaidPfc } from '../plaidPfcToLeafCategoryName';
 
 describe('leafCategoryNameFromPlaidPfc', () => {
-    it('maps detailed food codes', () => {
-        expect(leafCategoryNameFromPlaidPfc('FOOD_AND_DRINK', 'FOOD_AND_DRINK_GROCERIES')).toBe('Groceries');
-        expect(leafCategoryNameFromPlaidPfc('FOOD_AND_DRINK', 'FOOD_AND_DRINK_COFFEE')).toBe('Coffee Shops');
+    it('maps detailed food codes to flattened taxonomy', () => {
+        expect(leafCategoryNameFromPlaidPfc('FOOD_AND_DRINK', 'FOOD_AND_DRINK_GROCERIES')).toBe(
+            'Groceries'
+        );
+        expect(leafCategoryNameFromPlaidPfc('FOOD_AND_DRINK', 'FOOD_AND_DRINK_COFFEE')).toBe(
+            'Dining Out'
+        );
     });
 
     it('skips transfers', () => {
@@ -16,11 +20,25 @@ describe('leafCategoryNameFromPlaidPfc', () => {
     });
 
     it('falls back to primary defaults', () => {
-        expect(leafCategoryNameFromPlaidPfc('BANK_FEES', '')).toBe('Bank Fees');
-        expect(leafCategoryNameFromPlaidPfc('TRANSPORTATION', '')).toBe('Gas');
+        expect(leafCategoryNameFromPlaidPfc('BANK_FEES', '')).toBe('Business');
+        expect(leafCategoryNameFromPlaidPfc('TRANSPORTATION', '')).toBe('Transportation');
     });
 
-    it('maps legacy INCOME_WAGES', () => {
-        expect(leafCategoryNameFromPlaidPfc('INCOME', 'INCOME_WAGES')).toBe('Wages & Salary');
+    it('maps income wages to Job 1', () => {
+        expect(leafCategoryNameFromPlaidPfc('INCOME', 'INCOME_WAGES')).toBe('Job 1');
+        expect(leafCategoryNameFromPlaidPfc('INCOME', 'INCOME_SALARY')).toBe('Job 1');
+        expect(leafCategoryNameFromPlaidPfc('INCOME', 'INCOME_DIVIDENDS')).toBe('Dividend/Interest');
+    });
+
+    it('maps rent and wifi utilities', () => {
+        expect(leafCategoryNameFromPlaidPfc('RENT_AND_UTILITIES', 'RENT_AND_UTILITIES_RENT')).toBe(
+            'Rent'
+        );
+        expect(
+            leafCategoryNameFromPlaidPfc('RENT_AND_UTILITIES', 'RENT_AND_UTILITIES_INTERNET_AND_CABLE')
+        ).toBe('Wi-Fi');
+        expect(leafCategoryNameFromPlaidPfc('RENT_AND_UTILITIES', 'RENT_AND_UTILITIES_TELEPHONE')).toBe(
+            'Phone'
+        );
     });
 });

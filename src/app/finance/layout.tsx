@@ -35,6 +35,8 @@ export default function FinanceLayout({
                         {financeTabs.map((tab) => {
                             const isActive =
                                 pathname === tab.href ||
+                                (tab.href === '/finance/budget' &&
+                                    pathname?.startsWith('/finance/budget')) ||
                                 (tab.href === '/finance/settings/integrations' &&
                                     pathname?.startsWith('/finance/settings')) ||
                                 (tab.href === '/finance/concierge' &&

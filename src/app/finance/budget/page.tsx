@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState, FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
 import { getBudgetDataForMonth, saveCategoryBudget, deleteCategoryBudget, reorderCategories } from '@/lib/budgetGroups';
 import { computeTotalBudgeted } from '@/lib/budgetOverview';
 import type { BudgetGroup, Category, BudgetSummary } from '@/lib/types';
 
 export default function BudgetPage() {
+    const router = useRouter();
     const [budgetGroups, setBudgetGroups] = useState<BudgetGroup[]>([]);
     const [summary, setSummary] = useState<BudgetSummary | null>(null);
     const [loading, setLoading] = useState(true);
@@ -1002,10 +1004,11 @@ export default function BudgetPage() {
 
                 const savingsAssigned = transferGroups.reduce((sum, g) => sum + Math.abs(g.totalAssigned), 0);
                 const savingsActivity = transferGroups.reduce((sum, g) => sum + Math.abs(g.totalActivity), 0);
-                const savingsAvailable = savingsAssigned - savingsActivity;
+                // Same pattern as Income Available: actual activity minus amount budgeted/goal.
+                const savingsRemaining = savingsActivity - savingsAssigned;
 
-                // Ready to assign after expense + savings budgets
-                const netIncome = totalIncome - totalBudgeted - savingsAssigned;
+                // Ready to spend = income minus real expenses (savings excluded from expenses).
+                const totalAvailableToSpend = totalIncome - totalExpenses;
                 
                 return (
                     <div className="space-y-3">
@@ -1038,31 +1041,28 @@ export default function BudgetPage() {
                                 <div className="rounded-md border border-blue-700/50 bg-blue-950/30 p-3">
                                     <div className="text-blue-400 text-[10px] font-semibold uppercase mb-1">💰 Savings/Investing</div>
                                     <div className="text-lg font-semibold text-blue-300 mb-1">
-                                        {formatCurrency(savingsAssigned)}
-                                    </div>
-                                    <div className="text-[10px] text-slate-400">
-                                        Saved This Month: {formatCurrency(savingsActivity)}
+                                        {formatCurrency(savingsActivity)}
                                     </div>
                                     <div className={`text-[10px] font-medium mt-1 ${
-                                        savingsAvailable >= 0 ? 'text-blue-300' : 'text-red-400'
+                                        savingsRemaining >= 0 ? 'text-blue-300' : 'text-red-400'
                                     }`}>
-                                        Remaining: {formatCurrency(savingsAvailable)}
+                                        Remaining: {formatCurrency(savingsRemaining)}
                                     </div>
                                 </div>
                             </div>
                             <div className="border-t border-slate-700 pt-3">
                                 <div className="flex items-center justify-between">
-                                    <div className="text-slate-400 text-xs">Net Available</div>
+                                    <div className="text-slate-400 text-xs">Total Available to Spend</div>
                                     <div className={`text-xl font-bold ${
-                                        netIncome >= 0 ? 'text-emerald-400' : 'text-red-400'
+                                        totalAvailableToSpend >= 0 ? 'text-emerald-400' : 'text-red-400'
                                     }`}>
-                                        {formatCurrency(netIncome)}
+                                        {formatCurrency(totalAvailableToSpend)}
                                     </div>
                                 </div>
                                 <div className="text-[10px] text-slate-500 mt-1">
-                                    {netIncome >= 0 
-                                        ? `You have ${formatCurrency(netIncome)} left to assign (after savings)` 
-                                        : `You've overspent by ${formatCurrency(Math.abs(netIncome))} (including savings)`}
+                                    {totalAvailableToSpend >= 0 
+                                        ? `You have ${formatCurrency(totalAvailableToSpend)} left after expenses (savings excluded)` 
+                                        : `You've overspent by ${formatCurrency(Math.abs(totalAvailableToSpend))} (savings excluded)`}
                                 </div>
                             </div>
                         </div>
@@ -1398,16 +1398,25 @@ export default function BudgetPage() {
                                                                             autoFocus
                                                                         />
                                                                     ) : (
-                                                                        <span
+                                                                        <button
+                                                                            type="button"
                                                                             onClick={() => {
                                                                                 if (editMode) {
                                                                                     handleStartEditCategoryName(category.id, category.name);
+                                                                                } else {
+                                                                                    router.push(
+                                                                                        `/finance/budget/category/${category.id}?month=${monthStr}`
+                                                                                    );
                                                                                 }
                                                                             }}
-                                                                            className={editMode ? 'cursor-pointer hover:text-amber-400' : ''}
+                                                                            className={`text-left ${
+                                                                                editMode
+                                                                                    ? 'cursor-pointer hover:text-amber-400'
+                                                                                    : 'cursor-pointer hover:text-amber-400 underline-offset-2 hover:underline'
+                                                                            }`}
                                                                         >
                                                                             {category.name}
-                                                                        </span>
+                                                                        </button>
                                                                     )}
                                                                     {editMode && editingCategoryNames[category.id] === undefined && (
                                                                         <button

@@ -601,24 +601,32 @@ export default function TransactionsPage() {
         });
     }, [monthDate, transactionWindow]);
 
-    // ✅ Filter out transfers from income/expense totals
+    // Month summary reflects the category filter when active. Unfiltered month totals
+    // still exclude internal transfers; filtered views include every matching row so
+    // Transfer / Savings nets are visible.
     const totalIn = useMemo(
         () =>
-            transactions
-                .filter(tx => tx.amount > 0 && !tx.is_transfer)
+            visibleTransactions
+                .filter(tx => tx.amount > 0 && (categoryFilterId || !tx.is_transfer))
                 .reduce((sum, tx) => sum + tx.amount, 0),
-        [transactions]
+        [visibleTransactions, categoryFilterId]
     );
 
     const totalOut = useMemo(
         () =>
-            transactions
-                .filter(tx => tx.amount < 0 && !tx.is_transfer)
+            visibleTransactions
+                .filter(tx => tx.amount < 0 && (categoryFilterId || !tx.is_transfer))
                 .reduce((sum, tx) => sum + Math.abs(tx.amount), 0),
-        [transactions]
+        [visibleTransactions, categoryFilterId]
     );
 
-    const net = totalIn - totalOut;
+    const net = useMemo(
+        () =>
+            categoryFilterId
+                ? visibleTransactions.reduce((sum, tx) => sum + tx.amount, 0)
+                : totalIn - totalOut,
+        [categoryFilterId, visibleTransactions, totalIn, totalOut]
+    );
 
     // =========================================================
     // 🆕 TRANSACTION CRUD LOGIC
@@ -3675,10 +3683,12 @@ export default function TransactionsPage() {
                 </div>
             )}
 
-            {/* Month summary */}
+            {/* Month summary (updates with category filter) */}
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3 text-xs">
                 <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
-                    <p className="text-[10px] uppercase text-slate-400">Income</p>
+                    <p className="text-[10px] uppercase text-slate-400">
+                        Income{categoryFilterId ? ' (filtered)' : ''}
+                    </p>
                     <p className="text-xl font-semibold text-emerald-400">
                         {new Intl.NumberFormat('en-US', {
                             style: 'currency',
@@ -3688,7 +3698,9 @@ export default function TransactionsPage() {
                     </p>
                 </div>
                 <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
-                    <p className="text-[10px] uppercase text-slate-400">Expenses</p>
+                    <p className="text-[10px] uppercase text-slate-400">
+                        Expenses{categoryFilterId ? ' (filtered)' : ''}
+                    </p>
                     <p className="text-xl font-semibold text-red-400">
                         {new Intl.NumberFormat('en-US', {
                             style: 'currency',
@@ -3698,7 +3710,9 @@ export default function TransactionsPage() {
                     </p>
                 </div>
                 <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
-                    <p className="text-[10px] uppercase text-slate-400">Net</p>
+                    <p className="text-[10px] uppercase text-slate-400">
+                        Net{categoryFilterId ? ' (filtered)' : ''}
+                    </p>
                     <p
                         className={`text-xl font-semibold ${
                             net >= 0 ? 'text-emerald-400' : 'text-red-400'

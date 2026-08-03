@@ -35,6 +35,24 @@ describe('budgetGroups', () => {
             expect(totalIncome).toBe(100);
             expect(totalExpenses).toBe(40);
         });
+
+        it('excludes savings/investing categorized amounts from expenses', () => {
+            const categories = new Map([
+                ['groceries', { type: 'expense', name: 'Groceries' }],
+                ['investments', { type: 'transfer', name: 'Investments' }],
+                ['emergency', { type: 'expense', name: 'Emergency Fund' }],
+            ]);
+            const { totalExpenses } = computeMonthCashflow(
+                [
+                    { amount: -50, category_id: 'groceries' },
+                    { amount: -500, category_id: 'investments', is_transfer: false },
+                    { amount: -200, category_id: 'emergency', is_transfer: false },
+                ],
+                categories
+            );
+            // Only groceries counts; investments + emergency fund are savings buckets
+            expect(totalExpenses).toBe(50);
+        });
     });
 
     describe('computeTotalBudgeted', () => {
@@ -98,13 +116,19 @@ describe('budgetGroups', () => {
         it('matches savings/investing names even when typed as expense', () => {
             expect(isSavingsInvestingBucket('expense', 'Savings')).toBe(true);
             expect(isSavingsInvestingBucket('expense', 'Investments')).toBe(true);
+            expect(isSavingsInvestingBucket('expense', 'Emergency Fund')).toBe(true);
             expect(isSavingsInvestingBucket('transfer', 'Emergency Fund')).toBe(true);
+            expect(isSavingsInvestingBucket('transfer', 'Savings')).toBe(true);
+            expect(isSavingsInvestingBucket('transfer', 'Investments')).toBe(true);
+            expect(isSavingsInvestingBucket('transfer', 'Savings/Investing')).toBe(true);
         });
 
-        it('excludes the plain Transfer category', () => {
+        it('excludes the plain Transfer category and income investment leaves', () => {
             expect(isSavingsInvestingBucket('transfer', 'Transfer')).toBe(false);
             expect(isSavingsInvestingBucket('expense', 'Transfer')).toBe(false);
             expect(isSavingsInvestingBucket('expense', 'Groceries')).toBe(false);
+            expect(isSavingsInvestingBucket('income', 'Investments')).toBe(false);
+            expect(isSavingsInvestingBucket('income', 'Dividend/Interest')).toBe(false);
         });
     });
 

@@ -29,13 +29,13 @@ export async function getBudgetGroupsForMonth(
 export async function getBudgetDataForMonth(
     monthStr: string
 ): Promise<{ groups: BudgetGroup[]; summary: BudgetSummary }> {
-    const { groups, transactions } = await loadBudgetMonthData(monthStr);
-    return { groups, summary: buildBudgetSummary(groups, transactions) };
+    const { groups, transactions, categories } = await loadBudgetMonthData(monthStr);
+    return { groups, summary: buildBudgetSummary(groups, transactions, categories) };
 }
 
 async function loadBudgetMonthData(
     monthStr: string
-): Promise<{ groups: BudgetGroup[]; transactions: Transaction[] }> {
+): Promise<{ groups: BudgetGroup[]; transactions: Transaction[]; categories: Category[] }> {
     // Calculate date range for the month
     const [year, month] = monthStr.split('-').map(Number);
     const startOfMonth = new Date(year, month - 1, 1);
@@ -390,17 +390,25 @@ async function loadBudgetMonthData(
         return a.name.localeCompare(b.name); // Fallback to name sorting
     });
 
-    return { groups: sortedGroups, transactions };
+    return { groups: sortedGroups, transactions, categories };
 }
 
 function buildBudgetSummary(
     groups: BudgetGroup[],
-    transactions: Array<{ amount: number; is_transfer?: boolean | null }>
+    transactions: Array<{
+        amount: number;
+        is_transfer?: boolean | null;
+        category_id?: string | null;
+    }>,
+    categories: Category[]
 ): BudgetSummary {
     const totalAssigned = groups.reduce((sum, group) => sum + group.totalAssigned, 0);
     const totalActivity = groups.reduce((sum, group) => sum + group.totalActivity, 0);
     const totalAvailable = totalAssigned - totalActivity;
-    const { totalIncome, totalExpenses } = computeMonthCashflow(transactions);
+    const categoryById = new Map(
+        categories.map((c) => [c.id, { type: c.type, name: c.name }] as const)
+    );
+    const { totalIncome, totalExpenses } = computeMonthCashflow(transactions, categoryById);
     const totalBudgeted = computeTotalBudgeted(groups);
 
     return {
