@@ -993,13 +993,42 @@ export default function BudgetPage() {
                 // Same pattern as Income Available: actual activity minus amount budgeted/goal.
                 const savingsAssigned = transferGroups.reduce((sum, g) => sum + Math.abs(g.totalAssigned), 0);
                 const savingsRemaining = savingsActivity - savingsAssigned;
+
+                // Plan is over-assigned when non-income assigned exceeds income for the month.
+                const nonIncomeAssigned = budgetGroups
+                    .filter(g => g.type !== 'income')
+                    .reduce((sum, g) => sum + Math.abs(g.totalAssigned), 0);
+                const assignedOverIncome = nonIncomeAssigned > totalIncome + 0.005;
+                const overAssignedBy = nonIncomeAssigned - totalIncome;
                 
                 return (
                     <div className="space-y-3">
+                        {assignedOverIncome && (
+                            <div className="rounded-lg border border-red-600 bg-red-950/50 px-4 py-3 text-xs text-red-100">
+                                <p className="font-semibold text-red-300">
+                                    Plan exceeds income
+                                </p>
+                                <p className="mt-1 text-red-200/90">
+                                    You have assigned {formatCurrency(nonIncomeAssigned)} but income
+                                    is {formatCurrency(totalIncome)}
+                                    {totalIncome > 0
+                                        ? ` — over by ${formatCurrency(overAssignedBy)}`
+                                        : ''}
+                                    . Lower assigned amounts so your plan fits what you expect to
+                                    earn.
+                                </p>
+                            </div>
+                        )}
                         {/* Income vs Expenses Summary */}
-                        <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+                        <div className={`rounded-lg border bg-slate-900 p-4 ${
+                            assignedOverIncome ? 'border-red-700' : 'border-slate-800'
+                        }`}>
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-                                <div className="rounded-md border border-emerald-700/50 bg-emerald-950/30 p-3">
+                                <div className={`rounded-md border p-3 ${
+                                    assignedOverIncome
+                                        ? 'border-red-600/60 bg-red-950/30'
+                                        : 'border-emerald-700/50 bg-emerald-950/30'
+                                }`}>
                                     <div className="text-emerald-400 text-[10px] font-semibold uppercase mb-1">⬆️ Income</div>
                                     <div className="text-lg font-semibold text-emerald-400 mb-1">
                                         {formatCurrency(totalIncome)}
@@ -1009,6 +1038,11 @@ export default function BudgetPage() {
                                     }`}>
                                         Expected: {formatCurrency(incomeAvailable)}
                                     </div>
+                                    {assignedOverIncome && (
+                                        <p className="mt-2 text-[10px] font-medium text-red-300">
+                                            Assigned exceeds income — adjust your plan
+                                        </p>
+                                    )}
                                 </div>
                                 <div className="rounded-md border border-red-700/50 bg-red-950/30 p-3">
                                     <div className="text-red-400 text-[10px] font-semibold uppercase mb-1">⬇️ Expenses</div>
@@ -1698,6 +1732,8 @@ export default function BudgetPage() {
                                     0
                                 );
                                 const totalAvailable = totalAssigned - totalActivity;
+                                const monthIncome = summary?.totalIncome ?? 0;
+                                const assignedOverIncome = totalAssigned > monthIncome + 0.005;
                                 return (
                                     <div className="mt-4 border-t border-slate-700 pt-3">
                                         <div className="flex flex-col sm:grid sm:grid-cols-[1fr_100px_100px_100px] gap-2 items-center px-2 py-1">
@@ -1709,7 +1745,13 @@ export default function BudgetPage() {
                                                     <span className="sm:hidden text-slate-400 text-[10px]">
                                                         Total Assigned
                                                     </span>
-                                                    <span className="font-semibold text-slate-100">
+                                                    <span
+                                                        className={`font-semibold ${
+                                                            assignedOverIncome
+                                                                ? 'text-red-400'
+                                                                : 'text-slate-100'
+                                                        }`}
+                                                    >
                                                         {formatCurrency(totalAssigned)}
                                                     </span>
                                                 </div>
@@ -1737,6 +1779,13 @@ export default function BudgetPage() {
                                                 </div>
                                             </div>
                                         </div>
+                                        {assignedOverIncome && (
+                                            <p className="mt-2 px-2 text-[10px] font-medium text-red-300">
+                                                Assigned is {formatCurrency(totalAssigned - monthIncome)}{' '}
+                                                over income ({formatCurrency(monthIncome)}). Reduce
+                                                assigned amounts to balance your plan.
+                                            </p>
+                                        )}
                                     </div>
                                 );
                             })()}
