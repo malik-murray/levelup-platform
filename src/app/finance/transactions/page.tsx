@@ -3684,7 +3684,15 @@ export default function TransactionsPage() {
             )}
 
             {/* Month summary (updates with category filter) */}
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3 text-xs">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4 text-xs">
+                <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
+                    <p className="text-[10px] uppercase text-slate-400">
+                        Transactions{categoryFilterId ? ' (filtered)' : ''}
+                    </p>
+                    <p className="text-xl font-semibold text-slate-100">
+                        {visibleTransactions.length}
+                    </p>
+                </div>
                 <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
                     <p className="text-[10px] uppercase text-slate-400">
                         Income{categoryFilterId ? ' (filtered)' : ''}
