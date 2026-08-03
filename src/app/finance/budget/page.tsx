@@ -22,7 +22,7 @@ export default function BudgetPage() {
     const [newCategoryKind, setNewCategoryKind] = useState<'group' | 'category'>('category');
     const [creatingCategory, setCreatingCategory] = useState(false);
     
-    // Track collapsed groups (keyed by group id)
+    // Track collapsed groups (keyed by group id). Missing keys default to collapsed.
     const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
     
     // Track editing state for budgets (categoryId -> value string)
@@ -121,10 +121,13 @@ export default function BudgetPage() {
     }, []);
 
     const toggleGroup = (groupId: string) => {
-        setCollapsedGroups(prev => ({
-            ...prev,
-            [groupId]: !prev[groupId],
-        }));
+        setCollapsedGroups(prev => {
+            const currentlyCollapsed = prev[groupId] ?? true;
+            return {
+                ...prev,
+                [groupId]: !currentlyCollapsed,
+            };
+        });
     };
 
     const handleStartEditBudget = (categoryId: string) => {
@@ -1069,7 +1072,7 @@ export default function BudgetPage() {
                     const transferGroups = realGroups.filter(g => g.type === 'transfer' || g.type === null);
                     
                     const renderGroup = (group: BudgetGroup, groupIndex: number, totalInSection: number, allGroups: BudgetGroup[]) => {
-                        const isCollapsed = collapsedGroups[group.id];
+                        const isCollapsed = collapsedGroups[group.id] ?? true;
                         const hasCategories = group.categories.length > 0;
                         const globalIndex = allGroups.findIndex(g => g.id === group.id);
 
