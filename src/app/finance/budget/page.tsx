@@ -933,14 +933,7 @@ export default function BudgetPage() {
     return (
         <section className="space-y-4 px-6 py-4">
             <div className="flex items-center justify-between">
-                <div>
-                    <h2 className="text-lg font-semibold">Budget</h2>
-                    <p className="text-xs text-slate-400">
-                        One set of assigned amounts that carries month to month. Use the arrows to
-                        review spending for a month — edit assigned amounts only when you want to
-                        change the budget itself.
-                    </p>
-                </div>
+                <h2 className="text-lg font-semibold">Financial Plan</h2>
                 <div className="flex items-center gap-2 text-xs text-slate-300">
                     <button
                         type="button"
@@ -960,16 +953,7 @@ export default function BudgetPage() {
                 </div>
             </div>
 
-            {/* Budget Actions */}
             <div className="flex gap-2 justify-end">
-                <button
-                    type="button"
-                    onClick={() => setShowManageCategories(true)}
-                    disabled={loading}
-                    className="rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-[11px] font-semibold text-slate-200 hover:bg-slate-700 disabled:opacity-50"
-                >
-                    Manage Categories
-                </button>
                 <button
                     type="button"
                     onClick={() => setEditMode(!editMode)}
@@ -980,7 +964,7 @@ export default function BudgetPage() {
                             : 'border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'
                     }`}
                 >
-                    {editMode ? 'Done Editing' : 'Edit Budget'}
+                    {editMode ? 'Done Editing' : 'Edit Plan'}
                 </button>
             </div>
 
@@ -1002,20 +986,16 @@ export default function BudgetPage() {
                 const incomeAvailable = totalIncome - totalBudgeted;
                 const expenseAvailable = totalBudgeted - totalExpenses;
 
-                const savingsAssigned = transferGroups.reduce((sum, g) => sum + Math.abs(g.totalAssigned), 0);
                 const savingsActivity = transferGroups.reduce((sum, g) => sum + Math.abs(g.totalActivity), 0);
                 // Same pattern as Income Available: actual activity minus amount budgeted/goal.
+                const savingsAssigned = transferGroups.reduce((sum, g) => sum + Math.abs(g.totalAssigned), 0);
                 const savingsRemaining = savingsActivity - savingsAssigned;
-
-                // Ready to spend = income minus real expenses (savings excluded from expenses).
-                const totalAvailableToSpend = totalIncome - totalExpenses;
                 
                 return (
                     <div className="space-y-3">
                         {/* Income vs Expenses Summary */}
                         <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-                            <h3 className="mb-3 text-sm font-semibold">Budget Overview</h3>
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs mb-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
                                 <div className="rounded-md border border-emerald-700/50 bg-emerald-950/30 p-3">
                                     <div className="text-emerald-400 text-[10px] font-semibold uppercase mb-1">⬆️ Income</div>
                                     <div className="text-lg font-semibold text-emerald-300 mb-1">
@@ -1050,144 +1030,20 @@ export default function BudgetPage() {
                                     </div>
                                 </div>
                             </div>
-                            <div className="border-t border-slate-700 pt-3">
-                                <div className="flex items-center justify-between">
-                                    <div className="text-slate-400 text-xs">Total Available to Spend</div>
-                                    <div className={`text-xl font-bold ${
-                                        totalAvailableToSpend >= 0 ? 'text-emerald-400' : 'text-red-400'
-                                    }`}>
-                                        {formatCurrency(totalAvailableToSpend)}
-                                    </div>
-                                </div>
-                                <div className="text-[10px] text-slate-500 mt-1">
-                                    {totalAvailableToSpend >= 0 
-                                        ? `You have ${formatCurrency(totalAvailableToSpend)} left after expenses (savings excluded)` 
-                                        : `You've overspent by ${formatCurrency(Math.abs(totalAvailableToSpend))} (savings excluded)`}
-                                </div>
-                            </div>
-                        </div>
-                        
-                        {/* Detailed Summary */}
-                        <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-                            <h3 className="mb-3 text-sm font-semibold">Total Summary</h3>
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-                                <div>
-                                    <div className="text-slate-400">Total Assigned</div>
-                                    <div className="text-lg font-semibold text-slate-100">
-                                        {formatCurrency(summary.totalAssigned)}
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="text-slate-400">Total Activity</div>
-                                    <div className="text-lg font-semibold text-slate-100">
-                                        {formatCurrency(summary.totalActivity)}
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="text-slate-400">Available</div>
-                                    <div className={`text-lg font-semibold ${
-                                        summary.totalAvailable >= 0 ? 'text-emerald-400' : 'text-blue-400'
-                                    }`}>
-                                        {formatCurrency(summary.totalAvailable)}
-                                    </div>
-                                </div>
-                            </div>
                         </div>
                     </div>
                 );
             })()}
 
-            {/* Add Category Section */}
-            <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
-                <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-semibold">Categories</h3>
-                    <button
-                        type="button"
-                        onClick={() => setShowAddCategory(!showAddCategory)}
-                        className="rounded-md bg-amber-400 px-3 py-1.5 text-[11px] font-semibold text-black hover:bg-amber-300"
-                    >
-                        {showAddCategory ? 'Cancel' : '+ Add Category/Group'}
-                    </button>
-                </div>
-
-                {showAddCategory && (
-                    <form onSubmit={handleCreateCategory} className="mb-4 space-y-3 rounded-md bg-slate-950 p-3">
-                        <div>
-                            <label className="block text-slate-300 mb-1">Category Name</label>
-                            <input
-                                type="text"
-                                className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1"
-                                value={newCategoryName}
-                                onChange={e => setNewCategoryName(e.target.value)}
-                                placeholder="e.g., Subscriptions, Groceries, Softr"
-                                required
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-slate-300 mb-1">Type</label>
-                            <select
-                                className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1"
-                                value={newCategoryType}
-                                onChange={e => setNewCategoryType(e.target.value as 'income' | 'expense' | 'transfer')}
-                            >
-                                <option value="expense">⬇️ Expense</option>
-                                <option value="income">⬆️ Income</option>
-                                <option value="transfer">💰 Savings/Investing</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="block text-slate-300 mb-1">Kind</label>
-                            <select
-                                className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1"
-                                value={newCategoryKind}
-                                onChange={e => setNewCategoryKind(e.target.value as 'group' | 'category')}
-                            >
-                                <option value="group">Group (Top-level category)</option>
-                                <option value="category">Category (Subcategory)</option>
-                            </select>
-                        </div>
-
-                        {newCategoryKind === 'category' && (
-                            <div>
-                                <label className="block text-slate-300 mb-1">Parent Group (Required)</label>
-                                <select
-                                    className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1"
-                                    value={newCategoryParentId}
-                                    onChange={e => setNewCategoryParentId(e.target.value)}
-                                    required={newCategoryKind === 'category'}
-                                >
-                                    <option value="">Select a group</option>
-                                    {groupCategories.map(group => (
-                                        <option key={group.id} value={group.id}>
-                                                    {group.type === 'income' ? '⬆️' : group.type === 'transfer' ? '💰' : '⬇️'} {group.name}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                        )}
-
-                        <button
-                            type="submit"
-                            disabled={creatingCategory}
-                            className="w-full rounded-md bg-amber-400 px-3 py-2 text-[11px] font-semibold text-black hover:bg-amber-300 disabled:opacity-50"
-                        >
-                            {creatingCategory ? 'Creating...' : 'Create Category'}
-                        </button>
-                    </form>
-                )}
-            </div>
-
-            {/* Budget Groups List */}
-            <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
-                <h3 className="mb-4 text-sm font-semibold">Budget Categories</h3>
+            {/* Categories list */}
+            <div className="relative rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
+                <h3 className="mb-4 text-sm font-semibold">Categories</h3>
 
                 {loading ? (
-                    <div className="text-[11px] text-slate-400">Loading budgets…</div>
+                    <div className="text-[11px] text-slate-400">Loading…</div>
                 ) : budgetGroups.length === 0 ? (
                     <div className="text-[11px] text-slate-400">
-                        No budget categories found. Create a group and add categories to get started.
+                        No categories found. Use Edit Categories to create a group and add categories.
                     </div>
                 ) : (() => {
                     // Separate groups by type
@@ -1369,7 +1225,29 @@ export default function BudgetPage() {
                                                 return (
                                                     <div
                                                         key={category.id}
+                                                        role={!editMode ? 'button' : undefined}
+                                                        tabIndex={!editMode ? 0 : undefined}
+                                                        onClick={() => {
+                                                            if (!editMode) {
+                                                                router.push(
+                                                                    `/finance/budget/category/${category.id}?month=${monthStr}`
+                                                                );
+                                                            }
+                                                        }}
+                                                        onKeyDown={e => {
+                                                            if (
+                                                                !editMode &&
+                                                                (e.key === 'Enter' || e.key === ' ')
+                                                            ) {
+                                                                e.preventDefault();
+                                                                router.push(
+                                                                    `/finance/budget/category/${category.id}?month=${monthStr}`
+                                                                );
+                                                            }
+                                                        }}
                                                         className={`rounded-md bg-slate-900 hover:bg-slate-800 transition-colors ${
+                                                            !editMode ? 'cursor-pointer' : ''
+                                                        } ${
                                                             catIndex < group.categories.length - 1 ? 'mb-1' : ''
                                                         }`}
                                                     >
@@ -1395,33 +1273,30 @@ export default function BudgetPage() {
                                                                                 }
                                                                             }}
                                                                             onBlur={() => handleUpdateCategoryName(category.id, editingCategoryNames[category.id])}
+                                                                            onClick={e => e.stopPropagation()}
                                                                             autoFocus
                                                                         />
-                                                                    ) : (
+                                                                    ) : editMode ? (
                                                                         <button
                                                                             type="button"
-                                                                            onClick={() => {
-                                                                                if (editMode) {
-                                                                                    handleStartEditCategoryName(category.id, category.name);
-                                                                                } else {
-                                                                                    router.push(
-                                                                                        `/finance/budget/category/${category.id}?month=${monthStr}`
-                                                                                    );
-                                                                                }
+                                                                            onClick={e => {
+                                                                                e.stopPropagation();
+                                                                                handleStartEditCategoryName(category.id, category.name);
                                                                             }}
-                                                                            className={`text-left ${
-                                                                                editMode
-                                                                                    ? 'cursor-pointer hover:text-amber-400'
-                                                                                    : 'cursor-pointer hover:text-amber-400 underline-offset-2 hover:underline'
-                                                                            }`}
+                                                                            className="text-left cursor-pointer hover:text-amber-400"
                                                                         >
                                                                             {category.name}
                                                                         </button>
+                                                                    ) : (
+                                                                        <span className="text-left">{category.name}</span>
                                                                     )}
                                                                     {editMode && editingCategoryNames[category.id] === undefined && (
                                                                         <button
                                                                             type="button"
-                                                                            onClick={() => handleDeleteCategory(category.id, category.name, false)}
+                                                                            onClick={e => {
+                                                                                e.stopPropagation();
+                                                                                handleDeleteCategory(category.id, category.name, false);
+                                                                            }}
                                                                             className="rounded bg-red-900 px-1.5 py-0.5 text-[9px] hover:bg-red-800 text-red-200"
                                                                             title="Delete category"
                                                                         >
@@ -1430,7 +1305,10 @@ export default function BudgetPage() {
                                                                     )}
                                                                 </div>
                                                                 {/* Mobile: Show amounts in a row below name */}
-                                                                <div className="flex sm:hidden w-full justify-between text-xs mt-1 pl-4">
+                                                                <div
+                                                                    className="flex sm:hidden w-full justify-between text-xs mt-1 pl-4"
+                                                                    onClick={e => e.stopPropagation()}
+                                                                >
                                                                     <div className="flex flex-col">
                                                                         <span className="text-slate-400 text-[10px]">Assigned</span>
                                                                         {editMode || isEditing ? (
@@ -1522,7 +1400,7 @@ export default function BudgetPage() {
                                                                     </div>
                                                                 </div>
                                                                 {/* Desktop: Show amounts in grid columns */}
-                                                                <div className="hidden sm:block text-right">
+                                                                <div className="hidden sm:block text-right" onClick={e => e.stopPropagation()}>
                                                                     {editMode || isEditing ? (
                                                                         <input
                                                                             type="number"
@@ -1737,6 +1615,14 @@ export default function BudgetPage() {
                         </div>
                     );
                 })()}
+
+                <button
+                    type="button"
+                    onClick={() => setShowManageCategories(true)}
+                    className="fixed bottom-6 right-6 z-40 rounded-full bg-amber-400 px-4 py-3 text-sm font-semibold text-black shadow-lg shadow-black/40 hover:bg-amber-300"
+                >
+                    Edit Categories
+                </button>
             </div>
             
             {/* Manage Categories Modal */}
@@ -1744,24 +1630,97 @@ export default function BudgetPage() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
                     <div className="w-full max-w-2xl max-h-[90vh] rounded-lg border border-slate-700 bg-slate-900 flex flex-col">
                         {/* Header */}
-                        <div className="flex items-center justify-between p-4 border-b border-slate-800">
-                            <h3 className="text-lg font-semibold">Manage Categories</h3>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setShowManageCategories(false);
-                                    setAddingSubcategoryTo(null);
-                                    setConvertingCategory(null);
-                                    setExpandedCategories(new Set());
-                                }}
-                                className="rounded-md p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200"
-                            >
-                                ✕
-                            </button>
+                        <div className="flex items-center justify-between gap-3 p-4 border-b border-slate-800">
+                            <h3 className="text-lg font-semibold">Edit Categories</h3>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAddCategory(!showAddCategory)}
+                                    className="rounded-md bg-amber-400 px-3 py-1.5 text-[11px] font-semibold text-black hover:bg-amber-300"
+                                >
+                                    {showAddCategory ? 'Cancel' : '+ Add Category/Group'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setShowManageCategories(false);
+                                        setShowAddCategory(false);
+                                        setAddingSubcategoryTo(null);
+                                        setConvertingCategory(null);
+                                        setExpandedCategories(new Set());
+                                    }}
+                                    className="rounded-md p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+                                >
+                                    ✕
+                                </button>
+                            </div>
                         </div>
                         
                         {/* Content */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                            {showAddCategory && (
+                                <form onSubmit={handleCreateCategory} className="mb-3 space-y-3 rounded-md border border-slate-700 bg-slate-950 p-3 text-xs">
+                                    <div>
+                                        <label className="block text-slate-300 mb-1">Category Name</label>
+                                        <input
+                                            type="text"
+                                            className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1"
+                                            value={newCategoryName}
+                                            onChange={e => setNewCategoryName(e.target.value)}
+                                            placeholder="e.g., Subscriptions, Groceries"
+                                            required
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-slate-300 mb-1">Type</label>
+                                        <select
+                                            className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1"
+                                            value={newCategoryType}
+                                            onChange={e => setNewCategoryType(e.target.value as 'income' | 'expense' | 'transfer')}
+                                        >
+                                            <option value="expense">⬇️ Expense</option>
+                                            <option value="income">⬆️ Income</option>
+                                            <option value="transfer">💰 Savings/Investing</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-slate-300 mb-1">Kind</label>
+                                        <select
+                                            className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1"
+                                            value={newCategoryKind}
+                                            onChange={e => setNewCategoryKind(e.target.value as 'group' | 'category')}
+                                        >
+                                            <option value="group">Group (Top-level category)</option>
+                                            <option value="category">Category (Subcategory)</option>
+                                        </select>
+                                    </div>
+                                    {newCategoryKind === 'category' && (
+                                        <div>
+                                            <label className="block text-slate-300 mb-1">Parent Group (Required)</label>
+                                            <select
+                                                className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1"
+                                                value={newCategoryParentId}
+                                                onChange={e => setNewCategoryParentId(e.target.value)}
+                                                required={newCategoryKind === 'category'}
+                                            >
+                                                <option value="">Select a group</option>
+                                                {groupCategories.map(group => (
+                                                    <option key={group.id} value={group.id}>
+                                                        {group.type === 'income' ? '⬆️' : group.type === 'transfer' ? '💰' : '⬇️'} {group.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
+                                    <button
+                                        type="submit"
+                                        disabled={creatingCategory}
+                                        className="w-full rounded-md bg-amber-400 px-3 py-2 text-[11px] font-semibold text-black hover:bg-amber-300 disabled:opacity-50"
+                                    >
+                                        {creatingCategory ? 'Creating...' : 'Create Category'}
+                                    </button>
+                                </form>
+                            )}
                             {categoryHierarchy.map(({ category, children, level }) => {
                                 const isExpanded = expandedCategories.has(category.id);
                                 const isGroup = category.kind === 'group';

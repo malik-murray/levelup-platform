@@ -3780,27 +3780,6 @@ export default function TransactionsPage() {
                     </p>
                 ) : (
                     <div className="space-y-3">
-                        {merchantFrequencyRows.length > 0 && (
-                            <div className="rounded-md border border-slate-800 bg-slate-950 p-2">
-                                <p className="mb-1 text-[10px] uppercase text-slate-400">
-                                    Top Merchants/Descriptions (by frequency)
-                                </p>
-                                <div className="max-h-28 space-y-1 overflow-y-auto text-[10px]">
-                                    {merchantFrequencyRows.slice(0, 8).map(row => (
-                                        <div
-                                            key={row.key}
-                                            className="flex items-center justify-between gap-2 text-slate-300"
-                                        >
-                                            <span className="truncate">{row.label}</span>
-                                            <span className="shrink-0 text-slate-400">
-                                                {row.count} tx
-                                            </span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
                         {/* Bulk Edit Controls */}
                         {selectedTransactionIds.size > 0 && (
                             <div className="rounded-lg border border-amber-700 bg-slate-900 p-3">
@@ -3814,7 +3793,7 @@ export default function TransactionsPage() {
                                             onClick={() => setShowBulkEdit(!showBulkEdit)}
                                             className="rounded-md bg-amber-400 px-2 py-1 text-[10px] font-semibold text-black hover:bg-amber-300"
                                         >
-                                            {showBulkEdit ? 'Cancel' : 'Bulk Edit'}
+                                            {showBulkEdit ? 'Cancel' : 'Edit'}
                                         </button>
                                         <button
                                             type="button"
@@ -3822,17 +3801,7 @@ export default function TransactionsPage() {
                                             disabled={bulkUpdating}
                                             className="rounded-md bg-red-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-red-500 disabled:opacity-50"
                                         >
-                                            Delete Selected
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setSelectedTransactionIds(new Set());
-                                                setShowBulkEdit(false);
-                                            }}
-                                            className="rounded-md border border-slate-700 px-2 py-1 text-[10px] text-slate-300 hover:bg-slate-800"
-                                        >
-                                            Clear
+                                            Delete
                                         </button>
                                     </div>
                                 </div>
@@ -3950,7 +3919,7 @@ export default function TransactionsPage() {
                                         onChange={handleToggleSelectAll}
                                         className="rounded border-slate-600"
                                     />
-                                    <label>Select all visible transactions</label>
+                                    <label>Select All Transactions</label>
                                 </div>
                             )}
 

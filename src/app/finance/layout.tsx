@@ -11,7 +11,7 @@ const financeTabs = [
     { href: '/finance', label: 'Home' },
     { href: '/finance/accounts', label: 'Accounts' },
     { href: '/finance/transactions', label: 'Transactions' },
-    { href: '/finance/budget', label: 'Budget' },
+    { href: '/finance/budget', label: 'Financial Plan' },
     { href: '/finance/reports', label: 'Reports' },
     { href: '/finance/chat', label: 'Ask' },
     { href: '/finance/concierge', label: 'Concierge' },

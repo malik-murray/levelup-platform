@@ -197,7 +197,7 @@ export default function BudgetCategoryDetailPage() {
                         href="/finance/budget"
                         className="text-[11px] text-slate-400 hover:text-amber-400"
                     >
-                        ← Back to Budget
+                        ← Back to Financial Plan
                     </Link>
                     <h2 className="text-lg font-semibold mt-1">
                         {category?.name ?? 'Category'}
