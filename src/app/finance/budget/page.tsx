@@ -998,29 +998,33 @@ export default function BudgetPage() {
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
                                 <div className="rounded-md border border-emerald-700/50 bg-emerald-950/30 p-3">
                                     <div className="text-emerald-400 text-[10px] font-semibold uppercase mb-1">⬆️ Income</div>
-                                    <div className="text-lg font-semibold text-emerald-300 mb-1">
+                                    <div className="text-lg font-semibold text-emerald-400 mb-1">
                                         {formatCurrency(totalIncome)}
                                     </div>
                                     <div className={`text-[10px] font-medium mt-1 ${
-                                        incomeAvailable >= 0 ? 'text-emerald-300' : 'text-red-400'
+                                        incomeAvailable >= 0 ? 'text-emerald-400' : 'text-red-400'
                                     }`}>
-                                        Available: {formatCurrency(incomeAvailable)}
+                                        Expected: {formatCurrency(incomeAvailable)}
                                     </div>
                                 </div>
                                 <div className="rounded-md border border-red-700/50 bg-red-950/30 p-3">
                                     <div className="text-red-400 text-[10px] font-semibold uppercase mb-1">⬇️ Expenses</div>
-                                    <div className="text-lg font-semibold text-red-300 mb-1">
+                                    <div className={`text-lg font-semibold mb-1 ${
+                                        totalExpenses <= totalBudgeted ? 'text-emerald-400' : 'text-red-400'
+                                    }`}>
                                         {formatCurrency(totalExpenses)}
                                     </div>
                                     <div className={`text-[10px] font-medium mt-1 ${
-                                        expenseAvailable >= 0 ? 'text-emerald-300' : 'text-red-400'
+                                        expenseAvailable >= 0 ? 'text-emerald-400' : 'text-red-400'
                                     }`}>
                                         Available: {formatCurrency(expenseAvailable)}
                                     </div>
                                 </div>
                                 <div className="rounded-md border border-blue-700/50 bg-blue-950/30 p-3">
                                     <div className="text-blue-400 text-[10px] font-semibold uppercase mb-1">💰 Savings/Investing</div>
-                                    <div className="text-lg font-semibold text-blue-300 mb-1">
+                                    <div className={`text-lg font-semibold mb-1 ${
+                                        savingsActivity > 0 ? 'text-emerald-400' : 'text-slate-300'
+                                    }`}>
                                         {formatCurrency(savingsActivity)}
                                     </div>
                                     <div className={`text-[10px] font-medium mt-1 ${
