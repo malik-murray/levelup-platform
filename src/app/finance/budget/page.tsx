@@ -986,7 +986,6 @@ export default function BudgetPage() {
                 const totalIncome = summary.totalIncome;
                 const totalExpenses = summary.totalExpenses;
                 const totalBudgeted = summary.totalBudgeted;
-                const incomeAvailable = totalIncome - totalBudgeted;
                 const expenseAvailable = totalBudgeted - totalExpenses;
 
                 const savingsActivity = transferGroups.reduce((sum, g) => sum + Math.abs(g.totalActivity), 0);
@@ -994,12 +993,16 @@ export default function BudgetPage() {
                 const savingsAssigned = transferGroups.reduce((sum, g) => sum + Math.abs(g.totalAssigned), 0);
                 const savingsRemaining = savingsActivity - savingsAssigned;
 
-                // Plan is over-assigned when non-income assigned exceeds income for the month.
+                // Expected income = amounts assigned on income categories (the plan).
+                const expectedIncome = budgetGroups
+                    .filter(g => g.type === 'income')
+                    .reduce((sum, g) => sum + Math.abs(g.totalAssigned), 0);
+                // Plan is over when non-income assigned exceeds expected income.
                 const nonIncomeAssigned = budgetGroups
                     .filter(g => g.type !== 'income')
                     .reduce((sum, g) => sum + Math.abs(g.totalAssigned), 0);
-                const assignedOverIncome = nonIncomeAssigned > totalIncome + 0.005;
-                const overAssignedBy = nonIncomeAssigned - totalIncome;
+                const assignedOverIncome = nonIncomeAssigned > expectedIncome + 0.005;
+                const overAssignedBy = nonIncomeAssigned - expectedIncome;
                 
                 return (
                     <div className="space-y-3">
@@ -1009,13 +1012,9 @@ export default function BudgetPage() {
                                     Plan exceeds income
                                 </p>
                                 <p className="mt-1 text-red-200/90">
-                                    You have assigned {formatCurrency(nonIncomeAssigned)} but income
-                                    is {formatCurrency(totalIncome)}
-                                    {totalIncome > 0
-                                        ? ` — over by ${formatCurrency(overAssignedBy)}`
-                                        : ''}
-                                    . Lower assigned amounts so your plan fits what you expect to
-                                    earn.
+                                    Your plan is {formatCurrency(overAssignedBy)} over expected
+                                    income ({formatCurrency(expectedIncome)}). Lower assigned
+                                    amounts so your plan fits what you expect to earn.
                                 </p>
                             </div>
                         )}
@@ -1034,13 +1033,14 @@ export default function BudgetPage() {
                                         {formatCurrency(totalIncome)}
                                     </div>
                                     <div className={`text-[10px] font-medium mt-1 ${
-                                        incomeAvailable >= 0 ? 'text-emerald-400' : 'text-red-400'
+                                        assignedOverIncome ? 'text-red-400' : 'text-emerald-400'
                                     }`}>
-                                        Expected: {formatCurrency(incomeAvailable)}
+                                        Expected: {formatCurrency(expectedIncome)}
                                     </div>
                                     {assignedOverIncome && (
                                         <p className="mt-2 text-[10px] font-medium text-red-300">
-                                            Assigned exceeds income — adjust your plan
+                                            Plan is {formatCurrency(overAssignedBy)} over expected
+                                            income — adjust your plan
                                         </p>
                                     )}
                                 </div>
@@ -1732,8 +1732,11 @@ export default function BudgetPage() {
                                     0
                                 );
                                 const totalAvailable = totalAssigned - totalActivity;
-                                const monthIncome = summary?.totalIncome ?? 0;
-                                const assignedOverIncome = totalAssigned > monthIncome + 0.005;
+                                const expectedIncome = budgetGroups
+                                    .filter(g => g.type === 'income')
+                                    .reduce((sum, g) => sum + Math.abs(g.totalAssigned), 0);
+                                const assignedOverIncome = totalAssigned > expectedIncome + 0.005;
+                                const overAssignedBy = totalAssigned - expectedIncome;
                                 return (
                                     <div className="mt-4 border-t border-slate-700 pt-3">
                                         <div className="flex flex-col sm:grid sm:grid-cols-[1fr_100px_100px_100px] gap-2 items-center px-2 py-1">
@@ -1781,9 +1784,8 @@ export default function BudgetPage() {
                                         </div>
                                         {assignedOverIncome && (
                                             <p className="mt-2 px-2 text-[10px] font-medium text-red-300">
-                                                Assigned is {formatCurrency(totalAssigned - monthIncome)}{' '}
-                                                over income ({formatCurrency(monthIncome)}). Reduce
-                                                assigned amounts to balance your plan.
+                                                Your plan is {formatCurrency(overAssignedBy)} over
+                                                expected income ({formatCurrency(expectedIncome)}).
                                             </p>
                                         )}
                                     </div>

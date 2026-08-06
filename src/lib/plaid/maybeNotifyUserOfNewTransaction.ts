@@ -9,6 +9,11 @@ import { getQuickCategoryActionsForPush } from '@/lib/push/getQuickCategoryActio
 import { createNotificationActionToken } from '@/lib/push/notificationActionToken';
 import { sendFinanceSpendPush } from '@/lib/plaid/sendFinancePushNotification';
 import { getRemainingBudgetForCategory } from '@/lib/financial-concierge/budgetEngine';
+import {
+    isPlainTransferCategory,
+    isSavingsInvestingBucket,
+    resolveStickyBudgetAmounts,
+} from '@/lib/budgetOverview';
 
 export type TransactionForNotification = {
     id: string;
@@ -28,6 +33,78 @@ export type NotifyResult = {
     notified: boolean;
     skippedReason?: string;
 };
+
+type BudgetCategoryRef = {
+    id: string;
+    type: string | null;
+    name: string;
+};
+
+async function getRemainingPlanBalanceForMonth(
+    supabase: SupabaseClient,
+    userId: string,
+    month: string
+): Promise<number | null> {
+    const [year, monthNum] = month.split('-').map(Number);
+    const monthStart = `${month}-01`;
+    const nextMonthStart = new Date(Date.UTC(year, monthNum, 1)).toISOString().split('T')[0];
+
+    const [{ data: categories }, { data: budgets }, { data: transactions }] = await Promise.all([
+        supabase
+            .from('categories')
+            .select('id, type, name')
+            .eq('user_id', userId)
+            .eq('kind', 'category')
+            .eq('is_archived', false),
+        supabase
+            .from('category_budgets')
+            .select('category_id, month, amount')
+            .eq('user_id', userId),
+        supabase
+            .from('transactions')
+            .select('category_id, amount')
+            .eq('user_id', userId)
+            .gte('date', monthStart)
+            .lt('date', nextMonthStart)
+            .is('removed_at', null),
+    ]);
+
+    const categoryList = (categories as BudgetCategoryRef[] | null) ?? [];
+    if (categoryList.length === 0) return null;
+
+    const categoryById = new Map(categoryList.map((c) => [c.id, c] as const));
+    const stickyBudgets = resolveStickyBudgetAmounts(
+        ((budgets as Array<{ category_id: string; month: string; amount: number }> | null) ?? []).filter(
+            (b) => b.month <= month
+        )
+    );
+
+    // Match Financial Plan totals semantics: include non-income categories.
+    const totalAssigned = categoryList
+        .filter((c) => c.type !== 'income')
+        .reduce((sum, c) => sum + Math.abs(stickyBudgets.get(c.id) ?? 0), 0);
+
+    let totalActivity = 0;
+    for (const tx of ((transactions as Array<{ category_id: string | null; amount: number }> | null) ?? [])) {
+        if (!tx.category_id) continue;
+        const cat = categoryById.get(tx.category_id);
+        if (!cat || cat.type === 'income') continue;
+
+        // For spend/transfer-like buckets, activity is month outflow.
+        if (
+            isSavingsInvestingBucket(cat.type, cat.name) ||
+            isPlainTransferCategory(cat.type, cat.name) ||
+            cat.type === 'expense'
+        ) {
+            totalActivity += Math.abs(Math.min(0, Number(tx.amount) || 0));
+            continue;
+        }
+
+        totalActivity += Math.abs(Number(tx.amount) || 0);
+    }
+
+    return totalAssigned - totalActivity;
+}
 
 /**
  * Notify user of new spending (pending or posted). Idempotent via notified_at + notification_events.
@@ -89,15 +166,22 @@ export async function maybeNotifyUserOfNewTransaction(
     const title = 'New Transaction';
     const dateSuffix =
         transaction.date && /^\d{4}-\d{2}-\d{2}$/.test(transaction.date)
-            ? ` (${transaction.date})`
+            ? (() => {
+                  const [y, m, d] = transaction.date.split('-');
+                  // e.g. 2026-08-06 -> (8/6/26)
+                  const yy = y.slice(2);
+                  return ` (${parseInt(m, 10)}/${parseInt(d, 10)}/${yy})`;
+              })()
             : '';
 
     let remainingSuffix = '';
+    let planSuffix = '';
+    const month =
+        transaction.date && /^\d{4}-\d{2}/.test(transaction.date)
+            ? transaction.date.slice(0, 7)
+            : new Date().toISOString().slice(0, 7);
+
     if (transaction.category_id) {
-        const month =
-            transaction.date && /^\d{4}-\d{2}/.test(transaction.date)
-                ? transaction.date.slice(0, 7)
-                : new Date().toISOString().slice(0, 7);
         try {
             const remaining = await getRemainingBudgetForCategory(
                 supabase,
@@ -116,7 +200,23 @@ export async function maybeNotifyUserOfNewTransaction(
         }
     }
 
-    const body = `$${spendAbs.toFixed(2)} at ${merchant}${dateSuffix}${remainingSuffix}`;
+    try {
+        const planRemaining = await getRemainingPlanBalanceForMonth(
+            supabase,
+            transaction.user_id,
+            month
+        );
+        if (planRemaining != null) {
+            planSuffix =
+                planRemaining >= 0
+                    ? ` • Plan: $${planRemaining.toFixed(2)} left`
+                    : ` • Plan: $${Math.abs(planRemaining).toFixed(2)} over`;
+        }
+    } catch (err) {
+        console.error('getRemainingPlanBalanceForMonth failed:', err);
+    }
+
+    const body = `$${spendAbs.toFixed(2)} at ${merchant}${dateSuffix}${remainingSuffix}${planSuffix}`;
 
     const [quickCategories, actionToken] = await Promise.all([
         getQuickCategoryActionsForPush(supabase, transaction.user_id, transaction.category_id ?? null),
