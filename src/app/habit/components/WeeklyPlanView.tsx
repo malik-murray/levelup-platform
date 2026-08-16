@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, type SyntheticEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate } from '@/lib/habitHelpers';
 import WeeklyScoreBars, { type WeeklyScores } from './WeeklyScoreBars';
@@ -35,6 +36,7 @@ type DailyWeekNote = {
 };
 
 export default function WeeklyPlanView() {
+    const router = useRouter();
     const [loading, setLoading] = useState(true);
     const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan | null>(null);
     const [events, setEvents] = useState<WeeklyEvent[]>([]);
@@ -539,27 +541,61 @@ export default function WeeklyPlanView() {
                         </div>
                         <ul className="space-y-2">
                             {events.map(ev => (
-                                <li key={ev.id} className="flex items-center gap-3 p-3 rounded border border-slate-700 bg-slate-900/50 min-h-[44px]">
-                                    <label className="flex items-center gap-3 flex-1 cursor-pointer min-w-0">
-                                        <input
-                                            type="checkbox"
-                                            checked={!!ev.is_done}
-                                            onChange={(e) => handleToggleEventCompletion(ev, e.target.checked)}
-                                            disabled={!ev.todo_id}
-                                            className="h-5 w-5 shrink-0 rounded border-slate-600 text-amber-500 focus:ring-amber-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                                        />
-                                        <div className="flex-1 min-w-0">
-                                            <span className={`font-medium block ${ev.is_done ? 'line-through text-slate-500' : 'text-slate-200'}`}>
-                                                {ev.title}
-                                            </span>
-                                            <span className="text-xs text-slate-400">
-                                                {new Date(ev.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                                                {ev.start_time && ` • ${ev.start_time.slice(0, 5)}`}
-                                            </span>
-                                        </div>
-                                    </label>
+                                <li
+                                    key={ev.id}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => router.push(`/habit/weekly-plan/${ev.id}/edit`)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            router.push(`/habit/weekly-plan/${ev.id}/edit`);
+                                        }
+                                    }}
+                                    className="flex items-center gap-3 p-3 rounded border border-slate-700 bg-slate-900/50 min-h-[44px] cursor-pointer transition-colors hover:border-slate-600 hover:bg-slate-900/80"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        checked={!!ev.is_done}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={(e) => handleToggleEventCompletion(ev, e.target.checked)}
+                                        disabled={!ev.todo_id}
+                                        aria-label={`Mark ${ev.title} complete`}
+                                        className="h-5 w-5 shrink-0 rounded border-slate-600 text-amber-500 focus:ring-amber-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                        <span className={`font-medium block ${ev.is_done ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                                            {ev.title}
+                                        </span>
+                                        <span className="text-xs text-slate-400">
+                                            {new Date(ev.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                                            {ev.start_time && ` • ${ev.start_time.slice(0, 5)}`}
+                                        </span>
+                                    </div>
                                     <button
-                                        onClick={() => handleDeleteEvent(ev.id)}
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            router.push(`/habit/weekly-plan/${ev.id}/edit`);
+                                        }}
+                                        className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl border border-[#ff9d00]/30 text-[#ff9d00]/80 transition hover:border-[#ff9d00]/60 hover:text-[#ffe066] shrink-0"
+                                        aria-label={`Edit ${ev.title}`}
+                                    >
+                                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2}
+                                                d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                                            />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDeleteEvent(ev.id);
+                                        }}
                                         className="text-red-400 hover:text-red-300 text-sm shrink-0"
                                     >
                                         Delete
