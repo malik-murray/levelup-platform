@@ -169,6 +169,20 @@ export function deletePreviewTodo(preview: PreviewContextValue, id: string) {
     }));
 }
 
+export function movePreviewPriorityToDate(preview: PreviewContextValue, id: string, dateStr: string) {
+    preview.setHabit((prev) => ({
+        ...prev,
+        priorities: prev.priorities.map((p) => (p.id === id ? { ...p, date: dateStr } : p)),
+    }));
+}
+
+export function movePreviewTodoToDate(preview: PreviewContextValue, id: string, dateStr: string) {
+    preview.setHabit((prev) => ({
+        ...prev,
+        todos: prev.todos.map((t) => (t.id === id ? { ...t, date: dateStr } : t)),
+    }));
+}
+
 export function togglePreviewPriorityComplete(
     preview: PreviewContextValue,
     id: string,

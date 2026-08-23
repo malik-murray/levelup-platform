@@ -5,6 +5,13 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate } from '@/lib/habitHelpers';
 import WeeklyScoreBars, { type WeeklyScores } from './WeeklyScoreBars';
+import SortableWeeklyTodoList from './SortableWeeklyTodoList';
+import {
+    deleteWeeklyTodoLinkedRecords,
+    reorderWeeklyTodos,
+    syncWeeklyTodoDayAssignment,
+    type WeeklyTodoItem,
+} from '@/lib/habit/weeklyPlanActions';
 import { neon } from '@/app/dashboard/neonTheme';
 import NoteContentDisplay from '@/components/NoteContentDisplay';
 
@@ -40,6 +47,8 @@ export default function WeeklyPlanView() {
     const [loading, setLoading] = useState(true);
     const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan | null>(null);
     const [events, setEvents] = useState<WeeklyEvent[]>([]);
+    const [weeklyTodos, setWeeklyTodos] = useState<WeeklyTodoItem[]>([]);
+    const [weeklyTodosBusy, setWeeklyTodosBusy] = useState(false);
     const [weeklyScores, setWeeklyScores] = useState<WeeklyScores | null>(null);
     const [weeklyDailyNotes, setWeeklyDailyNotes] = useState<DailyWeekNote[]>([]);
 
@@ -50,6 +59,9 @@ export default function WeeklyPlanView() {
     const [newEventDate, setNewEventDate] = useState('');
     const [newEventStartTime, setNewEventStartTime] = useState('');
     const [newEventEndTime, setNewEventEndTime] = useState('');
+
+    const [newTodoTitle, setNewTodoTitle] = useState('');
+    const [newTodoDate, setNewTodoDate] = useState('');
 
     // Selected week (Sunday)
     const getWeekStart = (date: Date): Date => {
@@ -97,6 +109,7 @@ export default function WeeklyPlanView() {
 
     useEffect(() => {
         setNewEventDate(weekStartStr);
+        setNewTodoDate('');
     }, [weekStartStr]);
 
     const syncFocusIntentionHeight = useCallback(() => {
@@ -211,6 +224,47 @@ export default function WeeklyPlanView() {
             if (planData) {
                 setWeeklyPlan(planData);
                 setFocusIntention(planData.focus_intention || '');
+
+                const { data: weeklyItemsRaw } = await supabase
+                    .from('habit_weekly_items')
+                    .select(`
+                        id,
+                        title,
+                        sort_order,
+                        status,
+                        habit_weekly_item_days (
+                            id,
+                            date,
+                            completed,
+                            todo_id
+                        )
+                    `)
+                    .eq('weekly_plan_id', planData.id)
+                    .eq('user_id', user.id)
+                    .or('item_type.eq.todo,item_type.is.null')
+                    .order('sort_order');
+
+                const weeklyTodosData: WeeklyTodoItem[] = (weeklyItemsRaw || []).map((item) => {
+                    const days = (item.habit_weekly_item_days || []) as Array<{
+                        id: string;
+                        date: string;
+                        completed: boolean;
+                        todo_id: string | null;
+                    }>;
+                    const primaryDay = days[0] ?? null;
+                    const isDone = item.status === 'done' || (primaryDay?.completed ?? false);
+                    return {
+                        id: item.id,
+                        title: item.title,
+                        sort_order: item.sort_order ?? 0,
+                        status: item.status ?? 'not_started',
+                        assigned_date: primaryDay?.date ?? null,
+                        item_day_id: primaryDay?.id ?? null,
+                        todo_id: primaryDay?.todo_id ?? null,
+                        is_done: isDone,
+                    };
+                });
+                setWeeklyTodos(weeklyTodosData);
 
                 // Compute weekly scores from habit_daily_scores (events already loaded above)
                 const weekEnd = new Date(currentWeekStart);
@@ -371,6 +425,184 @@ export default function WeeklyPlanView() {
         }
     };
 
+    const handleAddWeeklyTodo = async () => {
+        if (!newTodoTitle.trim() || !weeklyPlan) return;
+        setWeeklyTodosBusy(true);
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const nextSortOrder = weeklyTodos.length > 0
+                ? Math.max(...weeklyTodos.map((t) => t.sort_order)) + 1
+                : 0;
+            const assignedDate = newTodoDate || null;
+
+            const { data: newItem, error } = await supabase
+                .from('habit_weekly_items')
+                .insert({
+                    user_id: user.id,
+                    weekly_plan_id: weeklyPlan.id,
+                    title: newTodoTitle.trim(),
+                    item_type: 'todo',
+                    status: 'not_started',
+                    sort_order: nextSortOrder,
+                })
+                .select('id, title, sort_order, status')
+                .single();
+
+            if (error || !newItem) throw error;
+
+            let itemDayId: string | null = null;
+            let todoId: string | null = null;
+            if (assignedDate) {
+                const linked = await syncWeeklyTodoDayAssignment(
+                    user.id,
+                    newItem.id,
+                    newItem.title,
+                    assignedDate
+                );
+                itemDayId = linked.itemDayId;
+                todoId = linked.todoId;
+            }
+
+            setWeeklyTodos((prev) => [
+                ...prev,
+                {
+                    id: newItem.id,
+                    title: newItem.title,
+                    sort_order: newItem.sort_order ?? nextSortOrder,
+                    status: 'not_started',
+                    assigned_date: assignedDate,
+                    item_day_id: itemDayId,
+                    todo_id: todoId,
+                    is_done: false,
+                },
+            ]);
+            setNewTodoTitle('');
+            setNewTodoDate('');
+        } catch (error) {
+            console.error('Error adding weekly todo:', error);
+        } finally {
+            setWeeklyTodosBusy(false);
+        }
+    };
+
+    const handleReorderWeeklyTodos = async (itemIds: string[]) => {
+        setWeeklyTodosBusy(true);
+        try {
+            await reorderWeeklyTodos(itemIds);
+            setWeeklyTodos((prev) => {
+                const byId = Object.fromEntries(prev.map((t) => [t.id, t]));
+                return itemIds
+                    .map((id, index) => {
+                        const item = byId[id];
+                        return item ? { ...item, sort_order: index } : null;
+                    })
+                    .filter(Boolean) as WeeklyTodoItem[];
+            });
+        } catch (error) {
+            console.error('Error reordering weekly todos:', error);
+            throw error;
+        } finally {
+            setWeeklyTodosBusy(false);
+        }
+    };
+
+    const handleToggleWeeklyTodo = async (todo: WeeklyTodoItem, completed: boolean) => {
+        setWeeklyTodosBusy(true);
+        try {
+            const completedAt = completed ? new Date().toISOString() : null;
+            const nextStatus = completed ? 'done' : 'not_started';
+
+            if (todo.todo_id) {
+                await supabase
+                    .from('habit_daily_todos')
+                    .update({ is_done: completed, completed_at: completedAt })
+                    .eq('id', todo.todo_id);
+            }
+            if (todo.item_day_id) {
+                await supabase
+                    .from('habit_weekly_item_days')
+                    .update({ completed, completed_at: completedAt })
+                    .eq('id', todo.item_day_id);
+            }
+            await supabase
+                .from('habit_weekly_items')
+                .update({ status: nextStatus })
+                .eq('id', todo.id);
+
+            setWeeklyTodos((prev) =>
+                prev.map((t) =>
+                    t.id === todo.id ? { ...t, is_done: completed, status: nextStatus } : t
+                )
+            );
+        } catch (error) {
+            console.error('Error toggling weekly todo:', error);
+        } finally {
+            setWeeklyTodosBusy(false);
+        }
+    };
+
+    const handleAssignWeeklyTodoDay = async (todo: WeeklyTodoItem, date: string) => {
+        setWeeklyTodosBusy(true);
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const assignedDate = date || null;
+            const linked = await syncWeeklyTodoDayAssignment(
+                user.id,
+                todo.id,
+                todo.title,
+                assignedDate,
+                todo.item_day_id,
+                todo.todo_id
+            );
+
+            const nextStatus = assignedDate ? 'not_started' : todo.status;
+            await supabase
+                .from('habit_weekly_items')
+                .update({ status: nextStatus })
+                .eq('id', todo.id);
+
+            setWeeklyTodos((prev) =>
+                prev.map((t) =>
+                    t.id === todo.id
+                        ? {
+                              ...t,
+                              assigned_date: assignedDate,
+                              item_day_id: linked.itemDayId,
+                              todo_id: linked.todoId,
+                              is_done: false,
+                              status: nextStatus,
+                          }
+                        : t
+                )
+            );
+        } catch (error) {
+            console.error('Error assigning weekly todo day:', error);
+        } finally {
+            setWeeklyTodosBusy(false);
+        }
+    };
+
+    const handleDeleteWeeklyTodo = async (todo: WeeklyTodoItem) => {
+        if (!confirm('Delete this to-do?')) return;
+        setWeeklyTodosBusy(true);
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            await deleteWeeklyTodoLinkedRecords(user.id, todo.todo_id, todo.item_day_id);
+            await supabase.from('habit_weekly_items').delete().eq('id', todo.id).eq('user_id', user.id);
+            setWeeklyTodos((prev) => prev.filter((t) => t.id !== todo.id));
+        } catch (error) {
+            console.error('Error deleting weekly todo:', error);
+        } finally {
+            setWeeklyTodosBusy(false);
+        }
+    };
+
     const handleDeleteEvent = async (eventId: string) => {
         if (!confirm('Delete this event?')) return;
         try {
@@ -487,6 +719,63 @@ export default function WeeklyPlanView() {
                             className="min-h-[3rem] w-full overflow-hidden rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm leading-normal resize-none"
                         />
                     </div>
+                    </div>
+                </details>
+            </section>
+
+            {/* Weekly To-Do List */}
+            <section className={`${neon.panel} p-4`}>
+                <details open className="group">
+                    <summary className="mb-3 flex cursor-pointer list-none items-center justify-between text-lg font-bold text-[#ff9d00]/95">
+                        <span>Weekly To-Do List</span>
+                        <svg className="h-5 w-5 text-[#ff9d00] transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </summary>
+                    <div className="mt-3 space-y-3">
+                        <p className="text-xs text-slate-500">
+                            Drag to set priority. Assign a day to sync with your daily to-do list.
+                        </p>
+                        <div className="flex flex-wrap gap-2 items-end p-3 rounded border border-slate-700 bg-slate-900/50">
+                            <input
+                                type="text"
+                                value={newTodoTitle}
+                                onChange={(e) => setNewTodoTitle(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleAddWeeklyTodo();
+                                }}
+                                placeholder="To-do title..."
+                                className="rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm flex-1 min-w-[140px]"
+                            />
+                            <select
+                                value={newTodoDate}
+                                onChange={(e) => setNewTodoDate(e.target.value)}
+                                className="rounded border border-slate-700 bg-slate-800 px-2 py-2 text-sm"
+                            >
+                                <option value="">No day</option>
+                                {weekDays.map((d) => (
+                                    <option key={formatDate(d)} value={formatDate(d)}>
+                                        {d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                                    </option>
+                                ))}
+                            </select>
+                            <button
+                                onClick={handleAddWeeklyTodo}
+                                disabled={weeklyTodosBusy || !newTodoTitle.trim()}
+                                className="px-4 py-2 rounded bg-amber-500 text-black text-sm font-semibold hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                Add To-Do
+                            </button>
+                        </div>
+                        <SortableWeeklyTodoList
+                            todos={weeklyTodos}
+                            weekDays={weekDays}
+                            busy={weeklyTodosBusy}
+                            onReorder={handleReorderWeeklyTodos}
+                            onToggle={handleToggleWeeklyTodo}
+                            onAssignDay={handleAssignWeeklyTodoDay}
+                            onDelete={handleDeleteWeeklyTodo}
+                        />
                     </div>
                 </details>
             </section>

@@ -10,6 +10,8 @@ import {
     deletePreviewTodo,
     ensureGuestSampleHabits,
     getPreviewHabitDataForDate,
+    movePreviewPriorityToDate,
+    movePreviewTodoToDate,
     savePreviewDailyScore,
     togglePreviewPriorityComplete,
     togglePreviewTodoDone,
@@ -23,6 +25,7 @@ import { enrichHabitTemplates } from '@/lib/habit/habitTemplateLinks';
 import { syncBacklogCompletion, syncBacklogTitle, updatePriorityGoal, updateTodoGoal } from '@/lib/habitBacklog';
 import { compareByQuadrant } from '@/lib/habit/eisenhower';
 import { TodoDeleteButton } from '@/components/TodoDeleteButton';
+import { MoveToTomorrowButton } from '@/components/MoveToTomorrowButton';
 import { GoalLinkButton } from '@/components/goals/GoalLinkButton';
 import { useGoalsForPicker } from '@/lib/goals/useGoalsForPicker';
 import { neon } from '../neonTheme';
@@ -112,6 +115,12 @@ const formatCompletedTime = (ts: string | null): string | null => {
     });
     // e.g. "8:30 PM" -> "8:30pm"
     return formatted.toLowerCase().replace(' ', '');
+};
+
+const nextDateString = (date: Date): string => {
+    const next = new Date(date);
+    next.setDate(next.getDate() + 1);
+    return formatDate(next);
 };
 
 export default function HabitDailyEntrySection({
@@ -659,6 +668,84 @@ export default function HabitDailyEntrySection({
         }
     };
 
+    const handleMovePriorityToTomorrow = async (priority: Priority) => {
+        const tomorrowDateStr = nextDateString(selectedDate);
+
+        if (isPreview) {
+            movePreviewPriorityToDate(preview, priority.id, tomorrowDateStr);
+            loadPreviewData();
+            return;
+        }
+
+        if (!userId) return;
+
+        const previousPriorities = priorities;
+        setPriorities((prev) => prev.filter((p) => p.id !== priority.id));
+
+        try {
+            const { error } = await supabase
+                .from('habit_daily_priorities')
+                .update({ date: tomorrowDateStr })
+                .eq('id', priority.id)
+                .eq('user_id', userId);
+            if (error) throw error;
+            loadData(true);
+        } catch (error) {
+            console.error('Error moving priority to tomorrow:', error);
+            setPriorities(previousPriorities);
+        }
+    };
+
+    const handleMoveTodoToTomorrow = async (todo: Todo) => {
+        const tomorrowDateStr = nextDateString(selectedDate);
+
+        if (isPreview) {
+            movePreviewTodoToDate(preview, todo.id, tomorrowDateStr);
+            loadPreviewData();
+            return;
+        }
+
+        if (!userId) return;
+
+        const previousTodos = todos;
+        setTodos((prev) => prev.filter((t) => t.id !== todo.id));
+
+        try {
+            const { error } = await supabase
+                .from('habit_daily_todos')
+                .update({ date: tomorrowDateStr })
+                .eq('id', todo.id)
+                .eq('user_id', userId);
+            if (error) throw error;
+
+            if (todo.weekly_event_id) {
+                const { error: eventError } = await supabase
+                    .from('habit_weekly_events')
+                    .update({ date: tomorrowDateStr })
+                    .eq('id', todo.weekly_event_id)
+                    .eq('user_id', userId);
+                if (eventError) {
+                    console.error('Error moving linked weekly event to tomorrow:', eventError);
+                }
+            }
+
+            if (todo.weekly_item_day_id) {
+                const { error: itemDayError } = await supabase
+                    .from('habit_weekly_item_days')
+                    .update({ date: tomorrowDateStr })
+                    .eq('id', todo.weekly_item_day_id);
+                if (itemDayError) {
+                    console.error('Error moving linked weekly item to tomorrow:', itemDayError);
+                }
+            }
+
+            loadData(true);
+        } catch (error) {
+            console.error('Error moving to-do to tomorrow:', error);
+            setTodos(previousTodos);
+        }
+    };
+
     const handlePriorityGoalChange = async (priorityId: string, goalId: string | null) => {
         if (!userId) return;
         const previous = priorities.find((p) => p.id === priorityId);
@@ -888,6 +975,18 @@ export default function HabitDailyEntrySection({
                     .from('habit_weekly_item_days')
                     .update({ completed: newIsDone, completed_at: completedAt })
                     .eq('id', todo.weekly_item_day_id);
+
+                const { data: itemDay } = await supabase
+                    .from('habit_weekly_item_days')
+                    .select('weekly_item_id')
+                    .eq('id', todo.weekly_item_day_id)
+                    .maybeSingle();
+                if (itemDay?.weekly_item_id) {
+                    await supabase
+                        .from('habit_weekly_items')
+                        .update({ status: newIsDone ? 'done' : 'not_started' })
+                        .eq('id', itemDay.weekly_item_id);
+                }
             }
 
             if (isDone && todoTitle && !hasBacklogLink) {
@@ -1109,6 +1208,13 @@ export default function HabitDailyEntrySection({
                                 />
                                 {priority ? (
                                     <div className="col-start-2 row-start-2 flex justify-end gap-1.5">
+                                        {!priority.completed ? (
+                                            <MoveToTomorrowButton
+                                                compact
+                                                itemLabel={priority.text}
+                                                onClick={() => void handleMovePriorityToTomorrow(priority)}
+                                            />
+                                        ) : null}
                                         <GoalLinkButton
                                             compact
                                             goals={goals}
@@ -1190,6 +1296,13 @@ export default function HabitDailyEntrySection({
                                 />
                                 {todo ? (
                                     <div className="col-start-2 row-start-2 flex justify-end gap-1.5">
+                                        {!todo.is_done ? (
+                                            <MoveToTomorrowButton
+                                                compact
+                                                itemLabel={todo.title}
+                                                onClick={() => void handleMoveTodoToTomorrow(todo)}
+                                            />
+                                        ) : null}
                                         <GoalLinkButton
                                             compact
                                             goals={goals}

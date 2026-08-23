@@ -19,6 +19,7 @@ import {
     YAxis,
 } from 'recharts';
 import { supabase } from '@auth/supabaseClient';
+import { isPlainTransferCategory, isSavingsInvestingBucket } from '@/lib/budgetOverview';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -64,7 +65,7 @@ type RangePreset =
     | 'all'
     | 'custom';
 
-type Direction = 'expense' | 'income';
+type Direction = 'expense' | 'income' | 'savings';
 type GroupBy = 'group' | 'category';
 
 type BucketRow = {
@@ -88,6 +89,7 @@ type CashflowMonthRow = {
     label: string;         // "Nov 2025"
     income: number;        // positive
     expenses: number;      // positive
+    savings: number;       // positive contributions
     net: number;           // can be negative
 };
 
@@ -116,6 +118,31 @@ const PALETTE = [
 
 function colorFor(index: number): string {
     return PALETTE[index % PALETTE.length];
+}
+
+function directionTitle(d: Direction): string {
+    if (d === 'expense') return 'Spending';
+    if (d === 'income') return 'Income';
+    return 'Savings/Investing';
+}
+
+function directionNoun(d: Direction): string {
+    if (d === 'expense') return 'spending';
+    if (d === 'income') return 'income';
+    return 'savings/investing';
+}
+
+function directionAmountClass(d: Direction): string {
+    if (d === 'expense') return 'text-red-400';
+    if (d === 'income') return 'text-emerald-400';
+    return 'text-blue-400';
+}
+
+function emptyDirectionMessage(d: Direction): string {
+    if (d === 'savings') {
+        return 'No savings/investing in this period. Categorize contributions as Savings/Investing to track them here.';
+    }
+    return `No ${directionNoun(d)} in this period.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -403,21 +430,34 @@ export default function ReportsPage() {
         return { id: cat.id, name: cat.name, type: cat.type };
     };
 
+    const classifyTx = (tx: Tx): { isSavings: boolean; isPlainTransfer: boolean } => {
+        const cat = tx.categoryId ? categoryById.get(tx.categoryId) : null;
+        const isSavings = Boolean(cat && isSavingsInvestingBucket(cat.type, cat.name));
+        const isPlainTransfer =
+            Boolean(cat && isPlainTransferCategory(cat.type, cat.name)) ||
+            (tx.isTransfer && !isSavings);
+        return { isSavings, isPlainTransfer };
+    };
+
     // ----- Filtering --------------------------------------------------------
 
     // Pre-filter transactions by direction & transfer rules.
+    // Savings/investing is its own view (contributions = outflows) and is never mixed
+    // into spending or income — matching Budget Overview.
     const filteredTx = useMemo(() => {
         return transactions.filter(tx => {
-            if (!includeTransfers) {
-                if (tx.isTransfer) return false;
-                const cat = tx.categoryId ? categoryById.get(tx.categoryId) : null;
-                if (cat?.type === 'transfer') return false;
+            const { isSavings, isPlainTransfer } = classifyTx(tx);
+            if (direction === 'savings') {
+                return isSavings && tx.amount < 0;
             }
+            if (!includeTransfers && isPlainTransfer) return false;
+            if (isSavings) return false;
             if (direction === 'expense') {
                 return tx.amount < 0;
             }
             return tx.amount > 0;
         });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [transactions, direction, includeTransfers, categoryById]);
 
     // ----- Bucket aggregation -----------------------------------------------
@@ -487,26 +527,32 @@ export default function ReportsPage() {
 
     const cashflowFilteredTx = useMemo(() => {
         return transactions.filter(tx => {
-            if (!includeTransfers) {
-                if (tx.isTransfer) return false;
-                const cat = tx.categoryId ? categoryById.get(tx.categoryId) : null;
-                if (cat?.type === 'transfer') return false;
-            }
+            const { isSavings, isPlainTransfer } = classifyTx(tx);
+            if (isSavings) return true;
+            if (!includeTransfers && isPlainTransfer) return false;
             return true;
         });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [transactions, includeTransfers, categoryById]);
 
     const cashflowTotals = useMemo(() => {
         let income = 0;
         let expenses = 0;
+        let savings = 0;
         cashflowFilteredTx.forEach(tx => {
+            const { isSavings } = classifyTx(tx);
+            if (isSavings) {
+                if (tx.amount < 0) savings += Math.abs(tx.amount);
+                return;
+            }
             if (tx.amount >= 0) income += tx.amount;
             else expenses += Math.abs(tx.amount);
         });
         const net = income - expenses;
-        const savingsRate = income > 0 ? (net / income) * 100 : 0;
-        return { income, expenses, net, savingsRate };
-    }, [cashflowFilteredTx]);
+        const savingsRate = income > 0 ? (savings / income) * 100 : 0;
+        return { income, expenses, savings, net, savingsRate };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [cashflowFilteredTx, categoryById]);
 
     const cashflowMonthsSpanned = useMemo(() => {
         const months = new Set<string>();
@@ -534,6 +580,7 @@ export default function ReportsPage() {
                 label: monthLabel(m),
                 income: 0,
                 expenses: 0,
+                savings: 0,
                 net: 0,
             });
         });
@@ -544,6 +591,11 @@ export default function ReportsPage() {
             const key = monthKey(dt);
             const row = idx.get(key);
             if (!row) return;
+            const { isSavings } = classifyTx(tx);
+            if (isSavings) {
+                if (tx.amount < 0) row.savings += Math.abs(tx.amount);
+                return;
+            }
             if (tx.amount >= 0) row.income += tx.amount;
             else row.expenses += Math.abs(tx.amount);
         });
@@ -665,7 +717,7 @@ export default function ReportsPage() {
         ];
     }, [buckets]);
 
-    const directionLabel = direction === 'expense' ? 'Spending' : 'Income';
+    const directionLabel = directionTitle(direction);
 
     // ----- Render -----------------------------------------------------------
 
@@ -685,18 +737,22 @@ export default function ReportsPage() {
                 <div className="flex flex-wrap items-center gap-2 text-xs">
                     {/* Direction */}
                     <div className="inline-flex rounded-full border border-slate-700 bg-slate-950 p-0.5">
-                        {(['expense', 'income'] as Direction[]).map(d => (
+                        {([
+                            { id: 'expense' as Direction, label: 'Spending' },
+                            { id: 'income' as Direction, label: 'Income' },
+                            { id: 'savings' as Direction, label: 'Savings' },
+                        ]).map(opt => (
                             <button
-                                key={d}
+                                key={opt.id}
                                 type="button"
-                                onClick={() => setDirection(d)}
+                                onClick={() => setDirection(opt.id)}
                                 className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
-                                    direction === d
+                                    direction === opt.id
                                         ? 'bg-amber-400 text-black'
                                         : 'text-slate-300 hover:bg-slate-800'
                                 }`}
                             >
-                                {d === 'expense' ? 'Spending' : 'Income'}
+                                {opt.label}
                             </button>
                         ))}
                     </div>
@@ -846,8 +902,9 @@ export default function ReportsPage() {
 
                     {visibleReportTx.length === 0 ? (
                         <p className="text-slate-400">
-                            No {direction === 'expense' ? 'spending' : 'income'} transactions in this
-                            view.
+                            {direction === 'savings'
+                                ? emptyDirectionMessage(direction)
+                                : `No ${directionNoun(direction)} transactions in this view.`}
                         </p>
                     ) : (
                         <div className="max-h-[360px] overflow-y-auto">
@@ -891,11 +948,7 @@ export default function ReportsPage() {
                                                     {desc}
                                                 </td>
                                                 <td
-                                                    className={`py-1 pr-2 text-right tabular-nums ${
-                                                        tx.amount < 0
-                                                            ? 'text-red-400'
-                                                            : 'text-emerald-400'
-                                                    }`}
+                                                    className={`py-1 pr-2 text-right tabular-nums ${directionAmountClass(direction)}`}
                                                 >
                                                     {moneyFmt.format(Math.abs(tx.amount))}
                                                 </td>
@@ -915,16 +968,16 @@ export default function ReportsPage() {
                 </div>
             )}
 
-            {/* Income vs Expenses summary (always shown for the timeframe) */}
+            {/* Income vs Expenses vs Savings summary (always shown for the timeframe) */}
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
                 <div className={cardClass}>
-                    <h3 className="text-sm font-semibold">Income vs Expenses</h3>
+                    <h3 className="text-sm font-semibold">Cashflow summary</h3>
                     <p className="text-[10px] text-slate-500">
                         {periodLabel}
                         {!includeTransfers && ' · excludes transfers'}
                     </p>
 
-                    <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="mt-3 grid grid-cols-3 gap-2 lg:grid-cols-1">
                         <div className="rounded-md border border-emerald-900/60 bg-emerald-950/30 p-3">
                             <p className="text-[10px] uppercase tracking-wide text-emerald-400/80">
                                 Income
@@ -947,6 +1000,21 @@ export default function ReportsPage() {
                                 {moneyFmt.format(cashflowTotals.expenses / cashflowMonthsSpanned)} / mo
                             </p>
                         </div>
+                        <div
+                            className="cursor-pointer rounded-md border border-blue-900/60 bg-blue-950/30 p-3"
+                            onClick={() => setDirection('savings')}
+                            title="View savings/investing breakdown"
+                        >
+                            <p className="text-[10px] uppercase tracking-wide text-blue-400/80">
+                                Savings
+                            </p>
+                            <p className="mt-1 text-lg font-semibold text-blue-400 tabular-nums">
+                                {moneyFmt.format(cashflowTotals.savings)}
+                            </p>
+                            <p className="mt-0.5 text-[10px] text-slate-500 tabular-nums">
+                                {moneyFmt.format(cashflowTotals.savings / cashflowMonthsSpanned)} / mo
+                            </p>
+                        </div>
                     </div>
 
                     {/* Net + savings rate */}
@@ -957,13 +1025,13 @@ export default function ReportsPage() {
                             </p>
                             <p
                                 className={`text-[10px] font-medium ${
-                                    cashflowTotals.net >= 0
-                                        ? 'text-emerald-400'
+                                    cashflowTotals.savingsRate >= 0
+                                        ? 'text-blue-400'
                                         : 'text-red-400'
                                 }`}
                             >
                                 {cashflowTotals.income > 0
-                                    ? `${cashflowTotals.savingsRate >= 0 ? '' : ''}${cashflowTotals.savingsRate.toFixed(1)}% savings rate`
+                                    ? `${cashflowTotals.savingsRate.toFixed(1)}% of income saved`
                                     : '—'}
                             </p>
                         </div>
@@ -978,38 +1046,45 @@ export default function ReportsPage() {
                             {moneyFmt.format(Math.abs(cashflowTotals.net))}
                         </p>
 
-                        {/* Income/expense ratio bar */}
-                        {(cashflowTotals.income > 0 || cashflowTotals.expenses > 0) && (
+                        {/* Where income went: expenses | savings | leftover */}
+                        {cashflowTotals.income > 0 && (
                             <div className="mt-2">
                                 <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-800">
                                     {(() => {
-                                        const sum =
-                                            cashflowTotals.income +
-                                            cashflowTotals.expenses;
-                                        if (sum === 0) return null;
-                                        const incomePct =
-                                            (cashflowTotals.income / sum) * 100;
-                                        const expensesPct =
-                                            (cashflowTotals.expenses / sum) * 100;
+                                        const expPct = Math.min(
+                                            100,
+                                            (cashflowTotals.expenses / cashflowTotals.income) * 100,
+                                        );
+                                        const savPct = Math.min(
+                                            100 - expPct,
+                                            (cashflowTotals.savings / cashflowTotals.income) * 100,
+                                        );
+                                        const leftPct = Math.max(0, 100 - expPct - savPct);
                                         return (
                                             <>
                                                 <div
-                                                    className="bg-emerald-500"
-                                                    style={{ width: `${incomePct}%` }}
-                                                    title={`Income ${incomePct.toFixed(1)}%`}
+                                                    className="bg-red-500"
+                                                    style={{ width: `${expPct}%` }}
+                                                    title={`Expenses ${expPct.toFixed(1)}%`}
                                                 />
                                                 <div
-                                                    className="bg-red-500"
-                                                    style={{ width: `${expensesPct}%` }}
-                                                    title={`Expenses ${expensesPct.toFixed(1)}%`}
+                                                    className="bg-blue-500"
+                                                    style={{ width: `${savPct}%` }}
+                                                    title={`Saved ${savPct.toFixed(1)}%`}
+                                                />
+                                                <div
+                                                    className="bg-emerald-500"
+                                                    style={{ width: `${leftPct}%` }}
+                                                    title={`Leftover ${leftPct.toFixed(1)}%`}
                                                 />
                                             </>
                                         );
                                     })()}
                                 </div>
                                 <div className="mt-1 flex justify-between text-[10px] text-slate-500">
-                                    <span>Income</span>
                                     <span>Expenses</span>
+                                    <span>Savings</span>
+                                    <span>Leftover</span>
                                 </div>
                             </div>
                         )}
@@ -1022,7 +1097,7 @@ export default function ReportsPage() {
                         <div>
                             <h3 className="text-sm font-semibold">Cashflow per month</h3>
                             <p className="text-[10px] text-slate-500">
-                                Income, expenses, and net over time (last 18 months max)
+                                Income, expenses, savings/investing, and net (last 18 months max)
                             </p>
                         </div>
                     </div>
@@ -1081,6 +1156,7 @@ export default function ReportsPage() {
                                             const labelMap: Record<string, string> = {
                                                 income: 'Income',
                                                 expenses: 'Expenses',
+                                                savings: 'Savings',
                                                 net: 'Net',
                                             };
                                             return [display, labelMap[key] ?? key];
@@ -1095,6 +1171,7 @@ export default function ReportsPage() {
                                             const labelMap: Record<string, string> = {
                                                 income: 'Income',
                                                 expenses: 'Expenses',
+                                                savings: 'Savings',
                                                 net: 'Net',
                                             };
                                             return labelMap[value] ?? value;
@@ -1108,6 +1185,11 @@ export default function ReportsPage() {
                                     <Bar
                                         dataKey="expenses"
                                         fill="#ef4444"
+                                        radius={[4, 4, 0, 0]}
+                                    />
+                                    <Bar
+                                        dataKey="savings"
+                                        fill="#3b82f6"
                                         radius={[4, 4, 0, 0]}
                                     />
                                     <Line
@@ -1143,9 +1225,7 @@ export default function ReportsPage() {
                         Total {directionLabel.toLowerCase()}
                     </p>
                     <p
-                        className={`mt-1 text-lg font-semibold ${
-                            direction === 'expense' ? 'text-red-400' : 'text-emerald-400'
-                        }`}
+                        className={`mt-1 text-lg font-semibold ${directionAmountClass(direction)}`}
                     >
                         {moneyFmt.format(grandTotal)}
                     </p>
@@ -1219,7 +1299,7 @@ export default function ReportsPage() {
                         <p className="mt-6 text-slate-400">Loading…</p>
                     ) : pieData.length === 0 ? (
                         <p className="mt-6 text-slate-400">
-                            No {direction === 'expense' ? 'spending' : 'income'} in this period.
+                            {emptyDirectionMessage(direction)}
                         </p>
                     ) : (
                         <div className="mt-3 h-80 w-full">
@@ -1452,7 +1532,7 @@ export default function ReportsPage() {
                     <p className="text-slate-400">Loading…</p>
                 ) : buckets.length === 0 ? (
                     <p className="text-slate-400">
-                        No {direction === 'expense' ? 'spending' : 'income'} in this period.
+                        {emptyDirectionMessage(direction)}
                     </p>
                 ) : (
                     <div className="max-h-[420px] overflow-y-auto">
@@ -1497,11 +1577,7 @@ export default function ReportsPage() {
                                                 </span>
                                             </td>
                                             <td
-                                                className={`py-1.5 pr-2 text-right font-medium ${
-                                                    direction === 'expense'
-                                                        ? 'text-red-400'
-                                                        : 'text-emerald-400'
-                                                }`}
+                                                className={`py-1.5 pr-2 text-right font-medium ${directionAmountClass(direction)}`}
                                             >
                                                 {moneyFmt.format(b.total)}
                                             </td>
@@ -1538,11 +1614,7 @@ export default function ReportsPage() {
                                 <tr className="border-t border-slate-700 text-slate-200">
                                     <td className="py-2 pr-2 font-semibold">Total</td>
                                     <td
-                                        className={`py-2 pr-2 text-right font-semibold ${
-                                            direction === 'expense'
-                                                ? 'text-red-400'
-                                                : 'text-emerald-400'
-                                        }`}
+                                        className={`py-2 pr-2 text-right font-semibold ${directionAmountClass(direction)}`}
                                     >
                                         {moneyFmt.format(grandTotal)}
                                     </td>
