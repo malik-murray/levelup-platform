@@ -5,10 +5,9 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
 import { formatDate } from '@/lib/habitHelpers';
 import WeeklyScoreBars, { type WeeklyScores } from './WeeklyScoreBars';
-import SortableWeeklyTodoList from './SortableWeeklyTodoList';
+import WeeklyTodoList from './WeeklyTodoList';
 import {
     deleteWeeklyTodoLinkedRecords,
-    reorderWeeklyTodos,
     syncWeeklyTodoDayAssignment,
     type WeeklyTodoItem,
 } from '@/lib/habit/weeklyPlanActions';
@@ -487,27 +486,6 @@ export default function WeeklyPlanView() {
         }
     };
 
-    const handleReorderWeeklyTodos = async (itemIds: string[]) => {
-        setWeeklyTodosBusy(true);
-        try {
-            await reorderWeeklyTodos(itemIds);
-            setWeeklyTodos((prev) => {
-                const byId = Object.fromEntries(prev.map((t) => [t.id, t]));
-                return itemIds
-                    .map((id, index) => {
-                        const item = byId[id];
-                        return item ? { ...item, sort_order: index } : null;
-                    })
-                    .filter(Boolean) as WeeklyTodoItem[];
-            });
-        } catch (error) {
-            console.error('Error reordering weekly todos:', error);
-            throw error;
-        } finally {
-            setWeeklyTodosBusy(false);
-        }
-    };
-
     const handleToggleWeeklyTodo = async (todo: WeeklyTodoItem, completed: boolean) => {
         setWeeklyTodosBusy(true);
         try {
@@ -538,49 +516,6 @@ export default function WeeklyPlanView() {
             );
         } catch (error) {
             console.error('Error toggling weekly todo:', error);
-        } finally {
-            setWeeklyTodosBusy(false);
-        }
-    };
-
-    const handleAssignWeeklyTodoDay = async (todo: WeeklyTodoItem, date: string) => {
-        setWeeklyTodosBusy(true);
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            const assignedDate = date || null;
-            const linked = await syncWeeklyTodoDayAssignment(
-                user.id,
-                todo.id,
-                todo.title,
-                assignedDate,
-                todo.item_day_id,
-                todo.todo_id
-            );
-
-            const nextStatus = assignedDate ? 'not_started' : todo.status;
-            await supabase
-                .from('habit_weekly_items')
-                .update({ status: nextStatus })
-                .eq('id', todo.id);
-
-            setWeeklyTodos((prev) =>
-                prev.map((t) =>
-                    t.id === todo.id
-                        ? {
-                              ...t,
-                              assigned_date: assignedDate,
-                              item_day_id: linked.itemDayId,
-                              todo_id: linked.todoId,
-                              is_done: false,
-                              status: nextStatus,
-                          }
-                        : t
-                )
-            );
-        } catch (error) {
-            console.error('Error assigning weekly todo day:', error);
         } finally {
             setWeeklyTodosBusy(false);
         }
@@ -733,9 +668,6 @@ export default function WeeklyPlanView() {
                         </svg>
                     </summary>
                     <div className="mt-3 space-y-3">
-                        <p className="text-xs text-slate-500">
-                            Drag to set priority. Assign a day to sync with your daily to-do list.
-                        </p>
                         <div className="flex flex-wrap gap-2 items-end p-3 rounded border border-slate-700 bg-slate-900/50">
                             <input
                                 type="text"
@@ -767,13 +699,10 @@ export default function WeeklyPlanView() {
                                 Add To-Do
                             </button>
                         </div>
-                        <SortableWeeklyTodoList
+                        <WeeklyTodoList
                             todos={weeklyTodos}
-                            weekDays={weekDays}
                             busy={weeklyTodosBusy}
-                            onReorder={handleReorderWeeklyTodos}
                             onToggle={handleToggleWeeklyTodo}
-                            onAssignDay={handleAssignWeeklyTodoDay}
                             onDelete={handleDeleteWeeklyTodo}
                         />
                     </div>
