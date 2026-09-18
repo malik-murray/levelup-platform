@@ -20,6 +20,16 @@ describe('getAccountBalanceDetails', () => {
         const result = getAccountBalanceDetails('checking', 1000, -250);
         expect(result.signedBalance).toBe(750);
         expect(result.displayBalance).toBe(750);
+        expect(result.usedLiveBalance).toBe(false);
+    });
+
+    it('prefers live institution balance over starting + txs', () => {
+        const result = getAccountBalanceDetails('checking', 1000, -250, {
+            liveBalance: 5400.36,
+        });
+        expect(result.signedBalance).toBe(5400.36);
+        expect(result.displayBalance).toBe(5400.36);
+        expect(result.usedLiveBalance).toBe(true);
     });
 
     it('shows credit as zero when idle', () => {
@@ -38,5 +48,12 @@ describe('getAccountBalanceDetails', () => {
         const result = getAccountBalanceDetails('credit', 500, -100);
         expect(result.displayBalance).toBe(-600);
         expect(result.signedBalance).toBe(-600);
+    });
+
+    it('uses live credit balance as amount owed', () => {
+        const result = getAccountBalanceDetails('credit', 500, -100, { liveBalance: 1117.99 });
+        expect(result.displayBalance).toBe(-1117.99);
+        expect(result.signedBalance).toBe(-1117.99);
+        expect(result.usedLiveBalance).toBe(true);
     });
 });

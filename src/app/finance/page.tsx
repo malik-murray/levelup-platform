@@ -21,6 +21,7 @@ type Account = {
     name: string;
     type: AccountType | null;
     starting_balance: number | null;
+    plaid_account_id?: string | null;
 };
 
 type Category = {
@@ -271,7 +272,7 @@ export default function FinancePage() {
 
             const { data: accountsData, error: accountsError } = await supabase
                 .from('accounts')
-                .select('id, name, type, starting_balance')
+                .select('id, name, type, starting_balance, plaid_account_id')
                 .eq('user_id', user.id)
                 .order('name');
 
@@ -373,7 +374,7 @@ export default function FinancePage() {
             // 1) ACCOUNTS - filter by user_id
             const { data: accountsData, error: accountsError } = await supabase
                 .from('accounts')
-                .select('id, name, type, starting_balance')
+                .select('id, name, type, starting_balance, plaid_account_id')
                 .eq('user_id', user.id)
                 .order('name');
 
@@ -569,7 +570,8 @@ export default function FinancePage() {
         getAccountBalanceDetails(
             acc.type,
             acc.starting_balance,
-            netChangeByAccountId.get(acc.id) ?? 0
+            netChangeByAccountId.get(acc.id) ?? 0,
+            { liveBalance: acc.plaid_account_id ? acc.starting_balance : null }
         );
 
     const netWorth = useMemo(() => {
@@ -652,7 +654,9 @@ export default function FinancePage() {
             const netChange = byAccount.get(acc.id) ?? 0;
             return (
                 sum +
-                getAccountBalanceDetails(acc.type, acc.starting_balance, netChange)
+                getAccountBalanceDetails(acc.type, acc.starting_balance, netChange, {
+                    liveBalance: acc.plaid_account_id ? acc.starting_balance : null,
+                })
                     .signedBalance
             );
         }, 0);
@@ -704,7 +708,9 @@ export default function FinancePage() {
                 const netChange = byAccount.get(acc.id) ?? 0;
                 return (
                     sum +
-                    getAccountBalanceDetails(acc.type, acc.starting_balance, netChange)
+                    getAccountBalanceDetails(acc.type, acc.starting_balance, netChange, {
+                        liveBalance: acc.plaid_account_id ? acc.starting_balance : null,
+                    })
                         .signedBalance
                 );
             }, 0);

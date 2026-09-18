@@ -84,23 +84,35 @@ export async function syncPlaidAccountsForItem(params: {
     for (const plaidAccount of accountsResponse.data.accounts) {
         const { data: existingAccount } = await supabase
             .from('accounts')
-            .select('id')
+            .select('id, name')
             .eq('plaid_account_id', plaidAccount.account_id)
             .maybeSingle();
 
-        const accountData = {
-            name: plaidAccount.name,
-            type: mapPlaidAccountType(plaidAccount.type, plaidAccount.subtype),
-            starting_balance: plaidAccount.balances.current || 0,
-            plaid_account_id: plaidAccount.account_id,
-            plaid_item_id: plaidItemDbId,
-            user_id: userId,
-        };
+        const liveBalance = plaidAccount.balances.current ?? 0;
 
         if (existingAccount) {
-            await supabase.from('accounts').update(accountData).eq('id', existingAccount.id);
+            // Refresh live balance only. Keep the user-chosen name — Plaid's official
+            // account nickname (e.g. "Spending Account") was overwriting renames.
+            // starting_balance stores the institution current balance for Plaid rows;
+            // the UI treats it as a live balance and does not add transaction nets on top.
+            await supabase
+                .from('accounts')
+                .update({
+                    type: mapPlaidAccountType(plaidAccount.type, plaidAccount.subtype),
+                    starting_balance: liveBalance,
+                    plaid_item_id: plaidItemDbId,
+                    user_id: userId,
+                })
+                .eq('id', existingAccount.id);
         } else {
-            const { error } = await supabase.from('accounts').insert(accountData);
+            const { error } = await supabase.from('accounts').insert({
+                name: plaidAccount.name,
+                type: mapPlaidAccountType(plaidAccount.type, plaidAccount.subtype),
+                starting_balance: liveBalance,
+                plaid_account_id: plaidAccount.account_id,
+                plaid_item_id: plaidItemDbId,
+                user_id: userId,
+            });
             if (!error) count++;
         }
     }

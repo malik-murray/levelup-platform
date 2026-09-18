@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
+import { isPlainTransferCategory } from '@/lib/budgetOverview';
 
 export type LinkInternalTransferPairsOptions = {
     /** Only consider transactions on or after this many days ago (default 730). */
@@ -123,9 +124,10 @@ async function resolveTransferCategoryId(
 
     if (error || !data?.length) return null;
 
-    const leaves = data.filter(
-        (c: { name?: string; type?: string | null }) =>
-            (c.type as string) === 'transfer' || (c.name || '').trim().toLowerCase() === 'transfer'
+    // Match the plain Transfer leaf by name. Savings/Investments also have type
+    // `transfer`; filtering on type alone can return Investments first.
+    const leaves = data.filter((c: { name?: string; type?: string | null }) =>
+        isPlainTransferCategory(c.type, c.name)
     );
     const userRow = leaves.find((c: { user_id: string | null }) => c.user_id === userId);
     const globalRow = leaves.find((c: { user_id: string | null }) => c.user_id == null);

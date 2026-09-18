@@ -6,13 +6,14 @@ import {
     learnMerchantMappingFromUserCategory,
     merchantKeyFromNameNote,
 } from '@/lib/financial-concierge/categoryEngine';
-import { isSavingsInvestingBucket } from '@/lib/budgetOverview';
+import { isPlainTransferCategory, isSavingsInvestingBucket } from '@/lib/budgetOverview';
 
 type AccountType = 'checking' | 'savings' | 'credit' | 'cash' | 'investment' | 'other';
 
 type Account = {
     id: string;
     name: string;
+    type: AccountType | null;
 };
 
 type Category = {
@@ -172,6 +173,7 @@ export default function TransactionsPage() {
     const [bulkTransferToAccount, setBulkTransferToAccount] = useState<string>('');
     const [bulkUpdating, setBulkUpdating] = useState(false);
     const [categoryFilterId, setCategoryFilterId] = useState<string>('');
+    const [accountFilterId, setAccountFilterId] = useState<string>('');
     const [sortMode, setSortMode] = useState<
         'date_desc' | 'merchant_frequency' | 'amount_desc' | 'amount_asc'
     >('date_desc');
@@ -194,13 +196,22 @@ export default function TransactionsPage() {
         [monthDate]
     );
 
+    const hasActiveFilter = Boolean(categoryFilterId || accountFilterId);
+
     const visibleTransactions = useMemo(() => {
-        if (!categoryFilterId) return transactions;
-        if (categoryFilterId === '__uncategorized__') {
-            return transactions.filter(tx => !tx.categoryId);
+        let rows = transactions;
+        if (accountFilterId === '__no_account__') {
+            rows = rows.filter(tx => !tx.accountId);
+        } else if (accountFilterId) {
+            rows = rows.filter(tx => tx.accountId === accountFilterId);
         }
-        return transactions.filter(tx => tx.categoryId === categoryFilterId);
-    }, [transactions, categoryFilterId]);
+        if (categoryFilterId === '__uncategorized__') {
+            rows = rows.filter(tx => !tx.categoryId);
+        } else if (categoryFilterId) {
+            rows = rows.filter(tx => tx.categoryId === categoryFilterId);
+        }
+        return rows;
+    }, [transactions, categoryFilterId, accountFilterId]);
 
     const merchantFrequencyRows = useMemo(() => {
         const byMerchant = new Map<
@@ -271,12 +282,13 @@ export default function TransactionsPage() {
         () => categories.find(c => c.id === bulkEditCategory) || null,
         [categories, bulkEditCategory]
     );
+    // Plain "Transfer" leaf only — Savings/Investments also use type `transfer`, so
+    // matching on type alone picks Investments alphabetically and credit-card payoffs
+    // keep showing as Investments even when Savings/Investing is unchecked.
     const transferCategoryId = useMemo(
         () =>
             categories.find(
-                c =>
-                    c.kind === 'category' &&
-                    (c.type === 'transfer' || c.name.toLowerCase() === 'transfer')
+                c => c.kind === 'category' && isPlainTransferCategory(c.type, c.name)
             )?.id ?? null,
         [categories]
     );
@@ -290,9 +302,46 @@ export default function TransactionsPage() {
                         c.kind === 'category' &&
                         isSavingsInvestingBucket(c.type, c.name)
                 )
-                .sort((a, b) => a.name.localeCompare(b.name)),
+                // Prefer Savings over Investments as the default when the checkbox is on.
+                .sort((a, b) => {
+                    const rank = (n: string) =>
+                        n.toLowerCase() === 'savings' ? 0 : n.toLowerCase() === 'investments' ? 2 : 1;
+                    const d = rank(a.name) - rank(b.name);
+                    return d !== 0 ? d : a.name.localeCompare(b.name);
+                }),
         [categories]
     );
+
+    const accountTypeById = useMemo(() => {
+        const map = new Map<string, AccountType | null>();
+        for (const a of accounts) map.set(a.id, a.type);
+        return map;
+    }, [accounts]);
+
+    const transferInvolvesCredit = useMemo(() => {
+        const fromType =
+            transferFromAccount === '__add_new__'
+                ? newTransferFromAccountType
+                : accountTypeById.get(transferFromAccount) ?? null;
+        const toType =
+            transferToAccount === '__add_new__'
+                ? newTransferToAccountType
+                : accountTypeById.get(transferToAccount) ?? null;
+        return fromType === 'credit' || toType === 'credit';
+    }, [
+        transferFromAccount,
+        transferToAccount,
+        newTransferFromAccountType,
+        newTransferToAccountType,
+        accountTypeById,
+    ]);
+
+    // Credit payoffs must stay as plain Transfer — clear savings/investing if a credit account is chosen.
+    useEffect(() => {
+        if (!transferInvolvesCredit || !transferIsSavingsInvesting) return;
+        setTransferIsSavingsInvesting(false);
+        setCategoryId(transferCategoryId ?? '');
+    }, [transferInvolvesCredit, transferIsSavingsInvesting, transferCategoryId]);
 
     const bulkCategoryIsTransfer = Boolean(
         selectedBulkCategory &&
@@ -434,7 +483,11 @@ export default function TransactionsPage() {
                 { data: accountsData, error: accountsError },
                 { data: categoriesData, error: categoriesError },
             ] = await Promise.all([
-                supabase.from('accounts').select('id, name').eq('user_id', user.id).order('name'),
+                supabase
+                    .from('accounts')
+                    .select('id, name, type')
+                    .eq('user_id', user.id)
+                    .order('name'),
                 supabase
                     .from('categories')
                     .select('id, name, kind, parent_id, type')
@@ -601,31 +654,31 @@ export default function TransactionsPage() {
         });
     }, [monthDate, transactionWindow]);
 
-    // Month summary reflects the category filter when active. Unfiltered month totals
-    // still exclude internal transfers; filtered views include every matching row so
-    // Transfer / Savings nets are visible.
+    // Month summary reflects active filters. Unfiltered totals still exclude internal
+    // transfers; filtered views include every matching row so Transfer / Savings nets
+    // and single-account views are visible.
     const totalIn = useMemo(
         () =>
             visibleTransactions
-                .filter(tx => tx.amount > 0 && (categoryFilterId || !tx.is_transfer))
+                .filter(tx => tx.amount > 0 && (hasActiveFilter || !tx.is_transfer))
                 .reduce((sum, tx) => sum + tx.amount, 0),
-        [visibleTransactions, categoryFilterId]
+        [visibleTransactions, hasActiveFilter]
     );
 
     const totalOut = useMemo(
         () =>
             visibleTransactions
-                .filter(tx => tx.amount < 0 && (categoryFilterId || !tx.is_transfer))
+                .filter(tx => tx.amount < 0 && (hasActiveFilter || !tx.is_transfer))
                 .reduce((sum, tx) => sum + Math.abs(tx.amount), 0),
-        [visibleTransactions, categoryFilterId]
+        [visibleTransactions, hasActiveFilter]
     );
 
     const net = useMemo(
         () =>
-            categoryFilterId
+            hasActiveFilter
                 ? visibleTransactions.reduce((sum, tx) => sum + tx.amount, 0)
                 : totalIn - totalOut,
-        [categoryFilterId, visibleTransactions, totalIn, totalOut]
+        [hasActiveFilter, visibleTransactions, totalIn, totalOut]
     );
 
     // =========================================================
@@ -817,7 +870,7 @@ export default function TransactionsPage() {
                 starting_balance: 0,
                 user_id: userId,
             })
-            .select('id, name')
+            .select('id, name, type')
             .single();
 
         if (error || !data?.id) {
@@ -830,8 +883,67 @@ export default function TransactionsPage() {
             return null;
         }
 
-        setAccounts(prev => [...prev, { id: data.id, name: data.name }]);
+        setAccounts(prev => [
+            ...prev,
+            { id: data.id, name: data.name, type: (data.type as AccountType | null) ?? accountType },
+        ]);
         return data.id;
+    };
+
+    /** Ensure the plain Transfer leaf exists so credit payoffs don't fall through to Investments. */
+    const ensurePlainTransferCategoryId = async (userId: string): Promise<string | null> => {
+        if (transferCategoryId) return transferCategoryId;
+
+        const existing = categories.find(
+            c => c.kind === 'category' && isPlainTransferCategory(c.type, c.name)
+        );
+        if (existing) return existing.id;
+
+        let transferGroup = categories.find(
+            c => c.kind === 'group' && isPlainTransferCategory(c.type, c.name)
+        );
+        if (!transferGroup) {
+            const { data: groupRow, error: groupErr } = await supabase
+                .from('categories')
+                .insert({
+                    name: 'Transfer',
+                    kind: 'group',
+                    parent_id: null,
+                    type: 'expense',
+                    user_id: userId,
+                    sort_order: 70,
+                    is_archived: false,
+                })
+                .select('id, name, kind, parent_id, type')
+                .single();
+            if (groupErr || !groupRow) {
+                console.error('Error creating Transfer group:', groupErr);
+                return null;
+            }
+            transferGroup = groupRow as Category;
+            setCategories(prev => [...prev, transferGroup as Category]);
+        }
+
+        const { data: leafRow, error: leafErr } = await supabase
+            .from('categories')
+            .insert({
+                name: 'Transfer',
+                kind: 'category',
+                parent_id: transferGroup.id,
+                type: 'expense',
+                user_id: userId,
+                sort_order: 1,
+                is_archived: false,
+            })
+            .select('id, name, kind, parent_id, type')
+            .single();
+        if (leafErr || !leafRow) {
+            console.error('Error creating Transfer category:', leafErr);
+            return null;
+        }
+        const leaf = leafRow as Category;
+        setCategories(prev => [...prev, leaf]);
+        return leaf.id;
     };
 
     const handleSaveTransaction = async (e: FormEvent, addAnother: boolean = false) => {
@@ -1575,21 +1687,6 @@ export default function TransactionsPage() {
             return;
         }
 
-        // Checkbox on: savings/investing category. Off: plain Transfer.
-        let budgetCatId: string | null = transferCategoryId;
-        if (transferIsSavingsInvesting) {
-            const selectedIsSavings = savingsInvestingCategories.some(c => c.id === categoryId);
-            budgetCatId = selectedIsSavings
-                ? categoryId
-                : savingsInvestingCategories[0]?.id ?? null;
-            if (!budgetCatId) {
-                setNotification(
-                    'Add a Savings/Investing category on the Budget page before marking a transfer as savings.'
-                );
-                return;
-            }
-        }
-
         setCreatingTransfer(true);
         setNotification(null);
 
@@ -1638,6 +1735,42 @@ export default function TransactionsPage() {
             if (resolvedFromAccountId === resolvedToAccountId) {
                 setNotification('From and To accounts must be different.');
                 return;
+            }
+
+            const fromType: AccountType | null =
+                transferFromAccount === '__add_new__'
+                    ? newTransferFromAccountType
+                    : accountTypeById.get(resolvedFromAccountId) ?? null;
+            const toType: AccountType | null =
+                transferToAccount === '__add_new__'
+                    ? newTransferToAccountType
+                    : accountTypeById.get(resolvedToAccountId) ?? null;
+            // Credit card payoffs are account settlement, never Savings/Investing contributions.
+            const involvesCredit = fromType === 'credit' || toType === 'credit';
+            const markAsSavingsInvesting = transferIsSavingsInvesting && !involvesCredit;
+
+            // Checkbox on (and not a credit payoff): savings/investing category.
+            // Off / credit: plain Transfer only — never keep an Investments id from form state.
+            let budgetCatId: string | null = null;
+            if (markAsSavingsInvesting) {
+                const selectedIsSavings = savingsInvestingCategories.some(c => c.id === categoryId);
+                budgetCatId = selectedIsSavings
+                    ? categoryId
+                    : savingsInvestingCategories[0]?.id ?? null;
+                if (!budgetCatId) {
+                    setNotification(
+                        'Add a Savings/Investing category on the Budget page before marking a transfer as savings.'
+                    );
+                    return;
+                }
+            } else {
+                budgetCatId = await ensurePlainTransferCategoryId(user.id);
+                if (
+                    budgetCatId &&
+                    savingsInvestingCategories.some(c => c.id === budgetCatId)
+                ) {
+                    budgetCatId = null;
+                }
             }
 
             // Resolve account names (including freshly created inline accounts).
@@ -2737,6 +2870,7 @@ export default function TransactionsPage() {
                                             {accounts.map(acc => (
                                                 <option key={acc.id} value={acc.id}>
                                                     {acc.name}
+                                                    {acc.type ? ` (${acc.type})` : ''}
                                                 </option>
                                             ))}
                                             <option value="__add_new__">+ Add new account...</option>
@@ -2791,6 +2925,7 @@ export default function TransactionsPage() {
                                             {accounts.map(acc => (
                                                 <option key={acc.id} value={acc.id}>
                                                     {acc.name}
+                                                    {acc.type ? ` (${acc.type})` : ''}
                                                 </option>
                                             ))}
                                             <option value="__add_new__">+ Add new account...</option>
@@ -2950,11 +3085,18 @@ export default function TransactionsPage() {
                         </div>
                         {transactionType === 'transfer' && (
                             <>
-                                <label className="flex cursor-pointer items-start gap-2 rounded-md border border-slate-800 bg-slate-950/80 px-3 py-2 text-sm text-slate-300">
+                                <label
+                                    className={`flex items-start gap-2 rounded-md border border-slate-800 bg-slate-950/80 px-3 py-2 text-sm text-slate-300 ${
+                                        transferInvolvesCredit
+                                            ? 'cursor-not-allowed opacity-60'
+                                            : 'cursor-pointer'
+                                    }`}
+                                >
                                     <input
                                         type="checkbox"
                                         className="mt-0.5 shrink-0"
-                                        checked={transferIsSavingsInvesting}
+                                        checked={transferIsSavingsInvesting && !transferInvolvesCredit}
+                                        disabled={transferInvolvesCredit}
                                         onChange={e => {
                                             const checked = e.target.checked;
                                             setTransferIsSavingsInvesting(checked);
@@ -2978,12 +3120,14 @@ export default function TransactionsPage() {
                                             Savings/Investing
                                         </span>
                                         <span className="mt-0.5 block text-[11px] text-slate-500">
-                                            Checked: counts toward your savings budget. Unchecked:
-                                            treated as a regular account transfer.
+                                            {transferInvolvesCredit
+                                                ? 'Credit card payments are regular transfers (not savings).'
+                                                : 'Checked: counts toward your savings budget. Unchecked: treated as a regular account transfer.'}
                                         </span>
                                     </span>
                                 </label>
                                 {transferIsSavingsInvesting &&
+                                    !transferInvolvesCredit &&
                                     savingsInvestingCategories.length > 1 && (
                                         <div className="space-y-1">
                                             <label className="block text-slate-300">
@@ -3003,6 +3147,7 @@ export default function TransactionsPage() {
                                         </div>
                                     )}
                                 {transferIsSavingsInvesting &&
+                                    !transferInvolvesCredit &&
                                     savingsInvestingCategories.length === 0 && (
                                         <p className="text-[11px] text-amber-400">
                                             No Savings/Investing categories yet. Create one on the
@@ -3683,11 +3828,11 @@ export default function TransactionsPage() {
                 </div>
             )}
 
-            {/* Month summary (updates with category filter) */}
+            {/* Month summary (updates with filters) */}
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4 text-xs">
                 <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
                     <p className="text-[10px] uppercase text-slate-400">
-                        Transactions{categoryFilterId ? ' (filtered)' : ''}
+                        Transactions{hasActiveFilter ? ' (filtered)' : ''}
                     </p>
                     <p className="text-xl font-semibold text-slate-100">
                         {visibleTransactions.length}
@@ -3695,7 +3840,7 @@ export default function TransactionsPage() {
                 </div>
                 <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
                     <p className="text-[10px] uppercase text-slate-400">
-                        Income{categoryFilterId ? ' (filtered)' : ''}
+                        Income{hasActiveFilter ? ' (filtered)' : ''}
                     </p>
                     <p className="text-xl font-semibold text-emerald-400">
                         {new Intl.NumberFormat('en-US', {
@@ -3707,7 +3852,7 @@ export default function TransactionsPage() {
                 </div>
                 <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
                     <p className="text-[10px] uppercase text-slate-400">
-                        Expenses{categoryFilterId ? ' (filtered)' : ''}
+                        Expenses{hasActiveFilter ? ' (filtered)' : ''}
                     </p>
                     <p className="text-xl font-semibold text-red-400">
                         {new Intl.NumberFormat('en-US', {
@@ -3719,7 +3864,7 @@ export default function TransactionsPage() {
                 </div>
                 <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
                     <p className="text-[10px] uppercase text-slate-400">
-                        Net{categoryFilterId ? ' (filtered)' : ''}
+                        Net{hasActiveFilter ? ' (filtered)' : ''}
                     </p>
                     <p
                         className={`text-xl font-semibold ${
@@ -3740,7 +3885,22 @@ export default function TransactionsPage() {
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-sm font-semibold">All transactions</h3>
                     <div className="flex flex-wrap items-center gap-2">
-                        <label className="text-[10px] text-slate-400">Category filter</label>
+                        <label className="text-[10px] text-slate-400">Account</label>
+                        <select
+                            className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px]"
+                            value={accountFilterId}
+                            onChange={e => setAccountFilterId(e.target.value)}
+                        >
+                            <option value="">All accounts</option>
+                            <option value="__no_account__">No account</option>
+                            {accounts.map(acc => (
+                                <option key={acc.id} value={acc.id}>
+                                    {acc.name}
+                                    {acc.type ? ` (${acc.type})` : ''}
+                                </option>
+                            ))}
+                        </select>
+                        <label className="ml-2 text-[10px] text-slate-400">Category</label>
                         <select
                             className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px]"
                             value={categoryFilterId}
