@@ -51,6 +51,22 @@ export function normalizeEisenhowerFields(fields: EisenhowerFields): {
     };
 }
 
+export const QUADRANT_ORDER = ['q1', 'q2', 'q3', 'q4'] as const;
+
+export function groupByQuadrant<T extends EisenhowerFields>(items: T[]): Record<(typeof QUADRANT_ORDER)[number], T[]> {
+    const groups: Record<(typeof QUADRANT_ORDER)[number], T[]> = {
+        q1: [],
+        q2: [],
+        q3: [],
+        q4: [],
+    };
+    for (const item of items) {
+        const quadrant = getQuadrant(item);
+        groups[quadrant === 'unclassified' ? 'q4' : quadrant].push(item);
+    }
+    return groups;
+}
+
 export function getQuadrant(fields: EisenhowerFields): EisenhowerQuadrant {
     const { is_important, is_urgent } = normalizeEisenhowerFields(fields);
     if (is_important && is_urgent) return 'q1';

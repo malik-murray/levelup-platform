@@ -7,7 +7,8 @@ import { supabase } from '@auth/supabaseClient';
 import AppSidebar from '@/app/dashboard/components/AppSidebar';
 import { neon } from '@/app/dashboard/neonTheme';
 import { formatDate } from '@/lib/habitHelpers';
-import { compareByQuadrant, getQuadrant, QUADRANT_META, quadrantBadgeClasses, type EisenhowerQuadrant } from '@/lib/habit/eisenhower';
+import { compareByQuadrant, getQuadrant, groupByQuadrant, QUADRANT_META, QUADRANT_ORDER, quadrantBadgeClasses, type EisenhowerFields, type EisenhowerQuadrant } from '@/lib/habit/eisenhower';
+import { focusScore } from '@/lib/habit/focusScore';
 import { EisenhowerToggles, QuadrantBadge } from '@/components/habit/EisenhowerToggles';
 import {
   assignBacklogTodoToDate,
@@ -17,6 +18,7 @@ import {
   setBacklogTaskCategories,
   setTodoCategories,
   syncBacklogCompletion,
+  syncBacklogDueDate,
   syncBacklogEisenhower,
   syncBacklogTitle,
   updateBacklogTaskGoal,
@@ -49,6 +51,7 @@ type TodoItem = {
   daily_todo_id: string | null;
   category_ids: string[];
   goal_id: string | null;
+  due_date: string | null;
 };
 
 const isBacklogOnly = (todo: TodoItem) => todo.daily_todo_id === null;
@@ -151,6 +154,11 @@ export default function TodoPage() {
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [doneItems, setDoneItems] = useState<DoneItem[]>([]);
   const [newTodoTitle, setNewTodoTitle] = useState('');
+  const [newTodoQuadrant, setNewTodoQuadrant] = useState<EisenhowerFields>({
+    is_important: true,
+    is_urgent: true,
+  });
+  const [newTodoDueDate, setNewTodoDueDate] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [assignOpenById, setAssignOpenById] = useState<Record<string, boolean>>({});
   const [assignDateById, setAssignDateById] = useState<Record<string, string>>({});
@@ -206,7 +214,7 @@ export default function TodoPage() {
           .order('created_at', { ascending: false }),
         supabase
           .from('habit_backlog_tasks')
-          .select('id, title, assigned_date, created_at, is_important, is_urgent, goal_id')
+          .select('id, title, assigned_date, created_at, is_important, is_urgent, goal_id, due_date')
           .eq('user_id', activeUserId)
           .is('completed_at', null)
           .or('daily_item_type.eq.todo,daily_item_type.is.null'),
@@ -246,6 +254,7 @@ export default function TodoPage() {
           daily_todo_id: todo.id,
           backlog_task_id: todo.backlog_task_id,
           category_ids: [] as string[],
+          due_date: null,
         }))
       );
 
@@ -267,6 +276,10 @@ export default function TodoPage() {
         ),
       ]);
 
+      const dueDateByBacklogId = new Map(
+        backlogTasks.map((task) => [task.id, task.due_date ?? null])
+      );
+
       const assignedItems: TodoItem[] = dedupedRows.map((todo) => ({
         id: todo.daily_todo_id ?? todo.id,
         daily_todo_id: todo.daily_todo_id,
@@ -279,6 +292,7 @@ export default function TodoPage() {
         is_urgent: todo.is_urgent,
         category_ids: categoryIdsByTodoId[todo.daily_todo_id ?? ''] ?? [],
         goal_id: todo.goal_id ?? null,
+        due_date: todo.backlog_task_id ? dueDateByBacklogId.get(todo.backlog_task_id) ?? null : null,
       }));
 
       const unassignedItems: TodoItem[] = unassignedBacklogTasks.map((task) => ({
@@ -293,6 +307,7 @@ export default function TodoPage() {
         is_urgent: task.is_urgent,
         category_ids: categoryIdsByBacklogTaskId[task.id] ?? [],
         goal_id: task.goal_id ?? null,
+        due_date: task.due_date ?? null,
       }));
 
       const mergedTodos = sortTodoItems([...assignedItems, ...unassignedItems]);
@@ -390,8 +405,9 @@ export default function TodoPage() {
         .insert({
           user_id: userId,
           title: trimmed,
-          is_important: false,
-          is_urgent: false,
+          is_important: newTodoQuadrant.is_important ?? false,
+          is_urgent: newTodoQuadrant.is_urgent ?? false,
+          due_date: newTodoDueDate || null,
           goal_id: newTodoGoalId,
         })
         .select('id, title, created_at, is_important, is_urgent, goal_id')
@@ -413,6 +429,7 @@ export default function TodoPage() {
           is_urgent: data.is_urgent,
           category_ids: [...newTodoCategoryIds],
           goal_id: data.goal_id ?? null,
+          due_date: newTodoDueDate || null,
         };
         setTodos((prev) => sortTodoItems([item, ...prev]));
         setAssignDateById((prev) => ({ ...prev, [data.id]: todayString }));
@@ -420,6 +437,8 @@ export default function TodoPage() {
       setNewTodoTitle('');
       setNewTodoCategoryIds([]);
       setNewTodoGoalId(null);
+      setNewTodoQuadrant({ is_important: true, is_urgent: true });
+      setNewTodoDueDate('');
     } catch (err) {
       console.error('Error adding to-do:', err);
     }
@@ -513,6 +532,22 @@ export default function TodoPage() {
       }
     } catch (err) {
       console.error('Error renaming to-do item:', err);
+    }
+  };
+
+  const handleDueDateChange = async (todoId: string, dueDate: string) => {
+    if (!userId) return;
+    const previous = todos.find((item) => item.id === todoId);
+    if (!previous?.backlog_task_id) return;
+    const nextDueDate = dueDate || null;
+    setTodos((prev) => prev.map((item) => (item.id === todoId ? { ...item, due_date: nextDueDate } : item)));
+    try {
+      await syncBacklogDueDate(previous.backlog_task_id, nextDueDate);
+    } catch (err) {
+      console.error('Error updating due date:', err);
+      setTodos((prev) =>
+        prev.map((item) => (item.id === todoId ? { ...item, due_date: previous.due_date } : item))
+      );
     }
   };
 
@@ -623,6 +658,12 @@ export default function TodoPage() {
     return items;
   }, [todos, quadrantFilter, groupFilter]);
 
+  const tasksByQuadrant = useMemo(() => groupByQuadrant(filteredTodos), [filteredTodos]);
+  const visibleQuadrants: Array<(typeof QUADRANT_ORDER)[number]> =
+    quadrantFilter === 'q1' || quadrantFilter === 'q2' || quadrantFilter === 'q3' || quadrantFilter === 'q4'
+      ? [quadrantFilter]
+      : [...QUADRANT_ORDER];
+
   const quadrantCounts = useMemo(() => {
     const counts: Record<EisenhowerQuadrant, number> = {
       q1: 0,
@@ -699,6 +740,7 @@ export default function TodoPage() {
           is_urgent: created.is_urgent,
           category_ids: todo.category_ids,
           goal_id: created.goal_id ?? todo.goal_id,
+          due_date: todo.due_date,
         };
         setTodos((prev) => prev.map((item) => (item.id === todoId ? assigned : item)));
         setAssignDateById((prev) => ({ ...prev, [assigned.id]: selectedDate }));
@@ -786,7 +828,7 @@ export default function TodoPage() {
                 Task Backlog
               </h1>
               <p className="mt-2 text-center text-sm text-slate-300">
-                Triage with the Eisenhower matrix — mark Important and Urgent, then assign Q1/Q2 items to your daily plan.
+                Create tasks here, put each one in a quadrant, then assign it to a day. The dashboard shows that day's tasks in the same quadrants.
               </p>
               <div className="mt-4 flex items-center justify-center gap-2">
                 <button
@@ -899,6 +941,19 @@ export default function TodoPage() {
                         value={newTodoGoalId}
                         onChange={setNewTodoGoalId}
                       />
+                      <EisenhowerToggles
+                        compact
+                        value={newTodoQuadrant}
+                        onChange={setNewTodoQuadrant}
+                      />
+                      <QuadrantBadge value={newTodoQuadrant} />
+                      <input
+                        type="date"
+                        aria-label="Due date"
+                        value={newTodoDueDate}
+                        onChange={(e) => setNewTodoDueDate(e.target.value)}
+                        className="rounded-md border border-[#ff9d00]/35 bg-[#03060f]/90 px-1.5 py-1 text-[11px] text-white focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
+                      />
                       <button
                         type="button"
                         onClick={() => void handleAddTodo()}
@@ -915,8 +970,25 @@ export default function TodoPage() {
                           : 'No tasks match the current filters.'}
                       </p>
                     ) : (
+                      <div className="space-y-3">
+                        {visibleQuadrants.map((quadrant) => {
+                          const quadrantTodos = [...tasksByQuadrant[quadrant]].sort(
+                            (a, b) => (focusScore(b, todayString) ?? -1) - (focusScore(a, todayString) ?? -1)
+                          );
+                          const meta = QUADRANT_META[quadrant];
+                          return (
+                            <section key={quadrant} aria-label={meta.label}>
+                              <div className={`mb-1.5 rounded-md border px-2 py-1.5 ${quadrantBadgeClasses(quadrant)}`}>
+                                <p className="text-[11px] font-bold uppercase tracking-wide">
+                                  {meta.shortLabel} · {meta.label}
+                                </p>
+                                <p className="text-[10px] opacity-80">{meta.description}</p>
+                              </div>
+                              {quadrantTodos.length === 0 ? (
+                                <p className="px-2 py-2 text-[11px] text-slate-500">No tasks in this quadrant.</p>
+                              ) : (
                       <ol className="space-y-1 min-w-0">
-                        {filteredTodos.map((todo, index) => (
+                        {quadrantTodos.map((todo, index) => (
                           <li key={todo.id} className="space-y-1 rounded-md border border-[#ff9d00]/20 bg-[#03060f]/70 p-1.5">
                             <div className="flex min-w-0 items-start gap-1">
                               <span className="mt-1 shrink-0 text-[11px] font-semibold text-slate-300">{index + 1}.</span>
@@ -967,6 +1039,16 @@ export default function TodoPage() {
                                       is_urgent: todo.is_urgent ?? null,
                                     }}
                                   />
+                                  <input
+                                    type="date"
+                                    aria-label={`Due date for ${todo.title}`}
+                                    value={todo.due_date ?? ''}
+                                    onChange={(e) => void handleDueDateChange(todo.id, e.target.value)}
+                                    className="rounded-md border border-[#ff9d00]/35 bg-[#03060f]/90 px-1.5 py-0.5 text-[11px] text-white focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
+                                  />
+                                  <span className="text-[10px] font-semibold tabular-nums text-[#ffe066]">
+                                    Score {focusScore(todo, todayString) ?? '—'}
+                                  </span>
                                   <span className="text-[9px] text-slate-500">
                                     {todo.date ? `Due: ${todo.date}` : 'Unassigned'}
                                   </span>
@@ -1009,6 +1091,11 @@ export default function TodoPage() {
                           </li>
                         ))}
                       </ol>
+                              )}
+                            </section>
+                          );
+                        })}
+                      </div>
                     )}
                   </>
                 ) : (

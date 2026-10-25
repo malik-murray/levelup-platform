@@ -2,6 +2,7 @@ import {
     compareByQuadrant,
     getQuadrant,
     getQuadrantSortOrder,
+    groupByQuadrant,
     suggestClassification,
 } from '../eisenhower';
 
@@ -29,6 +30,19 @@ describe('eisenhower', () => {
         expect(
             compareByQuadrant(a, b, (x, y) => (x as typeof a).rank - (y as typeof b).rank)
         ).toBeGreaterThan(0);
+    });
+
+    it('groups tasks into the four quadrants', () => {
+        const grouped = groupByQuadrant([
+            { id: 'a', is_important: true, is_urgent: true },
+            { id: 'b', is_important: true, is_urgent: false },
+            { id: 'c', is_important: false, is_urgent: true },
+            { id: 'd', is_important: null, is_urgent: null },
+        ]);
+        expect(grouped.q1.map((item) => item.id)).toEqual(['a']);
+        expect(grouped.q2.map((item) => item.id)).toEqual(['b']);
+        expect(grouped.q3.map((item) => item.id)).toEqual(['c']);
+        expect(grouped.q4.map((item) => item.id)).toEqual(['d']);
     });
 
     it('suggests important from goal and urgent from due date', () => {

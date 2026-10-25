@@ -75,6 +75,14 @@ export async function syncBacklogTitle(backlogTaskId: string, title: string) {
     if (error) throw error;
 }
 
+export async function syncBacklogDueDate(backlogTaskId: string, dueDate: string | null) {
+    const { error } = await supabase
+        .from('habit_backlog_tasks')
+        .update({ due_date: dueDate, updated_at: new Date().toISOString() })
+        .eq('id', backlogTaskId);
+    if (error) throw error;
+}
+
 export async function syncBacklogEisenhower(backlogTaskId: string, fields: EisenhowerFields) {
     const { error } = await supabase
         .from('habit_backlog_tasks')

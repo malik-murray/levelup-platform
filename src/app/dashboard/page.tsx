@@ -423,16 +423,7 @@ export default function DashboardPage() {
           )}
 
           <main className="min-w-0 flex-1 overflow-auto pb-28">
-            <div className="mx-auto w-full max-w-2xl px-4 py-6 sm:px-6 lg:max-w-6xl">
-              <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-                <div className="min-w-0 space-y-6 lg:col-span-7 xl:col-span-8">
-                  <div
-                    className={`rounded-2xl transition-all duration-500 ${
-                      morningFocusOn
-                        ? 'border border-[#ffb347]/55 bg-[#ff9d00]/[0.06] shadow-[0_0_32px_rgba(255,157,0,0.15)]'
-                        : ''
-                    }`}
-                  >
+            <div className="mx-auto w-full max-w-2xl px-4 pt-3 pb-6 sm:px-6 lg:max-w-6xl">
                     <HabitDailyEntrySection
                       selectedDate={selectedDate}
                       timeframe={timeframe}
@@ -440,41 +431,42 @@ export default function DashboardPage() {
                       customEndDate={customEndDate}
                       userId={userId}
                       onScoresChange={setHeaderScores}
+                      planClassName={
+                        morningFocusOn
+                          ? 'rounded-2xl border border-[#ffb347]/55 bg-[#ff9d00]/[0.06] shadow-[0_0_32px_rgba(255,157,0,0.15)] transition-all duration-500'
+                          : undefined
+                      }
+                      aside={
+                        timeframe === 'daily' ? (
+                          <div className="space-y-6">
+                            <div
+                              className={`rounded-2xl transition-all duration-500 ${
+                                eveningFocusOn
+                                  ? 'border border-[#818cf8]/45 bg-[#6366f1]/[0.08] shadow-[0_0_30px_rgba(129,140,248,0.18)]'
+                                  : ''
+                              }`}
+                            >
+                              <DashboardNotesSection selectedDate={selectedDate} userId={userId} />
+                            </div>
+                            {canUseDashboardFeature('newsfeed') ? (
+                              <NewsfeedSection selectedDate={selectedDate} timeframe={timeframe} userId={userId} />
+                            ) : (
+                              <LockedAppPreview app="newsfeed" compact />
+                            )}
+                            {canUseDashboardFeature('finance') ? (
+                              <FinanceWidget selectedDate={selectedDate} userId={userId} />
+                            ) : (
+                              <LockedAppPreview app="finance" compact />
+                            )}
+                            {canUseDashboardFeature('fitness') ? (
+                              <FitnessWidget selectedDate={selectedDate} userId={userId} />
+                            ) : (
+                              <LockedAppPreview app="fitness" compact />
+                            )}
+                          </div>
+                        ) : null
+                      }
                     />
-                  </div>
-                </div>
-
-                <div className="min-w-0 lg:col-span-5 xl:col-span-4">
-                  {timeframe === 'daily' && (
-                    <div className="space-y-6">
-                      <div
-                        className={`rounded-2xl transition-all duration-500 ${
-                          eveningFocusOn
-                            ? 'border border-[#818cf8]/45 bg-[#6366f1]/[0.08] shadow-[0_0_30px_rgba(129,140,248,0.18)]'
-                            : ''
-                        }`}
-                      >
-                        <DashboardNotesSection selectedDate={selectedDate} userId={userId} />
-                      </div>
-                      {canUseDashboardFeature('newsfeed') ? (
-                        <NewsfeedSection selectedDate={selectedDate} timeframe={timeframe} userId={userId} />
-                      ) : (
-                        <LockedAppPreview app="newsfeed" compact />
-                      )}
-                      {canUseDashboardFeature('finance') ? (
-                        <FinanceWidget selectedDate={selectedDate} userId={userId} />
-                      ) : (
-                        <LockedAppPreview app="finance" compact />
-                      )}
-                      {canUseDashboardFeature('fitness') ? (
-                        <FitnessWidget selectedDate={selectedDate} userId={userId} />
-                      ) : (
-                        <LockedAppPreview app="fitness" compact />
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
 
               <div className="mt-10 flex justify-center pb-4">
                 <button

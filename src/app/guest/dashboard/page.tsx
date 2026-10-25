@@ -187,14 +187,7 @@ export default function GuestDashboardPage() {
                 </header>
 
                 <main className="min-w-0 flex-1 overflow-auto pb-28">
-                    <div className="mx-auto w-full max-w-2xl px-4 py-6 sm:px-6 lg:max-w-6xl">
-                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-                            <div className="min-w-0 space-y-6 lg:col-span-7 xl:col-span-8">
-                                <div
-                                    className={`rounded-2xl transition-all duration-500 ${
-                                        morningFocusOn ? 'border border-[#ffb347]/55 bg-[#ff9d00]/[0.06]' : ''
-                                    }`}
-                                >
+                    <div className="mx-auto w-full max-w-2xl px-4 pt-3 pb-6 sm:px-6 lg:max-w-6xl">
                                     <HabitDailyEntrySection
                                         selectedDate={selectedDate}
                                         timeframe="daily"
@@ -202,22 +195,26 @@ export default function GuestDashboardPage() {
                                         customEndDate={null}
                                         userId={null}
                                         onScoresChange={setHeaderScores}
+                                        planClassName={
+                                            morningFocusOn
+                                                ? 'rounded-2xl border border-[#ffb347]/55 bg-[#ff9d00]/[0.06] transition-all duration-500'
+                                                : undefined
+                                        }
+                                        aside={
+                                            <div className="space-y-6">
+                                                <div
+                                                    className={`rounded-2xl transition-all duration-500 ${
+                                                        eveningFocusOn ? 'border border-[#818cf8]/45 bg-[#6366f1]/[0.08]' : ''
+                                                    }`}
+                                                >
+                                                    <DashboardNotesSection selectedDate={selectedDate} userId={null} />
+                                                </div>
+                                                <LockedAppPreview app="newsfeed" compact />
+                                                <LockedAppPreview app="finance" compact />
+                                                <LockedAppPreview app="fitness" compact />
+                                            </div>
+                                        }
                                     />
-                                </div>
-                            </div>
-                            <div className="min-w-0 space-y-6 lg:col-span-5 xl:col-span-4">
-                                <div
-                                    className={`rounded-2xl transition-all duration-500 ${
-                                        eveningFocusOn ? 'border border-[#818cf8]/45 bg-[#6366f1]/[0.08]' : ''
-                                    }`}
-                                >
-                                    <DashboardNotesSection selectedDate={selectedDate} userId={null} />
-                                </div>
-                                <LockedAppPreview app="newsfeed" compact />
-                                <LockedAppPreview app="finance" compact />
-                                <LockedAppPreview app="fitness" compact />
-                            </div>
-                        </div>
                     </div>
                 </main>
             </div>

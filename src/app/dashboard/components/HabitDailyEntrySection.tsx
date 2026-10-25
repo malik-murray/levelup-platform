@@ -1,35 +1,28 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { supabase } from '@auth/supabaseClient';
 import { usePreview } from '@/lib/previewStore';
 import {
-    deletePreviewPriority,
-    deletePreviewTodo,
     ensureGuestSampleHabits,
     getPreviewHabitDataForDate,
-    movePreviewPriorityToDate,
-    movePreviewTodoToDate,
     savePreviewDailyScore,
-    togglePreviewPriorityComplete,
     togglePreviewTodoDone,
     upsertPreviewHabitEntry,
-    upsertPreviewPriority,
-    upsertPreviewTodo,
 } from '@/lib/preview/habitDashboardPreview';
 import { formatDate, type Category, type TimeOfDay, type HabitStatus } from '@/lib/habitHelpers';
 import { computeDailyScoreSnapshot } from '@/lib/habit/computeDailyScores';
 import { enrichHabitTemplates } from '@/lib/habit/habitTemplateLinks';
-import { syncBacklogCompletion, syncBacklogTitle, updatePriorityGoal, updateTodoGoal } from '@/lib/habitBacklog';
+import { syncBacklogCompletion } from '@/lib/habitBacklog';
 import { compareByQuadrant } from '@/lib/habit/eisenhower';
-import { TodoDeleteButton } from '@/components/TodoDeleteButton';
-import { MoveToTomorrowButton } from '@/components/MoveToTomorrowButton';
-import { GoalLinkButton } from '@/components/goals/GoalLinkButton';
-import { useGoalsForPicker } from '@/lib/goals/useGoalsForPicker';
 import { neon } from '../neonTheme';
 import CollapsiblePanel from './CollapsiblePanel';
+import OperationSequence from './OperationSequence';
+import TodoNowSequence from './TodoNowSequence';
+import { compareOperationOrder } from '@/lib/habit/operationOrder';
+import { tasksForDay, type FocusTask } from '@/lib/habit/focusScore';
 
 type HabitTemplate = {
     id: string;
@@ -130,6 +123,8 @@ export default function HabitDailyEntrySection({
     customEndDate,
     userId,
     onScoresChange,
+    planClassName,
+    aside,
 }: {
     selectedDate: Date;
     timeframe: 'daily' | 'weekly' | 'custom';
@@ -137,34 +132,31 @@ export default function HabitDailyEntrySection({
     customEndDate: Date | null;
     userId: string | null;
     onScoresChange?: (scores: DailyScoresForHeader) => void;
+    planClassName?: string;
+    aside?: ReactNode;
 }) {
     const [loading, setLoading] = useState(true);
     const [habitTemplates, setHabitTemplates] = useState<HabitTemplate[]>([]);
     const [habitEntries, setHabitEntries] = useState<HabitEntry[]>([]);
     const [priorities, setPriorities] = useState<Priority[]>([]);
     const [todos, setTodos] = useState<Todo[]>([]);
+    const [openBacklog, setOpenBacklog] = useState<FocusTask[]>([]);
     const [dailyScore, setDailyScore] = useState<DailyScore | null>(null);
-    const [draftPriorities, setDraftPriorities] = useState<string[]>([]);
-    const [draftTodos, setDraftTodos] = useState<string[]>(['', '', '']);
     const [dailyPlanOpen, setDailyPlanOpen] = useState(true);
-    const [prioritiesOpen, setPrioritiesOpen] = useState(true);
+    const [habitsOpen, setHabitsOpen] = useState(true);
     const [todosOpen, setTodosOpen] = useState(true);
-    const [habitsOpen, setHabitsOpen] = useState(false);
     const [habitSubsectionsOpen, setHabitSubsectionsOpen] = useState({
         morning: true,
         afternoon: true,
         evening: true,
         bad: true,
     });
-    const [eventDisplayMap, setEventDisplayMap] = useState<Record<string, { start_time: string | null; end_time: string | null; title: string }>>({});
     const pathname = usePathname();
     const preview = usePreview();
     const isPreview =
         preview.isPreview ||
         pathname?.startsWith('/guest') === true ||
         pathname?.startsWith('/preview') === true;
-    const goals = useGoalsForPicker(isPreview ? null : userId);
-
     const loadPreviewData = () => {
         ensureGuestSampleHabits(preview);
         const dateStr = formatDate(selectedDate);
@@ -206,6 +198,7 @@ export default function HabitDailyEntrySection({
                 goal_id: t.goal_id,
             }))
         );
+        setOpenBacklog([]);
         setDailyScore(
             score
                 ? {
@@ -217,7 +210,6 @@ export default function HabitDailyEntrySection({
                   }
                 : null
         );
-        setEventDisplayMap({});
         setLoading(false);
     };
 
@@ -234,69 +226,6 @@ export default function HabitDailyEntrySection({
             };
         }
     }, [selectedDate, userId, isPreview, preview.habit]);
-
-    const sortedPrioritiesForSlots = useMemo(
-        () =>
-            [...priorities].sort((a, b) =>
-                compareByQuadrant(
-                    { is_important: a.is_important ?? null, is_urgent: a.is_urgent ?? null },
-                    { is_important: b.is_important ?? null, is_urgent: b.is_urgent ?? null },
-                    () => (a.sort_order ?? 999) - (b.sort_order ?? 999)
-                )
-            ),
-        [priorities]
-    );
-
-    useEffect(() => {
-        const titles = sortedPrioritiesForSlots.map((p) => {
-            if (p.completed && p.completed_at) {
-                const timeStr = formatCompletedTime(p.completed_at);
-                if (timeStr) {
-                    return `(${timeStr}) ${p.text}`;
-                }
-            }
-            return p.text;
-        });
-        setDraftPriorities([...titles, '']);
-    }, [sortedPrioritiesForSlots]);
-
-    const formatEventTimeShort = (start: string | null, end: string | null): string => {
-        const fmt = (t: string) => {
-            if (!t || t.length < 4) return '';
-            const parts = t.slice(0, 5).split(':').map(Number);
-            const h = parts[0];
-            const m = parts[1];
-            if (Number.isNaN(h)) return '';
-            const hour = h % 12 || 12;
-            const ampm = h < 12 ? 'am' : 'pm';
-            return m ? `${hour}:${String(m).padStart(2, '0')}${ampm}` : `${hour}${ampm}`;
-        };
-        if (start && end) return `${fmt(start)}-${fmt(end)}`;
-        if (start) return fmt(start);
-        return '';
-    };
-
-    useEffect(() => {
-        const titles = todos.map((t) => {
-            // 1) Prefer actual completion time when item is done
-            if (t.is_done && t.completed_at) {
-                const timeStr = formatCompletedTime(t.completed_at);
-                if (timeStr) return `(${timeStr}) ${t.title}`;
-            }
-            // 2) Otherwise fall back to scheduled/event time if available
-            if (t.weekly_event_id && eventDisplayMap[t.weekly_event_id]) {
-                const e = eventDisplayMap[t.weekly_event_id];
-                const timeStr = formatEventTimeShort(e.start_time, e.end_time);
-                if (timeStr) return `(${timeStr}) ${e.title}`;
-            }
-            if (t.start_time || t.end_time) {
-                const timeStr = formatEventTimeShort(t.start_time ?? null, t.end_time ?? null);
-                if (timeStr) return `(${timeStr}) ${t.title}`;
-            }
-            return t.title;
-        });
-        setDraftTodos([...titles, '']);
-    }, [todos, eventDisplayMap]);
 
     const loadData = async (silent = false) => {
         if (!userId) return;
@@ -343,27 +272,18 @@ export default function HabitDailyEntrySection({
 
             // Load event data for todos linked to weekly events (for sort-by-time and display title with time)
             let eventStartTimes: Record<string, string> = {};
-            const eventDisplayMapNew: Record<string, { start_time: string | null; end_time: string | null; title: string }> = {};
             const eventIds = (todosData || []).map((t) => t.weekly_event_id).filter(Boolean) as string[];
             if (eventIds.length > 0) {
                 const { data: eventsData } = await supabase
                     .from('habit_weekly_events')
-                    .select('id, start_time, end_time, title')
+                    .select('id, start_time')
                     .in('id', eventIds);
                 if (eventsData) {
                     eventStartTimes = Object.fromEntries(
                         eventsData.map((e) => [e.id, e.start_time ?? ''])
                     );
-                    eventsData.forEach((e) => {
-                        eventDisplayMapNew[e.id] = {
-                            start_time: e.start_time ?? null,
-                            end_time: e.end_time ?? null,
-                            title: e.title ?? '',
-                        };
-                    });
                 }
             }
-            setEventDisplayMap(eventDisplayMapNew);
 
             const getTodoSortTime = (t: NonNullable<typeof todosData>[number]) => {
                 if (t.weekly_event_id) return eventStartTimes[t.weekly_event_id] ?? '';
@@ -384,6 +304,25 @@ export default function HabitDailyEntrySection({
                 return (a.created_at ?? '').localeCompare(b.created_at ?? '');
             });
 
+            const dayStart = new Date(selectedDate);
+            dayStart.setHours(0, 0, 0, 0);
+            const dayEnd = new Date(dayStart);
+            dayEnd.setDate(dayEnd.getDate() + 1);
+            const backlogSelect = 'id, title, due_date, assigned_date, is_important, is_urgent, completed_at';
+            const [{ data: openBacklogRows }, { data: doneBacklogRows }] = await Promise.all([
+                supabase
+                    .from('habit_backlog_tasks')
+                    .select(backlogSelect)
+                    .eq('user_id', userId)
+                    .is('completed_at', null),
+                supabase
+                    .from('habit_backlog_tasks')
+                    .select(backlogSelect)
+                    .eq('user_id', userId)
+                    .gte('completed_at', dayStart.toISOString())
+                    .lt('completed_at', dayEnd.toISOString()),
+            ]);
+
             // Load daily score
             const { data: scoreData } = await supabase
                 .from('habit_daily_scores')
@@ -396,6 +335,7 @@ export default function HabitDailyEntrySection({
             setHabitEntries(entries || []);
             setPriorities(prioritiesData || []);
             setTodos(sortedTodos);
+            setOpenBacklog([...(openBacklogRows ?? []), ...(doneBacklogRows ?? [])]);
             if (scoreData) {
                 setDailyScore({
                     score_overall: scoreData.score_overall,
@@ -567,383 +507,6 @@ export default function HabitDailyEntrySection({
         }
     };
 
-    const handlePrioritySlotBlur = async (slotIndex: number, value: string) => {
-        const dateStr = formatDate(selectedDate);
-        const priority = sortedPrioritiesForSlots[slotIndex];
-
-        if (isPreview) {
-            if (value.trim()) {
-                upsertPreviewPriority(preview, dateStr, slotIndex, value.trim(), priority);
-            } else if (priority) {
-                deletePreviewPriority(preview, priority.id);
-            }
-            loadPreviewData();
-            return;
-        }
-
-        if (!userId) return;
-        try {
-            if (value.trim()) {
-                if (priority) {
-                    await supabase
-                        .from('habit_daily_priorities')
-                        .update({ text: value.trim() })
-                        .eq('id', priority.id);
-                    if (priority.backlog_task_id) {
-                        await syncBacklogTitle(priority.backlog_task_id, value.trim());
-                    }
-                } else {
-                    await supabase.from('habit_daily_priorities').insert({
-                        user_id: userId,
-                        date: dateStr,
-                        text: value.trim(),
-                        completed: false,
-                        sort_order: slotIndex,
-                        is_important: false,
-                        is_urgent: false,
-                    });
-                }
-            } else if (priority) {
-                await supabase.from('habit_daily_priorities').delete().eq('id', priority.id);
-            }
-            loadData(true);
-        } catch (error) {
-            console.error('Error saving priority:', error);
-        }
-    };
-
-    const parseTimeToDb = (s: string): string | null => {
-        const m = s.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*([ap]m)$/i);
-        if (!m) return null;
-        let h = parseInt(m[1], 10);
-        const min = m[2] ? parseInt(m[2], 10) : 0;
-        if (m[3].toLowerCase() === 'pm' && h !== 12) h += 12;
-        if (m[3].toLowerCase() === 'am' && h === 12) h = 0;
-        return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:00`;
-    };
-
-    const handleDeletePriority = async (priority: Priority) => {
-        if (isPreview) {
-            deletePreviewPriority(preview, priority.id);
-            loadPreviewData();
-            return;
-        }
-
-        if (!userId) return;
-
-        const previousPriorities = priorities;
-        setPriorities((prev) => prev.filter((p) => p.id !== priority.id));
-
-        try {
-            await supabase
-                .from('habit_daily_priorities')
-                .delete()
-                .eq('id', priority.id)
-                .eq('user_id', userId);
-            loadData(true);
-        } catch (error) {
-            console.error('Error deleting priority:', error);
-            setPriorities(previousPriorities);
-        }
-    };
-
-    const handleDeleteTodo = async (todo: Todo) => {
-        if (isPreview) {
-            deletePreviewTodo(preview, todo.id);
-            loadPreviewData();
-            return;
-        }
-
-        if (!userId) return;
-
-        const previousTodos = todos;
-        setTodos((prev) => prev.filter((t) => t.id !== todo.id));
-
-        try {
-            await supabase.from('habit_daily_todos').delete().eq('id', todo.id).eq('user_id', userId);
-            loadData(true);
-        } catch (error) {
-            console.error('Error deleting todo:', error);
-            setTodos(previousTodos);
-        }
-    };
-
-    const handleMovePriorityToTomorrow = async (priority: Priority) => {
-        const tomorrowDateStr = nextDateString(selectedDate);
-
-        if (isPreview) {
-            movePreviewPriorityToDate(preview, priority.id, tomorrowDateStr);
-            loadPreviewData();
-            return;
-        }
-
-        if (!userId) return;
-
-        const previousPriorities = priorities;
-        setPriorities((prev) => prev.filter((p) => p.id !== priority.id));
-
-        try {
-            const { error } = await supabase
-                .from('habit_daily_priorities')
-                .update({ date: tomorrowDateStr })
-                .eq('id', priority.id)
-                .eq('user_id', userId);
-            if (error) throw error;
-            loadData(true);
-        } catch (error) {
-            console.error('Error moving priority to tomorrow:', error);
-            setPriorities(previousPriorities);
-        }
-    };
-
-    const handleMoveTodoToTomorrow = async (todo: Todo) => {
-        const tomorrowDateStr = nextDateString(selectedDate);
-
-        if (isPreview) {
-            movePreviewTodoToDate(preview, todo.id, tomorrowDateStr);
-            loadPreviewData();
-            return;
-        }
-
-        if (!userId) return;
-
-        const previousTodos = todos;
-        setTodos((prev) => prev.filter((t) => t.id !== todo.id));
-
-        try {
-            const { error } = await supabase
-                .from('habit_daily_todos')
-                .update({ date: tomorrowDateStr })
-                .eq('id', todo.id)
-                .eq('user_id', userId);
-            if (error) throw error;
-
-            if (todo.weekly_event_id) {
-                const { error: eventError } = await supabase
-                    .from('habit_weekly_events')
-                    .update({ date: tomorrowDateStr })
-                    .eq('id', todo.weekly_event_id)
-                    .eq('user_id', userId);
-                if (eventError) {
-                    console.error('Error moving linked weekly event to tomorrow:', eventError);
-                }
-            }
-
-            if (todo.weekly_item_day_id) {
-                const { error: itemDayError } = await supabase
-                    .from('habit_weekly_item_days')
-                    .update({ date: tomorrowDateStr })
-                    .eq('id', todo.weekly_item_day_id);
-                if (itemDayError) {
-                    console.error('Error moving linked weekly item to tomorrow:', itemDayError);
-                }
-            }
-
-            loadData(true);
-        } catch (error) {
-            console.error('Error moving to-do to tomorrow:', error);
-            setTodos(previousTodos);
-        }
-    };
-
-    const handlePriorityGoalChange = async (priorityId: string, goalId: string | null) => {
-        if (!userId) return;
-        const previous = priorities.find((p) => p.id === priorityId);
-        if (!previous) return;
-
-        setPriorities((prev) =>
-            prev.map((p) => (p.id === priorityId ? { ...p, goal_id: goalId } : p))
-        );
-
-        try {
-            await updatePriorityGoal(priorityId, userId, goalId);
-
-            const dateStr = formatDate(selectedDate);
-            if (previous.backlog_task_id) {
-                await supabase
-                    .from('habit_daily_todos')
-                    .update({ goal_id: goalId })
-                    .eq('user_id', userId)
-                    .eq('backlog_task_id', previous.backlog_task_id);
-            } else if (previous.text.trim()) {
-                await supabase
-                    .from('habit_daily_todos')
-                    .update({ goal_id: goalId })
-                    .eq('user_id', userId)
-                    .eq('date', dateStr)
-                    .eq('title', previous.text.trim());
-            }
-
-            setTodos((prev) =>
-                prev.map((t) => {
-                    if (previous.backlog_task_id && t.backlog_task_id === previous.backlog_task_id) {
-                        return { ...t, goal_id: goalId };
-                    }
-                    if (
-                        !previous.backlog_task_id &&
-                        t.date === dateStr &&
-                        t.title.trim() === previous.text.trim()
-                    ) {
-                        return { ...t, goal_id: goalId };
-                    }
-                    return t;
-                })
-            );
-        } catch (error) {
-            console.error('Error linking priority to goal:', error);
-            setPriorities((prev) =>
-                prev.map((p) => (p.id === priorityId ? { ...p, goal_id: previous.goal_id ?? null } : p))
-            );
-        }
-    };
-
-    const handleTodoGoalChange = async (todoId: string, goalId: string | null) => {
-        if (!userId) return;
-        const previous = todos.find((t) => t.id === todoId);
-        if (!previous) return;
-
-        setTodos((prev) =>
-            prev.map((t) => (t.id === todoId ? { ...t, goal_id: goalId } : t))
-        );
-
-        try {
-            await updateTodoGoal(todoId, userId, goalId);
-        } catch (error) {
-            console.error('Error linking to-do to goal:', error);
-            setTodos((prev) =>
-                prev.map((t) => (t.id === todoId ? { ...t, goal_id: previous.goal_id ?? null } : t))
-            );
-        }
-    };
-
-    const handleTodoSlotBlur = async (slotIndex: number, value: string) => {
-        const dateStr = formatDate(selectedDate);
-        const todo = todos[slotIndex];
-        const match = value.trim().match(/^\((\d{1,2}(?::\d{2})?\s*[ap]m)(?:\s*-\s*(\d{1,2}(?::\d{2})?\s*[ap]m))?\)\s*(.*)$/i);
-        let title = value.trim();
-        if (match) {
-            title = match[3].trim();
-        }
-
-        if (isPreview) {
-            if (title) {
-                upsertPreviewTodo(preview, dateStr, title, todo);
-            } else if (todo) {
-                deletePreviewTodo(preview, todo.id);
-            }
-            loadPreviewData();
-            return;
-        }
-
-        if (!userId) return;
-        let start_time: string | null = null;
-        let end_time: string | null = null;
-        if (match) {
-            start_time = parseTimeToDb(match[1]);
-            if (match[2]) end_time = parseTimeToDb(match[2]);
-        }
-        try {
-            if (title) {
-                if (todo) {
-                    await supabase
-                        .from('habit_daily_todos')
-                        .update({ title, start_time, end_time })
-                        .eq('id', todo.id);
-                    if (todo.backlog_task_id) {
-                        await syncBacklogTitle(todo.backlog_task_id, title);
-                    }
-                } else {
-                    await supabase.from('habit_daily_todos').insert({
-                        user_id: userId,
-                        date: dateStr,
-                        title,
-                        start_time,
-                        end_time,
-                        is_done: false,
-                        is_important: false,
-                        is_urgent: false,
-                    });
-                }
-            } else if (todo) {
-                await supabase.from('habit_daily_todos').delete().eq('id', todo.id);
-            }
-            loadData(true);
-        } catch (error) {
-            console.error('Error saving todo:', error);
-        }
-    };
-
-    const handleTogglePriority = async (id: string, completed: boolean) => {
-        if (isPreview) {
-            togglePreviewPriorityComplete(preview, id, !completed);
-            loadPreviewData();
-            return;
-        }
-
-        if (!userId) return;
-
-        const completedAt = !completed ? new Date().toISOString() : null;
-        const selectedPriority = priorities.find((p) => p.id === id);
-        const priorityText = selectedPriority?.text ?? '';
-
-        try {
-            await supabase
-                .from('habit_daily_priorities')
-                .update({ completed: !completed, completed_at: completedAt })
-                .eq('id', id)
-                .eq('user_id', userId);
-
-            if (selectedPriority?.backlog_task_id) {
-                await syncBacklogCompletion(selectedPriority.backlog_task_id, !completed);
-            }
-
-            const dateStr = formatDate(selectedDate);
-            if (!completed && priorityText) {
-                const todoPatch = {
-                    is_done: true,
-                    completed_at: completedAt,
-                    goal_id: selectedPriority?.goal_id ?? null,
-                    is_important: selectedPriority?.is_important ?? false,
-                    is_urgent: selectedPriority?.is_urgent ?? false,
-                    ...(selectedPriority?.backlog_task_id
-                        ? { backlog_task_id: selectedPriority.backlog_task_id }
-                        : {}),
-                };
-
-                const { data: existing } = await supabase
-                    .from('habit_daily_todos')
-                    .select('id')
-                    .eq('user_id', userId)
-                    .eq('date', dateStr)
-                    .eq('title', priorityText)
-                    .maybeSingle();
-                if (existing) {
-                    await supabase
-                        .from('habit_daily_todos')
-                        .update(todoPatch)
-                        .eq('id', existing.id);
-                } else {
-                    await supabase.from('habit_daily_todos').insert({
-                        user_id: userId,
-                        date: dateStr,
-                        title: priorityText,
-                        ...todoPatch,
-                    });
-                }
-            } else if (completed && priorityText) {
-                await supabase
-                    .from('habit_daily_todos')
-                    .update({ is_done: false, completed_at: null })
-                    .eq('user_id', userId)
-                    .eq('date', dateStr)
-                    .eq('title', priorityText);
-            }
-            loadData(true);
-        } catch (error) {
-            console.error('Error updating priority:', error);
-        }
-    };
-
     const handleToggleTodo = async (id: string, isDone: boolean) => {
         if (isPreview) {
             togglePreviewTodoDone(preview, id, !isDone);
@@ -1014,6 +577,23 @@ export default function HabitDailyEntrySection({
         }
     };
 
+    const handleToggleFocus = async (taskId: string, isDone: boolean) => {
+        if (isPreview || !userId) return;
+        const nextDone = !isDone;
+        const completedAt = nextDone ? new Date().toISOString() : null;
+        try {
+            await syncBacklogCompletion(taskId, nextDone);
+            await supabase
+                .from('habit_daily_todos')
+                .update({ is_done: nextDone, completed_at: completedAt })
+                .eq('user_id', userId)
+                .eq('backlog_task_id', taskId);
+            loadData(true);
+        } catch (error) {
+            console.error('Error updating focus task:', error);
+        }
+    };
+
     const habitsWithEntries = habitTemplates.map(template => {
         const entry = habitEntries.find(e => e.habit_template_id === template.id);
         return {
@@ -1022,6 +602,16 @@ export default function HabitDailyEntrySection({
             checked_at: entry?.checked_at ?? null,
         };
     });
+
+    const selectedDay = formatDate(selectedDate);
+    const focusTasks = useMemo(() => {
+        return tasksForDay(openBacklog, selectedDay).map((task) => ({
+            ...task,
+            is_important: task.is_important ?? null,
+            is_urgent: task.is_urgent ?? null,
+            is_done: Boolean(task.completed_at),
+        }));
+    }, [openBacklog, selectedDay]);
 
     // Report live-computed scores to dashboard header (fills as user checks off items)
     // Good habits: checked = positive. Bad habits: each checked subtracts 3% from habit score.
@@ -1039,14 +629,18 @@ export default function HabitDailyEntrySection({
                 habit_template_id: e.habit_template_id,
                 status: e.status,
             })),
-            priorities: priorities.map((p) => ({
-                category: p.category,
-                completed: p.completed,
-            })),
-            todos: todos.map((t) => ({
-                category: t.category,
-                is_done: t.is_done,
-            })),
+            priorities: focusTasks
+                .filter((task) => task.is_important)
+                .map((task) => ({
+                    category: null,
+                    completed: task.is_done,
+                })),
+            todos: focusTasks
+                .filter((task) => !task.is_important)
+                .map((task) => ({
+                    category: null,
+                    is_done: task.is_done,
+                })),
         });
         onScoresChange({
             score_overall: snapshot.scoreOverall,
@@ -1095,23 +689,12 @@ export default function HabitDailyEntrySection({
                 savePreviewDailyScore(preview, dateStr, snapshot);
             }
         }
-    }, [timeframe, onScoresChange, habitTemplates, habitEntries, priorities, todos, userId, selectedDate, isPreview, preview]);
+    }, [timeframe, onScoresChange, habitTemplates, habitEntries, focusTasks, userId, selectedDate, isPreview, preview]);
 
-    const categoryColors = {
-        physical: 'bg-blue-500/30 text-blue-300 border-blue-500/50',
-        mental: 'bg-purple-500/30 text-purple-300 border-purple-500/50',
-        spiritual: 'bg-amber-500/30 text-amber-300 border-amber-500/50',
-    };
-    const timeOfDayOrder: TimeOfDay[] = ['morning', 'afternoon', 'evening'];
-    const timeOfDayLabels: Record<TimeOfDay, string> = {
-        morning: 'Morning',
-        afternoon: 'Afternoon',
-        evening: 'Evening',
-    };
-    const goodHabits = habitsWithEntries.filter((h) => !h.is_bad_habit);
-    const badHabits = habitsWithEntries.filter((h) => h.is_bad_habit);
-    const habitsByTimeOfDay = (time: TimeOfDay) =>
-        goodHabits.filter((h) => h.time_of_day === time || (time === 'afternoon' && !h.time_of_day));
+    const badHabits = habitsWithEntries
+        .filter((h) => h.is_bad_habit)
+        .slice()
+        .sort(compareOperationOrder);
 
     if (loading) {
         return (
@@ -1121,7 +704,28 @@ export default function HabitDailyEntrySection({
         );
     }
 
+    const planColumn = aside ? 'min-w-0 lg:col-span-7 xl:col-span-8' : 'min-w-0 lg:col-span-12';
+
     return (
+        <div className="space-y-6">
+            {timeframe === 'daily' ? (
+                <div className="grid grid-cols-2 items-stretch gap-3 sm:gap-4">
+                    <OperationSequence
+                        habits={habitsWithEntries}
+                        onToggle={(habitId) => void handleHabitToggle(habitId)}
+                        mode="card"
+                    />
+                    <TodoNowSequence
+                        tasks={focusTasks}
+                        day={selectedDay}
+                        onToggle={(taskId, isDone) => void handleToggleFocus(taskId, isDone)}
+                        todoHref={isPreview ? null : '/todo'}
+                        mode="card"
+                    />
+                </div>
+            ) : null}
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+            <div className={`${planColumn} ${planClassName ?? ''}`}>
         <div className={`${neon.panel} min-w-0 overflow-hidden`}>
             {/* Daily Plan - collapsible header */}
             <button
@@ -1145,191 +749,11 @@ export default function HabitDailyEntrySection({
             </button>
             <CollapsiblePanel open={dailyPlanOpen}>
             <div className="min-w-0 space-y-6 overflow-hidden px-4 pb-4">
-            <p className="text-xs text-slate-400">
-                Priorities and to-dos stay linked with your task backlog.{' '}
-                <Link href="/todo" className="text-[#ffe066] underline-offset-2 hover:underline">
-                    Triage on To-Do page
-                </Link>
-            </p>
-            {/* Priorities - collapsible */}
-            <div className={`relative min-w-0 overflow-hidden ${neon.section}`}>
-                <button
-                    type="button"
-                    onClick={() => setPrioritiesOpen((o) => !o)}
-                    aria-expanded={prioritiesOpen}
-                    className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-[#ff9d00]/5"
-                >
-                    <span className="text-base font-bold tracking-tight text-[#ffe066]">Priorities</span>
-                    <svg
-                        className={`h-5 w-5 shrink-0 text-[#ff9d00] transition-transform duration-300 ease-out motion-reduce:transition-none ${prioritiesOpen ? 'rotate-180' : ''}`}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                        aria-hidden
-                    >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                </button>
-                <CollapsiblePanel open={prioritiesOpen}>
-                <div className="p-4 pt-0 space-y-2 min-w-0 overflow-hidden">
-                <ol className="list-none space-y-2 min-w-0 pl-0">
-                    {Array.from({ length: sortedPrioritiesForSlots.length + 1 }, (_, slotIndex) => {
-                        const priority = sortedPrioritiesForSlots[slotIndex];
-                        const isAddRow = slotIndex === sortedPrioritiesForSlots.length;
-                        return (
-                            <li
-                                key={priority?.id ?? `priority-slot-${slotIndex}`}
-                                className="grid min-w-0 grid-cols-[auto_1fr] grid-rows-[auto_auto] gap-x-2 gap-y-1.5"
-                            >
-                                {priority ? (
-                                    <input
-                                        type="checkbox"
-                                        checked={priority.completed}
-                                        onChange={() => handleTogglePriority(priority.id, priority.completed)}
-                                        className="col-start-1 row-start-1 mt-2.5 h-5 w-5 shrink-0 rounded border-[#ff9d00]/50 text-[#ff9d00] focus:ring-[#ff9d00]/40"
-                                    />
-                                ) : (
-                                    <span className="col-start-1 row-start-1 mt-2.5 w-5 shrink-0" aria-hidden />
-                                )}
-                                <textarea
-                                    value={draftPriorities[slotIndex] ?? ''}
-                                    onChange={(e) =>
-                                        setDraftPriorities((prev) => {
-                                            const next = [...prev];
-                                            next[slotIndex] = e.target.value;
-                                            return next;
-                                        })
-                                    }
-                                    onBlur={(e) => handlePrioritySlotBlur(slotIndex, e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
-                                    placeholder={isAddRow ? 'Add priority' : `Priority ${slotIndex + 1}`}
-                                    rows={2}
-                                    className={`col-start-2 row-start-1 min-h-[2.5rem] min-w-0 w-full resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${priority?.completed ? 'text-slate-500 line-through' : ''}`}
-                                />
-                                {priority ? (
-                                    <div className="col-start-2 row-start-2 flex justify-end gap-1.5">
-                                        {!priority.completed ? (
-                                            <MoveToTomorrowButton
-                                                compact
-                                                itemLabel={priority.text}
-                                                onClick={() => void handleMovePriorityToTomorrow(priority)}
-                                            />
-                                        ) : null}
-                                        <GoalLinkButton
-                                            compact
-                                            goals={goals}
-                                            value={priority.goal_id ?? null}
-                                            onChange={(goalId) =>
-                                                void handlePriorityGoalChange(priority.id, goalId)
-                                            }
-                                        />
-                                        <TodoDeleteButton
-                                            compact
-                                            itemLabel={priority.text}
-                                            confirmMessage={`Delete "${priority.text}"? This removes it from today's priorities.`}
-                                            onConfirm={() => void handleDeletePriority(priority)}
-                                        />
-                                    </div>
-                                ) : null}
-                            </li>
-                        );
-                    })}
-                </ol>
-                </div>
-                </CollapsiblePanel>
-            </div>
-
-            {/* Today's To-Do List - collapsible */}
-            <div className={`min-w-0 overflow-hidden ${neon.section}`}>
-                <button
-                    type="button"
-                    onClick={() => setTodosOpen((o) => !o)}
-                    aria-expanded={todosOpen}
-                    className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-[#ff9d00]/5"
-                >
-                    <span className="text-base font-bold tracking-tight text-[#a7f3d0]">Today&apos;s To-Do List</span>
-                    <svg
-                        className={`h-5 w-5 shrink-0 text-[#ff9d00] transition-transform duration-300 ease-out motion-reduce:transition-none ${todosOpen ? 'rotate-180' : ''}`}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                        aria-hidden
-                    >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                </button>
-                <CollapsiblePanel open={todosOpen}>
-                <div className="p-4 pt-0 space-y-2 min-w-0 overflow-hidden">
-                <ol className="list-none space-y-2 min-w-0 pl-0">
-                    {Array.from({ length: todos.length + 1 }, (_, slotIndex) => {
-                        const todo = todos[slotIndex];
-                        const isAddRow = slotIndex === todos.length;
-                        return (
-                            <li
-                                key={todo?.id ?? `todo-slot-${slotIndex}`}
-                                className="grid min-w-0 grid-cols-[auto_1fr] grid-rows-[auto_auto] gap-x-2 gap-y-1.5"
-                            >
-                                {todo ? (
-                                    <input
-                                        type="checkbox"
-                                        checked={todo.is_done}
-                                        onChange={() => handleToggleTodo(todo.id, todo.is_done)}
-                                        className="col-start-1 row-start-1 mt-2.5 h-5 w-5 shrink-0 rounded border-[#ff9d00]/50 text-[#ff9d00] focus:ring-[#ff9d00]/40"
-                                    />
-                                ) : (
-                                    <span className="col-start-1 row-start-1 mt-2.5 w-5 shrink-0" aria-hidden />
-                                )}
-                                <textarea
-                                    value={draftTodos[slotIndex] ?? ''}
-                                    onChange={(e) =>
-                                        setDraftTodos((prev) => {
-                                            const next = [...prev];
-                                            next[slotIndex] = e.target.value;
-                                            return next;
-                                        })
-                                    }
-                                    onBlur={(e) => handleTodoSlotBlur(slotIndex, e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
-                                    placeholder={isAddRow ? 'Add to-do' : `To-do ${slotIndex + 1}`}
-                                    rows={2}
-                                    className={`col-start-2 row-start-1 min-h-[2.5rem] min-w-0 w-full resize-none break-words overflow-y-auto rounded-lg border border-[#ff9d00]/25 bg-[#03060f]/90 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30 ${todo?.is_done ? 'text-slate-500 line-through' : ''}`}
-                                />
-                                {todo ? (
-                                    <div className="col-start-2 row-start-2 flex justify-end gap-1.5">
-                                        {!todo.is_done ? (
-                                            <MoveToTomorrowButton
-                                                compact
-                                                itemLabel={todo.title}
-                                                onClick={() => void handleMoveTodoToTomorrow(todo)}
-                                            />
-                                        ) : null}
-                                        <GoalLinkButton
-                                            compact
-                                            goals={goals}
-                                            value={todo.goal_id ?? null}
-                                            onChange={(goalId) => void handleTodoGoalChange(todo.id, goalId)}
-                                        />
-                                        <TodoDeleteButton
-                                            compact
-                                            itemLabel={todo.title}
-                                            confirmMessage={`Delete "${todo.title}"? This removes it from today's to-do list.`}
-                                            onConfirm={() => void handleDeleteTodo(todo)}
-                                        />
-                                    </div>
-                                ) : null}
-                            </li>
-                        );
-                    })}
-                </ol>
-                </div>
-                </CollapsiblePanel>
-            </div>
-
             {/* Habits Checklist - collapsible (Morning, Afternoon, Evening, Bad Habits) */}
             <div className={`min-w-0 overflow-hidden ${neon.section}`}>
                 <div className="flex min-w-0 items-center justify-between gap-2 px-4 py-3">
                     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-                        <h3 className="min-w-0 text-base font-bold text-[#93c5fd]">Habits Checklist</h3>
+                        <h3 className="min-w-0 text-base font-bold text-[#93c5fd]">What to do next</h3>
                         {habitsOpen ? (
                             <Link
                                 href="/habit"
@@ -1374,74 +798,11 @@ export default function HabitDailyEntrySection({
                         <span className="text-slate-400">Spiritual</span>
                     </span>
                 </div>
-                {timeOfDayOrder.map((time) => {
-                    const timeHabits = habitsByTimeOfDay(time);
-                    if (timeHabits.length === 0) return null;
-                    const subOpen = habitSubsectionsOpen[time];
-
-                    return (
-                        <div
-                            key={time}
-                            className="min-w-0 overflow-hidden rounded-lg border border-[#ff9d00]/25 bg-[#060a14]/70"
-                        >
-                            <button
-                                type="button"
-                                onClick={() =>
-                                    setHabitSubsectionsOpen((p) => ({ ...p, [time]: !p[time] }))
-                                }
-                                className="flex w-full min-w-0 items-center justify-between gap-2 px-3 py-2.5 text-left transition-colors hover:bg-[#ff9d00]/5"
-                                aria-expanded={subOpen}
-                                aria-label={`${subOpen ? 'Collapse' : 'Expand'} ${timeOfDayLabels[time]}`}
-                            >
-                                <h4 className="text-sm font-semibold text-slate-200">{timeOfDayLabels[time]}</h4>
-                                <svg
-                                    className={`h-5 w-5 shrink-0 text-[#ff9d00] transition-transform duration-300 ease-out motion-reduce:transition-none ${subOpen ? 'rotate-180' : ''}`}
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                    aria-hidden
-                                >
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                </svg>
-                            </button>
-                            <CollapsiblePanel open={subOpen}>
-                                <div className="space-y-2 min-w-0 px-3 pb-3">
-                                    {timeHabits.map((habit) => (
-                                        <label key={habit.id} className="flex min-w-0 cursor-pointer items-center gap-3">
-                                            <input
-                                                type="checkbox"
-                                                checked={habit.status === 'checked'}
-                                                onChange={() => handleHabitToggle(habit.id)}
-                                                className="h-5 w-5 shrink-0 rounded border-[#ff9d00]/50 text-[#ff9d00] focus:ring-[#ff9d00]/40"
-                                            />
-                                            <span className="shrink-0 text-lg">{habit.icon}</span>
-                                            <span
-                                                className={`min-w-0 flex-1 break-words ${habit.status === 'checked' ? 'line-through text-slate-500' : 'text-white'}`}
-                                            >
-                                                {habit.status === 'checked' && habit.checked_at
-                                                    ? `(${formatCompletedTime(habit.checked_at)}) ${habit.name}`
-                                                    : habit.name}
-                                            </span>
-                                            <span className="flex shrink-0 flex-wrap justify-end gap-1">
-                                                {(habit.categories?.length ? habit.categories : [habit.category]).map(
-                                                    (cat) => (
-                                                        <span
-                                                            key={cat}
-                                                            className={`rounded border px-1.5 py-0.5 text-[10px] font-medium capitalize ${categoryColors[cat]}`}
-                                                            title={cat}
-                                                        >
-                                                            {cat}
-                                                        </span>
-                                                    )
-                                                )}
-                                            </span>
-                                        </label>
-                                    ))}
-                                </div>
-                            </CollapsiblePanel>
-                        </div>
-                    );
-                })}
+                <OperationSequence
+                    habits={habitsWithEntries}
+                    onToggle={(habitId) => void handleHabitToggle(habitId)}
+                    mode="list"
+                />
                 {badHabits.length > 0 && (
                     <div className="min-w-0 overflow-hidden rounded-lg border border-red-500/30 bg-red-950/20">
                         <button
@@ -1493,8 +854,56 @@ export default function HabitDailyEntrySection({
                 </CollapsiblePanel>
             </div>
 
+            <div className={`min-w-0 overflow-hidden ${neon.section}`}>
+                <div className="flex min-w-0 items-center justify-between gap-2 px-4 py-3">
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+                        <h3 className="min-w-0 text-base font-bold text-[#93c5fd]">To-do</h3>
+                        {todosOpen && !isPreview ? (
+                            <Link
+                                href="/todo"
+                                className="shrink-0 rounded-lg border border-[#93c5fd]/35 bg-[#060a14]/90 px-3 py-1 text-xs font-medium text-slate-200 transition-colors hover:border-[#93c5fd]/55 hover:text-white sm:py-1.5 sm:text-sm"
+                            >
+                                Edit to-dos
+                            </Link>
+                        ) : null}
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setTodosOpen((open) => !open)}
+                        className="shrink-0 rounded p-1.5 text-[#93c5fd] transition-colors hover:bg-[#93c5fd]/10"
+                        aria-expanded={todosOpen}
+                        aria-label={todosOpen ? 'Collapse to-do list' : 'Expand to-do list'}
+                    >
+                        <svg
+                            className={`h-5 w-5 transition-transform duration-300 ease-out motion-reduce:transition-none ${todosOpen ? 'rotate-180' : ''}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                            aria-hidden
+                        >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </button>
+                </div>
+                <CollapsiblePanel open={todosOpen}>
+                    <div className="min-w-0 space-y-3 overflow-hidden px-4 pb-4">
+                        <TodoNowSequence
+                            tasks={focusTasks}
+                            day={selectedDay}
+                            onToggle={(taskId, isDone) => void handleToggleFocus(taskId, isDone)}
+                            todoHref={isPreview ? null : '/todo'}
+                            mode="list"
+                        />
+                    </div>
+                </CollapsiblePanel>
+            </div>
+
             </div>
             </CollapsiblePanel>
+        </div>
+            </div>
+            {aside ? <div className="min-w-0 lg:col-span-5 xl:col-span-4">{aside}</div> : null}
+            </div>
         </div>
     );
 }
