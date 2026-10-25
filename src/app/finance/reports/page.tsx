@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
     Bar,
@@ -288,9 +288,12 @@ export default function ReportsPage() {
     const [groupBy, setGroupBy] = useState<GroupBy>('group');
     const [includeTransfers, setIncludeTransfers] = useState(false);
     const [selectedBucketId, setSelectedBucketId] = useState<string | null>(null);
+    const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<string | null>(null);
     const [txListSort, setTxListSort] = useState<'date_desc' | 'amount_desc' | 'amount_asc'>(
         'date_desc',
     );
+    const txListRef = useRef<HTMLDivElement | null>(null);
+    const drilldownRef = useRef<HTMLDivElement | null>(null);
 
     const { startDate, endDate } = useMemo(
         () => computeRange(preset, customStart, customEnd),
@@ -397,7 +400,19 @@ export default function ReportsPage() {
     // Reset selected slice when filters change
     useEffect(() => {
         setSelectedBucketId(null);
+        setSelectedSubcategoryId(null);
     }, [direction, groupBy, preset, customStart, customEnd, includeTransfers]);
+
+    const toggleBucketSelection = (id: string | null) => {
+        if (!id || id === 'other') return;
+        setSelectedSubcategoryId(null);
+        setSelectedBucketId(prev => (prev === id ? null : id));
+    };
+
+    const toggleSubcategorySelection = (id: string | null) => {
+        if (!id || id === 'other') return;
+        setSelectedSubcategoryId(prev => (prev === id ? null : id));
+    };
 
     // ----- Maps -------------------------------------------------------------
 
@@ -426,6 +441,20 @@ export default function ReportsPage() {
             if (parent) {
                 return { id: parent.id, name: parent.name, type: parent.type };
             }
+        }
+        return { id: cat.id, name: cat.name, type: cat.type };
+    };
+
+    /** Leaf category for a transaction (used when drilling into a group). */
+    const leafCategoryForTx = (
+        tx: Tx,
+    ): { id: string; name: string; type: CategoryType } => {
+        if (!tx.categoryId) {
+            return { id: 'uncategorized', name: 'Uncategorized', type: null };
+        }
+        const cat = categoryById.get(tx.categoryId);
+        if (!cat) {
+            return { id: 'uncategorized', name: 'Uncategorized', type: null };
         }
         return { id: cat.id, name: cat.name, type: cat.type };
     };
@@ -653,12 +682,72 @@ export default function ReportsPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [filteredTx, buckets, startDate, endDate, groupBy]);
 
+    const TOP_N = 8;
+
     // ----- Transaction list (all rows in view, or bucket-filtered) ---------
 
+    const groupFilteredTx = useMemo(() => {
+        if (!selectedBucketId) return filteredTx;
+        return filteredTx.filter(tx => bucketIdForTx(tx).id === selectedBucketId);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [filteredTx, selectedBucketId, groupBy, categoryById]);
+
+    /** Subcategory breakdown when a group is selected (Food → Dining Out, Groceries, …). */
+    const subBuckets: BucketRow[] = useMemo(() => {
+        if (!selectedBucketId || groupBy !== 'group') return [];
+        const map = new Map<
+            string,
+            { id: string; name: string; type: CategoryType; total: number; txCount: number }
+        >();
+        groupFilteredTx.forEach(tx => {
+            const leaf = leafCategoryForTx(tx);
+            const value = Math.abs(tx.amount);
+            const entry = map.get(leaf.id);
+            if (entry) {
+                entry.total += value;
+                entry.txCount += 1;
+            } else {
+                map.set(leaf.id, {
+                    id: leaf.id,
+                    name: leaf.name,
+                    type: leaf.type,
+                    total: value,
+                    txCount: 1,
+                });
+            }
+        });
+        const arr = Array.from(map.values()).sort((a, b) => b.total - a.total);
+        return arr.map((row, i) => ({ ...row, color: colorFor(i) }));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [groupFilteredTx, selectedBucketId, groupBy, categoryById]);
+
+    const subPieData = useMemo(() => {
+        if (subBuckets.length <= TOP_N) return subBuckets;
+        const top = subBuckets.slice(0, TOP_N);
+        const otherTotal = subBuckets.slice(TOP_N).reduce((s, b) => s + b.total, 0);
+        const otherCount = subBuckets.slice(TOP_N).reduce((s, b) => s + b.txCount, 0);
+        return [
+            ...top,
+            {
+                id: 'other',
+                name: `Other (${subBuckets.length - TOP_N})`,
+                type: null as CategoryType,
+                total: otherTotal,
+                txCount: otherCount,
+                color: '#64748b',
+            },
+        ];
+    }, [subBuckets]);
+
+    const selectedSubcategory = useMemo(
+        () => subBuckets.find(b => b.id === selectedSubcategoryId) ?? null,
+        [subBuckets, selectedSubcategoryId],
+    );
+
     const visibleReportTx = useMemo(() => {
-        const base = selectedBucketId
-            ? filteredTx.filter(tx => bucketIdForTx(tx).id === selectedBucketId)
-            : filteredTx;
+        const base = selectedSubcategoryId
+            ? groupFilteredTx.filter(tx => leafCategoryForTx(tx).id === selectedSubcategoryId)
+            : groupFilteredTx;
         const sorted = [...base];
         if (txListSort === 'date_desc') {
             sorted.sort((a, b) => {
@@ -685,16 +774,34 @@ export default function ReportsPage() {
         }
         return sorted;
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [filteredTx, selectedBucketId, groupBy, categoryById, txListSort]);
+    }, [
+        groupFilteredTx,
+        selectedSubcategoryId,
+        groupBy,
+        categoryById,
+        txListSort,
+    ]);
 
     const selectedBucket = useMemo(
         () => buckets.find(b => b.id === selectedBucketId) ?? null,
         [buckets, selectedBucketId],
     );
 
+    // When a group is selected, scroll to the subcategory breakdown (or tx list).
+    useEffect(() => {
+        if (!selectedBucketId) return;
+        const el =
+            groupBy === 'group' && subBuckets.length > 0
+                ? drilldownRef.current
+                : txListRef.current;
+        if (!el) return;
+        requestAnimationFrame(() => {
+            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+    }, [selectedBucketId, groupBy, subBuckets.length]);
+
     // ----- Pie / chart datasets ---------------------------------------------
 
-    const TOP_N = 8;
     const pieData = useMemo(() => {
         if (buckets.length <= TOP_N) return buckets;
         const top = buckets.slice(0, TOP_N);
@@ -841,130 +948,6 @@ export default function ReportsPage() {
             {notification && (
                 <div className="rounded-md border border-red-700 bg-red-950 px-4 py-2 text-xs text-red-200">
                     {notification}
-                </div>
-            )}
-
-            {/* Transactions list (matches period, direction, transfers toggle; optional bucket filter) */}
-            {!loading && (
-                <div className={cardClass}>
-                    <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                            <h3 className="text-sm font-semibold">
-                                {selectedBucket ? (
-                                    <>
-                                        <span
-                                            className="mr-2 inline-block h-2.5 w-2.5 rounded-sm align-middle"
-                                            style={{ background: selectedBucket.color }}
-                                        />
-                                        {selectedBucket.name}
-                                    </>
-                                ) : (
-                                    'Transactions'
-                                )}
-                            </h3>
-                            <p className="text-[10px] text-slate-500">
-                                {periodLabel} · {directionLabel}
-                                {selectedBucket
-                                    ? ` · ${visibleReportTx.length} transaction${
-                                          visibleReportTx.length === 1 ? '' : 's'
-                                      } · ${moneyFmt.format(selectedBucket.total)}`
-                                    : ` · ${visibleReportTx.length} transaction${
-                                          visibleReportTx.length === 1 ? '' : 's'
-                                      }`}
-                                {!selectedBucketId
-                                    ? ' · use the breakdown table below to filter by row'
-                                    : ''}
-                            </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                            <label className="text-[10px] text-slate-500">Sort</label>
-                            <select
-                                className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200"
-                                value={txListSort}
-                                onChange={e =>
-                                    setTxListSort(
-                                        e.target.value as 'date_desc' | 'amount_desc' | 'amount_asc',
-                                    )
-                                }
-                            >
-                                <option value="date_desc">Recent</option>
-                                <option value="amount_desc">Amount: high → low</option>
-                                <option value="amount_asc">Amount: low → high</option>
-                            </select>
-                            <Link
-                                href="/finance/transactions"
-                                className="rounded-md border border-slate-700 bg-slate-950 px-3 py-1 text-[11px] text-slate-200 hover:bg-slate-800"
-                            >
-                                Open transactions →
-                            </Link>
-                        </div>
-                    </div>
-
-                    {visibleReportTx.length === 0 ? (
-                        <p className="text-slate-400">
-                            {direction === 'savings'
-                                ? emptyDirectionMessage(direction)
-                                : `No ${directionNoun(direction)} transactions in this view.`}
-                        </p>
-                    ) : (
-                        <div className="max-h-[360px] overflow-y-auto">
-                            <table className="w-full border-collapse text-[11px]">
-                                <thead>
-                                    <tr className="border-b border-slate-800 text-left text-slate-400">
-                                        <th className="py-1.5 pr-2">Date</th>
-                                        {!selectedBucketId && (
-                                            <th className="py-1.5 pr-2">
-                                                {groupBy === 'group' ? 'Group' : 'Category'}
-                                            </th>
-                                        )}
-                                        <th className="py-1.5 pr-2">Description</th>
-                                        <th className="py-1.5 pr-2 text-right">Amount</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {visibleReportTx.slice(0, 200).map(tx => {
-                                        const desc =
-                                            tx.name?.trim() ||
-                                            tx.note?.trim() ||
-                                            (tx.categoryId
-                                                ? categoryById.get(tx.categoryId)?.name
-                                                : null) ||
-                                            'Transaction';
-                                        const bucket = bucketIdForTx(tx);
-                                        return (
-                                            <tr
-                                                key={tx.id}
-                                                className="border-b border-slate-900 last:border-b-0"
-                                            >
-                                                <td className="py-1 pr-2 text-slate-300">
-                                                    {tx.date}
-                                                </td>
-                                                {!selectedBucketId && (
-                                                    <td className="py-1 pr-2 text-slate-400">
-                                                        <span className="truncate">{bucket.name}</span>
-                                                    </td>
-                                                )}
-                                                <td className="py-1 pr-2 text-slate-100">
-                                                    {desc}
-                                                </td>
-                                                <td
-                                                    className={`py-1 pr-2 text-right tabular-nums ${directionAmountClass(direction)}`}
-                                                >
-                                                    {moneyFmt.format(Math.abs(tx.amount))}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                            {visibleReportTx.length > 200 && (
-                                <p className="mt-2 text-[10px] text-slate-500">
-                                    Showing 200 of {visibleReportTx.length}. Use the Transactions tab
-                                    to see them all.
-                                </p>
-                            )}
-                        </div>
-                    )}
                 </div>
             )}
 
@@ -1284,15 +1267,9 @@ export default function ReportsPage() {
                             {directionLabel} by{' '}
                             {groupBy === 'group' ? 'group' : 'category'}
                         </h3>
-                        {selectedBucket && (
-                            <button
-                                type="button"
-                                onClick={() => setSelectedBucketId(null)}
-                                className="text-[10px] text-slate-400 hover:text-amber-300"
-                            >
-                                Clear selection
-                            </button>
-                        )}
+                        <span className="text-[10px] text-slate-500">
+                            Click a slice to see its transactions
+                        </span>
                     </div>
 
                     {loading ? (
@@ -1317,10 +1294,7 @@ export default function ReportsPage() {
                                         onClick={(_, idx) => {
                                             const slice = pieData[idx];
                                             if (!slice) return;
-                                            if (slice.id === 'other') return;
-                                            setSelectedBucketId(
-                                                selectedBucketId === slice.id ? null : slice.id,
-                                            );
+                                            toggleBucketSelection(slice.id);
                                         }}
                                     >
                                         {pieData.map(slice => (
@@ -1363,7 +1337,12 @@ export default function ReportsPage() {
                                     />
                                     <Legend
                                         verticalAlign="bottom"
-                                        wrapperStyle={{ fontSize: 11, color: '#cbd5e1' }}
+                                        wrapperStyle={{ fontSize: 11, color: '#cbd5e1', cursor: 'pointer' }}
+                                        onClick={entry => {
+                                            const name = String(entry?.value ?? '');
+                                            const match = pieData.find(s => s.name === name);
+                                            if (match) toggleBucketSelection(match.id);
+                                        }}
                                     />
                                 </PieChart>
                             </ResponsiveContainer>
@@ -1422,9 +1401,7 @@ export default function ReportsPage() {
                                         onClick={(_, idx) => {
                                             const b = buckets[idx];
                                             if (!b) return;
-                                            setSelectedBucketId(
-                                                selectedBucketId === b.id ? null : b.id,
-                                            );
+                                            toggleBucketSelection(b.id);
                                         }}
                                     >
                                         {buckets.slice(0, 8).map(b => (
@@ -1456,7 +1433,7 @@ export default function ReportsPage() {
                     </h3>
                     <p className="text-[10px] text-slate-500">
                         Stacked by {groupBy === 'group' ? 'group' : 'category'} ·{' '}
-                        showing up to 18 months
+                        showing up to 18 months · click a color to filter
                     </p>
                     <div className="mt-3 h-72 w-full">
                         <ResponsiveContainer width="100%" height="100%">
@@ -1504,16 +1481,373 @@ export default function ReportsPage() {
                                                 ? 1
                                                 : 0.25
                                         }
-                                        onClick={() =>
-                                            setSelectedBucketId(
-                                                selectedBucketId === b.id ? null : b.id,
-                                            )
-                                        }
+                                        onClick={() => toggleBucketSelection(b.id)}
                                     />
                                 ))}
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
+                </div>
+            )}
+
+            {/* Subcategory drill-down when a group is selected */}
+            {!loading &&
+                selectedBucket &&
+                groupBy === 'group' &&
+                subBuckets.length > 0 && (
+                    <div
+                        ref={drilldownRef}
+                        className={`${cardClass} ring-1 ring-amber-600/40`}
+                    >
+                        <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                                <h3 className="text-sm font-semibold">
+                                    <span
+                                        className="mr-2 inline-block h-2.5 w-2.5 rounded-sm align-middle"
+                                        style={{ background: selectedBucket.color }}
+                                    />
+                                    {selectedBucket.name} by category
+                                </h3>
+                                <p className="text-[10px] text-slate-500">
+                                    {moneyFmt.format(selectedBucket.total)} ·{' '}
+                                    {subBuckets.length} categor
+                                    {subBuckets.length === 1 ? 'y' : 'ies'} · click a
+                                    slice to filter transactions
+                                    {selectedSubcategory
+                                        ? ` · showing ${selectedSubcategory.name}`
+                                        : ''}
+                                </p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                {selectedSubcategory && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedSubcategoryId(null)}
+                                        className="rounded-md border border-slate-700 bg-slate-950 px-3 py-1 text-[11px] text-slate-300 hover:bg-slate-800 hover:text-amber-300"
+                                    >
+                                        Clear category
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setSelectedBucketId(null);
+                                        setSelectedSubcategoryId(null);
+                                    }}
+                                    className="rounded-md border border-slate-700 bg-slate-950 px-3 py-1 text-[11px] text-slate-300 hover:bg-slate-800 hover:text-amber-300"
+                                >
+                                    Back to all groups
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                            <div className="h-72 w-full lg:col-span-2">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie
+                                            data={subPieData}
+                                            dataKey="total"
+                                            nameKey="name"
+                                            cx="50%"
+                                            cy="50%"
+                                            innerRadius={50}
+                                            outerRadius={95}
+                                            paddingAngle={1}
+                                            onClick={(_, idx) => {
+                                                const slice = subPieData[idx];
+                                                if (!slice) return;
+                                                toggleSubcategorySelection(slice.id);
+                                            }}
+                                        >
+                                            {subPieData.map(slice => (
+                                                <Cell
+                                                    key={slice.id}
+                                                    fill={slice.color}
+                                                    opacity={
+                                                        selectedSubcategoryId === null ||
+                                                        selectedSubcategoryId === slice.id
+                                                            ? 1
+                                                            : 0.25
+                                                    }
+                                                    stroke="rgba(15,23,42,0.6)"
+                                                    style={{ cursor: 'pointer' }}
+                                                />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip
+                                            contentStyle={{
+                                                background: '#0f172a',
+                                                border: '1px solid #334155',
+                                                borderRadius: 8,
+                                                fontSize: 11,
+                                                color: '#e2e8f0',
+                                            }}
+                                            formatter={(value, _name, item) => {
+                                                const num = Number(value ?? 0);
+                                                const payload = item?.payload as
+                                                    | { name?: string }
+                                                    | undefined;
+                                                const groupTotal = selectedBucket.total;
+                                                const pct =
+                                                    groupTotal > 0
+                                                        ? ` (${((num / groupTotal) * 100).toFixed(1)}%)`
+                                                        : '';
+                                                return [
+                                                    `${moneyFmt.format(num)}${pct}`,
+                                                    payload?.name ?? '',
+                                                ];
+                                            }}
+                                        />
+                                        <Legend
+                                            verticalAlign="bottom"
+                                            wrapperStyle={{
+                                                fontSize: 11,
+                                                color: '#cbd5e1',
+                                                cursor: 'pointer',
+                                            }}
+                                            onClick={entry => {
+                                                const name = String(entry?.value ?? '');
+                                                const match = subPieData.find(
+                                                    s => s.name === name,
+                                                );
+                                                if (match) {
+                                                    toggleSubcategorySelection(match.id);
+                                                }
+                                            }}
+                                        />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            </div>
+
+                            <div className="max-h-72 overflow-y-auto">
+                                <table className="w-full border-collapse text-[11px]">
+                                    <thead>
+                                        <tr className="border-b border-slate-800 text-left text-slate-400">
+                                            <th className="py-1.5 pr-2">Category</th>
+                                            <th className="py-1.5 pr-2 text-right">Total</th>
+                                            <th className="py-1.5 text-right">%</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {subBuckets.map(b => {
+                                            const pct =
+                                                selectedBucket.total > 0
+                                                    ? (b.total / selectedBucket.total) * 100
+                                                    : 0;
+                                            const isSelected =
+                                                selectedSubcategoryId === b.id;
+                                            return (
+                                                <tr
+                                                    key={b.id}
+                                                    onClick={() =>
+                                                        toggleSubcategorySelection(b.id)
+                                                    }
+                                                    className={`cursor-pointer border-b border-slate-900 last:border-b-0 transition-colors ${
+                                                        isSelected
+                                                            ? 'bg-slate-800/60'
+                                                            : 'hover:bg-slate-800/30'
+                                                    }`}
+                                                >
+                                                    <td className="py-1.5 pr-2 text-slate-100">
+                                                        <span className="inline-flex items-center gap-2">
+                                                            <span
+                                                                className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-sm"
+                                                                style={{
+                                                                    background: b.color,
+                                                                }}
+                                                            />
+                                                            <span className="truncate">
+                                                                {b.name}
+                                                            </span>
+                                                        </span>
+                                                    </td>
+                                                    <td
+                                                        className={`py-1.5 pr-2 text-right tabular-nums ${directionAmountClass(direction)}`}
+                                                    >
+                                                        {moneyFmt.format(b.total)}
+                                                    </td>
+                                                    <td className="py-1.5 text-right text-slate-400 tabular-nums">
+                                                        {pct.toFixed(1)}%
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+            {/* Transactions for selected group/category (or all in view) */}
+            {!loading && (
+                <div
+                    ref={txListRef}
+                    className={`${cardClass} ${
+                        selectedBucket
+                            ? 'ring-1 ring-amber-600/40'
+                            : ''
+                    }`}
+                >
+                    <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                            <h3 className="text-sm font-semibold">
+                                {selectedBucket ? (
+                                    <>
+                                        <span
+                                            className="mr-2 inline-block h-2.5 w-2.5 rounded-sm align-middle"
+                                            style={{
+                                                background:
+                                                    selectedSubcategory?.color ??
+                                                    selectedBucket.color,
+                                            }}
+                                        />
+                                        {selectedBucket.name}
+                                        {selectedSubcategory
+                                            ? ` › ${selectedSubcategory.name}`
+                                            : ''}{' '}
+                                        transactions
+                                    </>
+                                ) : (
+                                    'Transactions'
+                                )}
+                            </h3>
+                            <p className="text-[10px] text-slate-500">
+                                {periodLabel} · {directionLabel}
+                                {selectedBucket
+                                    ? ` · ${visibleReportTx.length} transaction${
+                                          visibleReportTx.length === 1 ? '' : 's'
+                                      } · ${moneyFmt.format(
+                                          selectedSubcategory?.total ??
+                                              selectedBucket.total,
+                                      )}`
+                                    : ` · ${visibleReportTx.length} transaction${
+                                          visibleReportTx.length === 1 ? '' : 's'
+                                      } · click a slice, bar, or table row to filter`}
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            {selectedBucket && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setSelectedBucketId(null);
+                                        setSelectedSubcategoryId(null);
+                                    }}
+                                    className="rounded-md border border-slate-700 bg-slate-950 px-3 py-1 text-[11px] text-slate-300 hover:bg-slate-800 hover:text-amber-300"
+                                >
+                                    Clear filter
+                                </button>
+                            )}
+                            <label className="text-[10px] text-slate-500">Sort</label>
+                            <select
+                                className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200"
+                                value={txListSort}
+                                onChange={e =>
+                                    setTxListSort(
+                                        e.target.value as
+                                            | 'date_desc'
+                                            | 'amount_desc'
+                                            | 'amount_asc',
+                                    )
+                                }
+                            >
+                                <option value="date_desc">Recent</option>
+                                <option value="amount_desc">Amount: high → low</option>
+                                <option value="amount_asc">Amount: low → high</option>
+                            </select>
+                            <Link
+                                href="/finance/transactions"
+                                className="rounded-md border border-slate-700 bg-slate-950 px-3 py-1 text-[11px] text-slate-200 hover:bg-slate-800"
+                            >
+                                Open transactions →
+                            </Link>
+                        </div>
+                    </div>
+
+                    {visibleReportTx.length === 0 ? (
+                        <p className="text-slate-400">
+                            {direction === 'savings'
+                                ? emptyDirectionMessage(direction)
+                                : `No ${directionNoun(direction)} transactions in this view.`}
+                        </p>
+                    ) : (
+                        <div className="max-h-[420px] overflow-y-auto">
+                            <table className="w-full border-collapse text-[11px]">
+                                <thead>
+                                    <tr className="border-b border-slate-800 text-left text-slate-400">
+                                        <th className="py-1.5 pr-2">Date</th>
+                                        {groupBy === 'group' && (
+                                            <th className="py-1.5 pr-2">Category</th>
+                                        )}
+                                        {!selectedBucketId && groupBy === 'category' && (
+                                            <th className="py-1.5 pr-2">Category</th>
+                                        )}
+                                        {!selectedBucketId && groupBy === 'group' && (
+                                            <th className="py-1.5 pr-2">Group</th>
+                                        )}
+                                        <th className="py-1.5 pr-2">Description</th>
+                                        <th className="py-1.5 pr-2 text-right">Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {visibleReportTx.slice(0, 200).map(tx => {
+                                        const desc =
+                                            tx.name?.trim() ||
+                                            tx.note?.trim() ||
+                                            (tx.categoryId
+                                                ? categoryById.get(tx.categoryId)?.name
+                                                : null) ||
+                                            'Transaction';
+                                        const bucket = bucketIdForTx(tx);
+                                        const leafName = tx.categoryId
+                                            ? categoryById.get(tx.categoryId)?.name ?? '—'
+                                            : 'Uncategorized';
+                                        return (
+                                            <tr
+                                                key={tx.id}
+                                                className="border-b border-slate-900 last:border-b-0"
+                                            >
+                                                <td className="py-1 pr-2 text-slate-300">
+                                                    {tx.date}
+                                                </td>
+                                                {groupBy === 'group' && (
+                                                    <td className="py-1 pr-2 text-slate-400">
+                                                        <span className="truncate">{leafName}</span>
+                                                    </td>
+                                                )}
+                                                {!selectedBucketId && groupBy === 'category' && (
+                                                    <td className="py-1 pr-2 text-slate-400">
+                                                        <span className="truncate">{bucket.name}</span>
+                                                    </td>
+                                                )}
+                                                {!selectedBucketId && groupBy === 'group' && (
+                                                    <td className="py-1 pr-2 text-slate-400">
+                                                        <span className="truncate">{bucket.name}</span>
+                                                    </td>
+                                                )}
+                                                <td className="py-1 pr-2 text-slate-100">
+                                                    {desc}
+                                                </td>
+                                                <td
+                                                    className={`py-1 pr-2 text-right tabular-nums ${directionAmountClass(direction)}`}
+                                                >
+                                                    {moneyFmt.format(Math.abs(tx.amount))}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                            {visibleReportTx.length > 200 && (
+                                <p className="mt-2 text-[10px] text-slate-500">
+                                    Showing 200 of {visibleReportTx.length}. Use the Transactions tab
+                                    to see them all.
+                                </p>
+                            )}
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -1524,7 +1858,7 @@ export default function ReportsPage() {
                         {groupBy === 'group' ? 'Groups' : 'Categories'}
                     </h3>
                     <span className="text-[10px] text-slate-500">
-                        Click a row to filter
+                        Click a row to see its transactions
                     </span>
                 </div>
 
@@ -1556,11 +1890,7 @@ export default function ReportsPage() {
                                     return (
                                         <tr
                                             key={b.id}
-                                            onClick={() =>
-                                                setSelectedBucketId(
-                                                    isSelected ? null : b.id,
-                                                )
-                                            }
+                                            onClick={() => toggleBucketSelection(b.id)}
                                             className={`cursor-pointer border-b border-slate-900 last:border-b-0 transition-colors ${
                                                 isSelected
                                                     ? 'bg-slate-800/60'

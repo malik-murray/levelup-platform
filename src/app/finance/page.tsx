@@ -11,6 +11,7 @@ import {
     getAccountGroup,
     type AccountType,
 } from '@/lib/finance/accountBalances';
+import { loadAllTimeTransactions } from '@/lib/finance/loadAllTimeAccountNets';
 import { saveCategoryBudget } from '@/lib/budgetGroups';
 import { resolveStickyBudgetAmounts } from '@/lib/budgetOverview';
 
@@ -519,37 +520,23 @@ export default function FinancePage() {
                 return;
             }
 
-            const { data: txData, error: txError } = await supabase
-                .from('transactions')
-                .select('id, date, amount, account_id')
-                .eq('user_id', user.id)
-                .order('date', { ascending: false });
-
-            if (txError) {
+            try {
+                const rows = await loadAllTimeTransactions(supabase, user.id);
+                const mapped: Transaction[] = rows.map(tx => ({
+                    id: tx.id,
+                    date: tx.date,
+                    amount: Number(tx.amount),
+                    person: '',
+                    note: null,
+                    account: null,
+                    category: null,
+                    accountId: tx.account_id,
+                    categoryId: null,
+                }));
+                setAllTransactions(mapped);
+            } catch (txError) {
                 console.error('Error loading all transactions for net worth:', txError);
-                return;
             }
-
-            const rows = (txData ?? []) as Array<{
-                id: string;
-                date: string;
-                amount: number;
-                account_id: string | null;
-            }>;
-
-            const mapped: Transaction[] = rows.map(tx => ({
-                id: tx.id,
-                date: tx.date,
-                amount: Number(tx.amount),
-                person: '',
-                note: null,
-                account: null,
-                category: null,
-                accountId: tx.account_id,
-                categoryId: null,
-            }));
-
-            setAllTransactions(mapped);
         };
 
         loadAllTransactions();

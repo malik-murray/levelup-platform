@@ -1,6 +1,9 @@
 import {
     getAccountBalanceDetails,
     getAccountGroup,
+    getAvailableCredit,
+    getCreditDebtOwed,
+    getSpendableTotal,
 } from '../accountBalances';
 
 describe('getAccountGroup', () => {
@@ -55,5 +58,24 @@ describe('getAccountBalanceDetails', () => {
         expect(result.displayBalance).toBe(-1117.99);
         expect(result.signedBalance).toBe(-1117.99);
         expect(result.usedLiveBalance).toBe(true);
+    });
+});
+
+describe('available credit / spendable', () => {
+    it('computes debt owed from signed credit balance', () => {
+        expect(getCreditDebtOwed(-400)).toBe(400);
+        expect(getCreditDebtOwed(0)).toBe(0);
+        expect(getCreditDebtOwed(50)).toBe(0);
+    });
+
+    it('computes available credit from limit − debt', () => {
+        expect(getAvailableCredit(5000, 1200)).toBe(3800);
+        expect(getAvailableCredit(1000, 1500)).toBe(0);
+        expect(getAvailableCredit(null, 100)).toBeNull();
+    });
+
+    it('sums liquid cash + available credit as spendable', () => {
+        expect(getSpendableTotal(2000, 3800)).toBe(5800);
+        expect(getSpendableTotal(-10, 100)).toBe(100);
     });
 });

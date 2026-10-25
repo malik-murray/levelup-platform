@@ -10,6 +10,8 @@ import {
 } from 'recharts';
 import { supabase } from '@auth/supabaseClient';
 import { learnMerchantMappingFromUserCategory } from '@/lib/financial-concierge/categoryEngine';
+import { PlaidLinkButton } from '@/components/PlaidLinkButton';
+import Link from 'next/link';
 import {
     ACCOUNT_GROUP_LABELS,
     ACCOUNT_GROUP_ORDER,
@@ -21,6 +23,9 @@ import {
     getAccountBalanceDetails,
     getAccountGroup,
     getAccountGroupIcon,
+    getAvailableCredit,
+    getCreditDebtOwed,
+    getSpendableTotal,
     type AccountGroup,
     type AccountLiquidity,
     type AccountType,
@@ -30,6 +35,12 @@ import {
     resolveAccountLiquidity,
     saveAccountLiquidity,
 } from '@/lib/finance/accountLiquidity';
+import {
+    loadAccountCreditLimitMap,
+    resolveAccountCreditLimit,
+    saveAccountCreditLimit,
+} from '@/lib/finance/accountCreditLimits';
+import { loadAllTimeNetByAccountId } from '@/lib/finance/loadAllTimeAccountNets';
 
 type Account = {
     id: string;
@@ -99,11 +110,17 @@ export default function AccountsPage() {
     const [pieMode, setPieMode] = useState<'group' | 'account' | 'liquidity'>('group');
     const [collapsedGroups, setCollapsedGroups] = useState<Set<AccountGroup>>(() => new Set());
     const [showAddAccount, setShowAddAccount] = useState(false);
+    const [dataVersion, setDataVersion] = useState(0);
     const [liquidityByAccountId, setLiquidityByAccountId] = useState<
         Record<string, AccountLiquidity>
     >({});
+    const [creditLimitByAccountId, setCreditLimitByAccountId] = useState<
+        Record<string, number>
+    >({});
     const [editLiquidity, setEditLiquidity] = useState<AccountLiquidity | ''>('');
     const [newLiquidity, setNewLiquidity] = useState<AccountLiquidity | ''>('');
+    const [editCreditLimit, setEditCreditLimit] = useState('');
+    const [newCreditLimit, setNewCreditLimit] = useState('');
 
     // Month state (same pattern as other pages)
     const [monthDate, setMonthDate] = useState<Date>(() => {
@@ -168,8 +185,9 @@ export default function AccountsPage() {
                 { data: accountsData, error: accountsError },
                 { data: categoriesData, error: categoriesError },
                 { data: txData, error: txError },
-                { data: allTxAmounts, error: allTxError },
+                allTimeMapResult,
                 liquidityMap,
+                creditLimitMap,
             ] = await Promise.all([
                 // 🔹 Include balances - filter by user_id
                 supabase
@@ -189,14 +207,15 @@ export default function AccountsPage() {
                     .is('removed_at', null)
                     .gte('date', startStr)
                     .lt('date', endStr),
-                // All-time amounts for manual-account balance (starting + all txs).
-                // Plaid accounts use current_balance instead and ignore this sum.
-                supabase
-                    .from('transactions')
-                    .select('account_id, amount')
-                    .eq('user_id', user.id)
-                    .is('removed_at', null),
+                loadAllTimeNetByAccountId(supabase, user.id).then(
+                    map => ({ map, error: null as string | null }),
+                    (err: unknown) => ({
+                        map: new Map<string, number>(),
+                        error: err instanceof Error ? err.message : 'Failed to load balances',
+                    })
+                ),
                 loadAccountLiquidityMap(supabase, user.id),
+                loadAccountCreditLimitMap(supabase, user.id),
             ]);
 
             if (accountsError) {
@@ -209,8 +228,8 @@ export default function AccountsPage() {
                 setNotification('Error loading transactions. Check console/logs.');
             }
 
-            if (allTxError) {
-                console.error(allTxError);
+            if (allTimeMapResult.error) {
+                console.error(allTimeMapResult.error);
             }
             
             if (categoriesError) {
@@ -221,16 +240,8 @@ export default function AccountsPage() {
             setCategories((categoriesData as Category[]) ?? []);
             setTransactions((txData as TxRow[]) ?? []);
             setLiquidityByAccountId(liquidityMap);
-
-            const allTimeMap = new Map<string, number>();
-            for (const row of allTxAmounts || []) {
-                if (!row.account_id) continue;
-                allTimeMap.set(
-                    row.account_id,
-                    (allTimeMap.get(row.account_id) ?? 0) + Number(row.amount)
-                );
-            }
-            setAllTimeNetByAccountId(allTimeMap);
+            setCreditLimitByAccountId(creditLimitMap);
+            setAllTimeNetByAccountId(allTimeMapResult.map);
             setLoading(false);
         };
 
@@ -239,7 +250,7 @@ export default function AccountsPage() {
             setNotification('Error loading data. Check console/logs.');
             setLoading(false);
         });
-    }, [monthDate]);
+    }, [monthDate, dataVersion]);
 
     // Filter transactions by selected account
     const filteredTransactions = useMemo(() => {
@@ -436,6 +447,29 @@ export default function AccountsPage() {
         }, 0);
     }, [accounts, allTimeNetByAccountId]);
 
+    const availableCreditTotal = useMemo(() => {
+        return accounts.reduce((sum, acc) => {
+            if (getAccountGroup(acc.type) !== 'credit') return sum;
+            const limit = resolveAccountCreditLimit(acc.id, creditLimitByAccountId);
+            const debt = getCreditDebtOwed(getAccountBalance(acc).signedBalance);
+            const available = getAvailableCredit(limit, debt);
+            return sum + (available ?? 0);
+        }, 0);
+    }, [accounts, allTimeNetByAccountId, creditLimitByAccountId]);
+
+    const spendableTotal = useMemo(
+        () => getSpendableTotal(liquiditySummary.liquid, availableCreditTotal),
+        [liquiditySummary.liquid, availableCreditTotal]
+    );
+
+    const parseCreditLimitInput = (raw: string): number | null | 'invalid' => {
+        const trimmed = raw.trim();
+        if (!trimmed) return null;
+        const n = Number(trimmed.replace(/,/g, ''));
+        if (Number.isNaN(n) || n < 0) return 'invalid';
+        return n;
+    };
+
     const selectedAccount = selectedAccountId
         ? accounts.find(acc => acc.id === selectedAccountId)
         : null;
@@ -525,11 +559,36 @@ export default function AccountsPage() {
                 }
             }
 
+            if ((newAccountType || null) === 'credit') {
+                const limitParsed = parseCreditLimitInput(newCreditLimit);
+                if (limitParsed === 'invalid') {
+                    setNotification('Credit limit must be a valid non-negative number.');
+                    setAccounts(prev => [...prev, created]);
+                    setActionLoadingId(null);
+                    return;
+                }
+                if (limitParsed != null) {
+                    const limErr = await saveAccountCreditLimit(
+                        supabase,
+                        user.id,
+                        created.id,
+                        limitParsed
+                    );
+                    if (!limErr.error) {
+                        setCreditLimitByAccountId(prev => ({
+                            ...prev,
+                            [created.id]: limitParsed,
+                        }));
+                    }
+                }
+            }
+
             setAccounts(prev => [...prev, created]);
             setNewAccountName('');
             setNewAccountType('');
             setNewStartingBalance('');
             setNewLiquidity('');
+            setNewCreditLimit('');
             setShowAddAccount(false);
             setNotification('Account created.');
         } catch (err) {
@@ -557,6 +616,8 @@ export default function AccountsPage() {
             liquidityByAccountId
         );
         setEditLiquidity(resolved ?? '');
+        const limit = resolveAccountCreditLimit(account.id, creditLimitByAccountId);
+        setEditCreditLimit(limit != null ? String(limit) : '');
         setNotification(null);
     };
 
@@ -566,6 +627,7 @@ export default function AccountsPage() {
         setEditType('');
         setEditStartingBalance('');
         setEditLiquidity('');
+        setEditCreditLimit('');
     };
 
     // 🔹 Save account edits
@@ -632,6 +694,42 @@ export default function AccountsPage() {
                         else delete next[accountId];
                         return next;
                     });
+                }
+                const effectiveType = (editType || existing.type) as AccountType | null;
+                if (effectiveType === 'credit') {
+                    const limitParsed = parseCreditLimitInput(editCreditLimit);
+                    if (limitParsed === 'invalid') {
+                        setNotification('Credit limit must be a valid non-negative number.');
+                        return;
+                    }
+                    const limErr = await saveAccountCreditLimit(
+                        supabase,
+                        user.id,
+                        accountId,
+                        limitParsed
+                    );
+                    if (!limErr.error) {
+                        setCreditLimitByAccountId(prev => {
+                            const next = { ...prev };
+                            if (limitParsed == null) delete next[accountId];
+                            else next[accountId] = limitParsed;
+                            return next;
+                        });
+                    }
+                } else {
+                    const limErr = await saveAccountCreditLimit(
+                        supabase,
+                        user.id,
+                        accountId,
+                        null
+                    );
+                    if (!limErr.error) {
+                        setCreditLimitByAccountId(prev => {
+                            const next = { ...prev };
+                            delete next[accountId];
+                            return next;
+                        });
+                    }
                 }
                 setNotification(
                     'Name/type saved. Balance for linked accounts comes from your bank sync.'
@@ -704,6 +802,42 @@ export default function AccountsPage() {
                     else delete next[accountId];
                     return next;
                 });
+            }
+            const effectiveType = (editType || existing.type) as AccountType | null;
+            if (effectiveType === 'credit') {
+                const limitParsed = parseCreditLimitInput(editCreditLimit);
+                if (limitParsed === 'invalid') {
+                    setNotification('Credit limit must be a valid non-negative number.');
+                    return;
+                }
+                const limErr = await saveAccountCreditLimit(
+                    supabase,
+                    user.id,
+                    accountId,
+                    limitParsed
+                );
+                if (!limErr.error) {
+                    setCreditLimitByAccountId(prev => {
+                        const next = { ...prev };
+                        if (limitParsed == null) delete next[accountId];
+                        else next[accountId] = limitParsed;
+                        return next;
+                    });
+                }
+            } else {
+                const limErr = await saveAccountCreditLimit(
+                    supabase,
+                    user.id,
+                    accountId,
+                    null
+                );
+                if (!limErr.error) {
+                    setCreditLimitByAccountId(prev => {
+                        const next = { ...prev };
+                        delete next[accountId];
+                        return next;
+                    });
+                }
             }
             setNotification('Account updated.');
             cancelEditing();
@@ -822,6 +956,15 @@ export default function AccountsPage() {
         setTxNote('');
     };
 
+    const adjustAllTimeNet = (accountId: string | null | undefined, delta: number) => {
+        if (!accountId || delta === 0) return;
+        setAllTimeNetByAccountId(prev => {
+            const next = new Map(prev);
+            next.set(accountId, (next.get(accountId) ?? 0) + delta);
+            return next;
+        });
+    };
+
     const handleDeleteTransaction = async (id: string) => {
         const tx = transactions.find(t => t.id === id);
         if (!tx) {
@@ -853,6 +996,9 @@ export default function AccountsPage() {
                     setNotification('Error deleting transfer. Check console/logs.');
                     return;
                 }
+                for (const row of transferGroup) {
+                    adjustAllTimeNet(row.account_id, -Number(row.amount));
+                }
                 setTransactions(prev => prev.filter(t => !transferGroup.some(tg => tg.id === t.id)));
                 setNotification('Transfer deleted.');
                 return;
@@ -866,6 +1012,7 @@ export default function AccountsPage() {
             return;
         }
 
+        adjustAllTimeNet(tx.account_id, -Number(tx.amount));
         setTransactions(prev => prev.filter(t => t.id !== id));
         setNotification('Transaction deleted.');
     };
@@ -937,6 +1084,11 @@ export default function AccountsPage() {
                 });
             }
 
+            if (prior) {
+                adjustAllTimeNet(prior.account_id, -Number(prior.amount));
+            }
+            adjustAllTimeNet(txAccountId, finalAmount);
+
             setTransactions(prev =>
                 prev.map(t =>
                     t.id === editingTxId
@@ -992,6 +1144,8 @@ export default function AccountsPage() {
             });
         }
 
+        adjustAllTimeNet(txAccountId, finalAmount);
+
         const startOfMonth = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
         const endOfMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
         const startStr = startOfMonth.toISOString().slice(0, 10);
@@ -1001,6 +1155,7 @@ export default function AccountsPage() {
             .from('transactions')
             .select('id, date, amount, account_id, category_id, person, note, name, is_transfer, transfer_group_id')
             .eq('user_id', user.id)
+            .is('removed_at', null)
             .gte('date', startStr)
             .lt('date', endStr);
         
@@ -1052,6 +1207,20 @@ export default function AccountsPage() {
                                     {formatCurrency(netWorth)}
                                 </span>
                             </p>
+                            <p className="mt-0.5 text-[11px] text-slate-400">
+                                Spendable:{' '}
+                                <span className="font-semibold tabular-nums text-sky-400">
+                                    {formatCurrency(spendableTotal)}
+                                </span>
+                                <span className="text-slate-500">
+                                    {' '}
+                                    (liquid {formatCurrency(liquiditySummary.liquid)}
+                                    {availableCreditTotal > 0
+                                        ? ` + credit ${formatCurrency(availableCreditTotal)}`
+                                        : ''}
+                                    )
+                                </span>
+                            </p>
                             <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[9px] text-slate-500">
                                 {ACCOUNT_LIQUIDITY_ORDER.map(tag => (
                                     <span key={tag} className="inline-flex items-center gap-1">
@@ -1069,13 +1238,35 @@ export default function AccountsPage() {
                                 ))}
                             </div>
                         </div>
-                        <button
-                            type="button"
-                            onClick={() => setShowAddAccount(v => !v)}
-                            className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[10px] font-medium text-slate-300 hover:bg-slate-800"
-                        >
-                            {showAddAccount ? 'Close' : '+ Add'}
-                        </button>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                            <PlaidLinkButton
+                                label="Link bank"
+                                hideInlineError
+                                buttonClassName="rounded-md bg-amber-400 px-2 py-1 text-[10px] font-semibold text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                onSuccess={() => {
+                                    setNotification(
+                                        'Bank linked. Syncing accounts and transactions…'
+                                    );
+                                    setDataVersion(v => v + 1);
+                                }}
+                                onError={err =>
+                                    setNotification(err.message || 'Failed to link bank')
+                                }
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowAddAccount(v => !v)}
+                                className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[10px] font-medium text-slate-300 hover:bg-slate-800"
+                            >
+                                {showAddAccount ? 'Close' : '+ Manual'}
+                            </button>
+                            <Link
+                                href="/finance/settings/integrations"
+                                className="text-[9px] text-slate-500 underline hover:text-slate-300"
+                            >
+                                Manage links
+                            </Link>
+                        </div>
                     </div>
 
                     {showAddAccount && (
@@ -1083,6 +1274,10 @@ export default function AccountsPage() {
                             onSubmit={handleCreateAccount}
                             className="shrink-0 space-y-2 border-b border-slate-800 px-3 py-2.5"
                         >
+                            <p className="text-[10px] text-slate-500">
+                                Prefer linking your bank above for live balances. Or add a
+                                manual account:
+                            </p>
                             <input
                                 value={newAccountName}
                                 onChange={e => setNewAccountName(e.target.value)}
@@ -1133,6 +1328,15 @@ export default function AccountsPage() {
                                     </option>
                                 ))}
                             </select>
+                            {newAccountType === 'credit' && (
+                                <input
+                                    value={newCreditLimit}
+                                    onChange={e => setNewCreditLimit(e.target.value)}
+                                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-100"
+                                    placeholder="Credit limit (e.g. 5000)"
+                                    inputMode="decimal"
+                                />
+                            )}
                             <button
                                 type="submit"
                                 disabled={actionLoadingId === 'new'}
@@ -1146,7 +1350,10 @@ export default function AccountsPage() {
                     {loading ? (
                         <p className="p-3 text-slate-400">Loading…</p>
                     ) : accounts.length === 0 ? (
-                        <p className="p-3 text-slate-400">No accounts yet. Tap + Add to create one.</p>
+                        <p className="p-3 text-slate-400">
+                            No accounts yet. Use <span className="text-amber-300">Link bank</span>{' '}
+                            or + Manual to get started.
+                        </p>
                     ) : (
                         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                             {accountsByGroup.map(
@@ -1201,6 +1408,22 @@ export default function AccountsPage() {
                                                             isCredit
                                                                 ? null
                                                                 : getAccountLiquidity(acc);
+                                                        const creditLimit = isCredit
+                                                            ? resolveAccountCreditLimit(
+                                                                  acc.id,
+                                                                  creditLimitByAccountId
+                                                              )
+                                                            : null;
+                                                        const availableOnCard =
+                                                            isCredit && creditLimit != null
+                                                                ? getAvailableCredit(
+                                                                      creditLimit,
+                                                                      getCreditDebtOwed(
+                                                                          getAccountBalance(acc)
+                                                                              .signedBalance
+                                                                      )
+                                                                  )
+                                                                : null;
 
                                                         if (isEditing) {
                                                             return (
@@ -1287,6 +1510,20 @@ export default function AccountsPage() {
                                                                             className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] disabled:opacity-60"
                                                                             placeholder="Current balance"
                                                                         />
+                                                                        {(editType || acc.type) ===
+                                                                            'credit' && (
+                                                                            <input
+                                                                                value={editCreditLimit}
+                                                                                onChange={e =>
+                                                                                    setEditCreditLimit(
+                                                                                        e.target.value
+                                                                                    )
+                                                                                }
+                                                                                className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px]"
+                                                                                placeholder="Credit limit"
+                                                                                inputMode="decimal"
+                                                                            />
+                                                                        )}
                                                                         <div className="flex gap-1.5">
                                                                             <button
                                                                                 type="submit"
@@ -1379,6 +1616,17 @@ export default function AccountsPage() {
                                                                     >
                                                                         {formatCurrency(balanceToShow)}
                                                                     </span>
+                                                                    {availableOnCard != null && (
+                                                                        <span
+                                                                            className="shrink-0 text-[9px] tabular-nums text-sky-400/90"
+                                                                            title={`Available of ${formatCurrency(creditLimit ?? 0)} limit`}
+                                                                        >
+                                                                            {formatCurrency(
+                                                                                availableOnCard
+                                                                            )}{' '}
+                                                                            avail
+                                                                        </span>
+                                                                    )}
                                                                     <div
                                                                         className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
                                                                         onClick={e => e.stopPropagation()}
@@ -1604,6 +1852,19 @@ export default function AccountsPage() {
                                                 </span>
                                             </p>
                                         )}
+                                    <p className="pt-1 text-[10px] text-slate-500">
+                                        Spendable now:{' '}
+                                        <span className="font-medium text-sky-400">
+                                            {formatCurrency(spendableTotal)}
+                                        </span>
+                                        <span className="text-slate-600">
+                                            {' '}
+                                            · liquid {formatCurrency(liquiditySummary.liquid)}
+                                            {availableCreditTotal > 0
+                                                ? ` + avail credit ${formatCurrency(availableCreditTotal)}`
+                                                : ' · set a credit limit on cards to include available credit'}
+                                        </span>
+                                    </p>
                                     <p className="pt-2 text-[10px] text-slate-500">
                                         Select an account in the sidebar (or a slice) to view
                                         transactions.

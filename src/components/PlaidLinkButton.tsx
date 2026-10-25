@@ -7,9 +7,21 @@ import { supabase } from '@auth/supabaseClient';
 interface PlaidLinkButtonProps {
     onSuccess?: () => void;
     onError?: (error: Error) => void;
+    /** Button label. Defaults to "Connect Bank Account". */
+    label?: string;
+    /** Extra classes for the button (replaces default amber styles when set with compact). */
+    buttonClassName?: string;
+    /** When true, errors are only passed to onError (no inline error box). */
+    hideInlineError?: boolean;
 }
 
-export function PlaidLinkButton({ onSuccess, onError }: PlaidLinkButtonProps) {
+export function PlaidLinkButton({
+    onSuccess,
+    onError,
+    label = 'Connect Bank Account',
+    buttonClassName,
+    hideInlineError = false,
+}: PlaidLinkButtonProps) {
     const [linkToken, setLinkToken] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -152,13 +164,17 @@ export function PlaidLinkButton({ onSuccess, onError }: PlaidLinkButtonProps) {
     return (
         <div className="flex flex-col gap-2">
             <button
+                type="button"
                 onClick={handleClick}
                 disabled={!ready || loading || !linkToken}
-                className="rounded-md bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className={
+                    buttonClassName ??
+                    'rounded-md bg-amber-400 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+                }
             >
-                {loading ? 'Connecting...' : 'Connect Bank Account'}
+                {loading ? 'Connecting...' : label}
             </button>
-            {error && (
+            {!hideInlineError && error && (
                 <div className="rounded-md border border-red-600 bg-red-950 px-3 py-1.5 text-xs text-red-200">
                     {error}
                 </div>

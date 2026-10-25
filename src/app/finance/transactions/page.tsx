@@ -174,6 +174,9 @@ export default function TransactionsPage() {
     const [bulkUpdating, setBulkUpdating] = useState(false);
     const [categoryFilterId, setCategoryFilterId] = useState<string>('');
     const [accountFilterId, setAccountFilterId] = useState<string>('');
+    const [cashflowFilter, setCashflowFilter] = useState<
+        '' | 'income' | 'saved' | 'expenses'
+    >('');
     const [sortMode, setSortMode] = useState<
         'date_desc' | 'merchant_frequency' | 'amount_desc' | 'amount_asc'
     >('date_desc');
@@ -196,9 +199,22 @@ export default function TransactionsPage() {
         [monthDate]
     );
 
-    const hasActiveFilter = Boolean(categoryFilterId || accountFilterId);
+    const hasAccountOrCategoryFilter = Boolean(categoryFilterId || accountFilterId);
 
-    const visibleTransactions = useMemo(() => {
+    const categoryById = useMemo(() => {
+        const map = new Map<string, Category>();
+        for (const c of categories) map.set(c.id, c);
+        return map;
+    }, [categories]);
+
+    const isSavingsInvestingTx = (tx: Transaction) => {
+        if (!tx.categoryId) return false;
+        const cat = categoryById.get(tx.categoryId);
+        return Boolean(cat && isSavingsInvestingBucket(cat.type, cat.name));
+    };
+
+    /** Account + category scope only — used for cash-flow totals so header math stays stable. */
+    const scopedTransactions = useMemo(() => {
         let rows = transactions;
         if (accountFilterId === '__no_account__') {
             rows = rows.filter(tx => !tx.accountId);
@@ -212,6 +228,30 @@ export default function TransactionsPage() {
         }
         return rows;
     }, [transactions, categoryFilterId, accountFilterId]);
+
+    const matchesCashflowBucket = (tx: Transaction, bucket: 'income' | 'saved' | 'expenses') => {
+        if (bucket === 'saved') {
+            return tx.amount < 0 && isSavingsInvestingTx(tx);
+        }
+        if (bucket === 'income') {
+            if (tx.amount <= 0) return false;
+            if (isSavingsInvestingTx(tx)) return false;
+            if (!hasAccountOrCategoryFilter && tx.is_transfer) return false;
+            return true;
+        }
+        // expenses
+        if (tx.amount >= 0) return false;
+        if (isSavingsInvestingTx(tx)) return false;
+        if (!hasAccountOrCategoryFilter && tx.is_transfer) return false;
+        return true;
+    };
+
+    const visibleTransactions = useMemo(() => {
+        if (!cashflowFilter) return scopedTransactions;
+        return scopedTransactions.filter(tx =>
+            matchesCashflowBucket(tx, cashflowFilter)
+        );
+    }, [scopedTransactions, cashflowFilter, categoryById, hasAccountOrCategoryFilter]);
 
     const merchantFrequencyRows = useMemo(() => {
         const byMerchant = new Map<
@@ -654,31 +694,37 @@ export default function TransactionsPage() {
         });
     }, [monthDate, transactionWindow]);
 
-    // Month summary reflects active filters. Unfiltered totals still exclude internal
-    // transfers; filtered views include every matching row so Transfer / Savings nets
-    // and single-account views are visible.
+    // Month summary reflects account/category filters (not cash-flow row clicks).
+    // Unfiltered: Income / Expenses ignore plain transfers; Savings/Investing outflows
+    // are shown separately as Saved (they were previously invisible because is_transfer).
     const totalIn = useMemo(
         () =>
-            visibleTransactions
-                .filter(tx => tx.amount > 0 && (hasActiveFilter || !tx.is_transfer))
+            scopedTransactions
+                .filter(tx => matchesCashflowBucket(tx, 'income'))
                 .reduce((sum, tx) => sum + tx.amount, 0),
-        [visibleTransactions, hasActiveFilter]
+        [scopedTransactions, categoryById, hasAccountOrCategoryFilter]
     );
 
     const totalOut = useMemo(
         () =>
-            visibleTransactions
-                .filter(tx => tx.amount < 0 && (hasActiveFilter || !tx.is_transfer))
+            scopedTransactions
+                .filter(tx => matchesCashflowBucket(tx, 'expenses'))
                 .reduce((sum, tx) => sum + Math.abs(tx.amount), 0),
-        [visibleTransactions, hasActiveFilter]
+        [scopedTransactions, categoryById, hasAccountOrCategoryFilter]
     );
 
-    const net = useMemo(
+    const totalSaved = useMemo(
         () =>
-            hasActiveFilter
-                ? visibleTransactions.reduce((sum, tx) => sum + tx.amount, 0)
-                : totalIn - totalOut,
-        [hasActiveFilter, visibleTransactions, totalIn, totalOut]
+            scopedTransactions
+                .filter(tx => matchesCashflowBucket(tx, 'saved'))
+                .reduce((sum, tx) => sum + Math.abs(tx.amount), 0),
+        [scopedTransactions, categoryById]
+    );
+
+    // Leftover after spending and saving/investing.
+    const net = useMemo(
+        () => totalIn - totalOut - totalSaved,
+        [totalIn, totalOut, totalSaved]
     );
 
     // =========================================================
@@ -3828,62 +3874,132 @@ export default function TransactionsPage() {
                 </div>
             )}
 
-            {/* Month summary (updates with filters) */}
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-4 text-xs">
-                <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
+            {/* Month summary — stacked like Income − Saved − Expenses = Net */}
+            <div className="rounded-lg border border-slate-800 bg-slate-900 p-3 text-xs">
+                <div className="mb-2 flex items-baseline justify-between gap-2">
                     <p className="text-[10px] uppercase text-slate-400">
-                        Transactions{hasActiveFilter ? ' (filtered)' : ''}
+                        Cash flow
+                        {hasAccountOrCategoryFilter || cashflowFilter
+                            ? ' (filtered)'
+                            : ''}
                     </p>
-                    <p className="text-xl font-semibold text-slate-100">
-                        {visibleTransactions.length}
+                    <p className="text-[10px] text-slate-500">
+                        {visibleTransactions.length} transaction
+                        {visibleTransactions.length !== 1 ? 's' : ''}
+                        {cashflowFilter ? (
+                            <button
+                                type="button"
+                                className="ml-2 text-slate-400 underline hover:text-slate-200"
+                                onClick={() => setCashflowFilter('')}
+                            >
+                                Clear
+                            </button>
+                        ) : null}
                     </p>
                 </div>
-                <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
-                    <p className="text-[10px] uppercase text-slate-400">
-                        Income{hasActiveFilter ? ' (filtered)' : ''}
-                    </p>
-                    <p className="text-xl font-semibold text-emerald-400">
-                        {new Intl.NumberFormat('en-US', {
-                            style: 'currency',
-                            currency: 'USD',
-                            minimumFractionDigits: 2,
-                        }).format(totalIn)}
-                    </p>
-                </div>
-                <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
-                    <p className="text-[10px] uppercase text-slate-400">
-                        Expenses{hasActiveFilter ? ' (filtered)' : ''}
-                    </p>
-                    <p className="text-xl font-semibold text-red-400">
-                        {new Intl.NumberFormat('en-US', {
-                            style: 'currency',
-                            currency: 'USD',
-                            minimumFractionDigits: 2,
-                        }).format(totalOut)}
-                    </p>
-                </div>
-                <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
-                    <p className="text-[10px] uppercase text-slate-400">
-                        Net{hasActiveFilter ? ' (filtered)' : ''}
-                    </p>
-                    <p
-                        className={`text-xl font-semibold ${
-                            net >= 0 ? 'text-emerald-400' : 'text-red-400'
+                <div className="mx-auto w-full max-w-xs font-mono tabular-nums">
+                    <button
+                        type="button"
+                        onClick={() =>
+                            setCashflowFilter(prev =>
+                                prev === 'income' ? '' : 'income'
+                            )
+                        }
+                        className={`flex w-full items-baseline justify-between gap-4 rounded px-1 py-0.5 text-left transition-colors hover:bg-slate-800/80 ${
+                            cashflowFilter === 'income'
+                                ? 'bg-emerald-950/50 ring-1 ring-emerald-700/60'
+                                : ''
                         }`}
                     >
-                        {new Intl.NumberFormat('en-US', {
-                            style: 'currency',
-                            currency: 'USD',
-                            minimumFractionDigits: 2,
-                        }).format(net)}
-                    </p>
+                        <span className="text-slate-400">Income</span>
+                        <span className="text-base font-semibold text-emerald-400">
+                            {new Intl.NumberFormat('en-US', {
+                                style: 'currency',
+                                currency: 'USD',
+                                minimumFractionDigits: 2,
+                            }).format(totalIn)}
+                        </span>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() =>
+                            setCashflowFilter(prev =>
+                                prev === 'saved' ? '' : 'saved'
+                            )
+                        }
+                        className={`flex w-full items-baseline justify-between gap-4 rounded px-1 py-0.5 text-left transition-colors hover:bg-slate-800/80 ${
+                            cashflowFilter === 'saved'
+                                ? 'bg-sky-950/50 ring-1 ring-sky-700/60'
+                                : ''
+                        }`}
+                    >
+                        <span className="text-slate-400">− Saved</span>
+                        <span className="text-base font-semibold text-sky-400">
+                            {new Intl.NumberFormat('en-US', {
+                                style: 'currency',
+                                currency: 'USD',
+                                minimumFractionDigits: 2,
+                            }).format(totalSaved)}
+                        </span>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() =>
+                            setCashflowFilter(prev =>
+                                prev === 'expenses' ? '' : 'expenses'
+                            )
+                        }
+                        className={`flex w-full items-baseline justify-between gap-4 rounded px-1 py-0.5 text-left transition-colors hover:bg-slate-800/80 ${
+                            cashflowFilter === 'expenses'
+                                ? 'bg-red-950/50 ring-1 ring-red-700/60'
+                                : ''
+                        }`}
+                    >
+                        <span className="text-slate-400">− Expenses</span>
+                        <span className="text-base font-semibold text-red-400">
+                            {new Intl.NumberFormat('en-US', {
+                                style: 'currency',
+                                currency: 'USD',
+                                minimumFractionDigits: 2,
+                            }).format(totalOut)}
+                        </span>
+                    </button>
+                    <div className="mt-1 border-t border-slate-700 pt-1.5">
+                        <div className="flex items-baseline justify-between gap-4 px-1">
+                            <span className="text-slate-300">
+                                Net
+                                <span className="ml-1.5 text-[10px] font-sans font-normal text-slate-500">
+                                    = Income − Saved − Expenses
+                                </span>
+                            </span>
+                            <span
+                                className={`text-base font-semibold ${
+                                    net >= 0 ? 'text-emerald-400' : 'text-red-400'
+                                }`}
+                            >
+                                {new Intl.NumberFormat('en-US', {
+                                    style: 'currency',
+                                    currency: 'USD',
+                                    minimumFractionDigits: 2,
+                                }).format(net)}
+                            </span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
             {/* Transactions list */}
             <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 text-xs">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold">All transactions</h3>
+                    <h3 className="text-sm font-semibold">
+                        {cashflowFilter === 'income'
+                            ? 'Income transactions'
+                            : cashflowFilter === 'saved'
+                              ? 'Saved transactions'
+                              : cashflowFilter === 'expenses'
+                                ? 'Expense transactions'
+                                : 'All transactions'}
+                    </h3>
                     <div className="flex flex-wrap items-center gap-2">
                         <label className="text-[10px] text-slate-400">Account</label>
                         <select

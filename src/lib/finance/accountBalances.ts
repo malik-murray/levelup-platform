@@ -186,3 +186,33 @@ export function getAccountGroupIcon(group: AccountGroup): string {
             return '🏧';
     }
 }
+
+/** Positive amount currently owed on a credit account. */
+export function getCreditDebtOwed(signedBalance: number): number {
+    return Math.max(0, -signedBalance);
+}
+
+/**
+ * Remaining credit available to spend.
+ * Returns null when no limit is set.
+ */
+export function getAvailableCredit(
+    creditLimit: number | null | undefined,
+    debtOwed: number
+): number | null {
+    if (creditLimit == null || !Number.isFinite(creditLimit) || creditLimit < 0) {
+        return null;
+    }
+    return Math.max(0, creditLimit - Math.max(0, debtOwed));
+}
+
+/**
+ * Cash you can spend now: liquid balances + remaining credit limits.
+ * Does not include reserved/locked assets.
+ */
+export function getSpendableTotal(
+    liquidCash: number,
+    availableCreditTotal: number
+): number {
+    return Math.max(0, liquidCash) + Math.max(0, availableCreditTotal);
+}
