@@ -54,7 +54,43 @@ type TodoItem = {
   due_date: string | null;
 };
 
+type TodoDraft = {
+  title: string;
+  is_important: boolean | null;
+  is_urgent: boolean | null;
+  due_date: string | null;
+  category_ids: string[];
+  goal_id: string | null;
+};
+
 const isBacklogOnly = (todo: TodoItem) => todo.daily_todo_id === null;
+
+const draftFromTodo = (todo: TodoItem): TodoDraft => ({
+  title: todo.title,
+  is_important: todo.is_important,
+  is_urgent: todo.is_urgent,
+  due_date: todo.due_date,
+  category_ids: [...todo.category_ids],
+  goal_id: todo.goal_id,
+});
+
+const sameCategoryIds = (a: string[], b: string[]) => {
+  if (a.length !== b.length) return false;
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return left.every((id, index) => id === right[index]);
+};
+
+const isDraftDirty = (todo: TodoItem, draft: TodoDraft) =>
+  draft.title.trim() !== todo.title.trim() ||
+  draft.is_important !== todo.is_important ||
+  draft.is_urgent !== todo.is_urgent ||
+  draft.due_date !== todo.due_date ||
+  draft.goal_id !== todo.goal_id ||
+  !sameCategoryIds(draft.category_ids, todo.category_ids);
+
+const displayTodo = (todo: TodoItem, draft: TodoDraft | undefined): TodoItem =>
+  draft ? { ...todo, ...draft, category_ids: [...draft.category_ids] } : todo;
 
 type DoneCategory = 'habit' | 'priority' | 'to-do';
 
@@ -171,7 +207,21 @@ export default function TodoPage() {
   const [categories, setCategories] = useState<BacklogCategory[]>([]);
   const [newTodoCategoryIds, setNewTodoCategoryIds] = useState<string[]>([]);
   const [newTodoGoalId, setNewTodoGoalId] = useState<string | null>(null);
+  const [draftsById, setDraftsById] = useState<Record<string, TodoDraft>>({});
+  const [savingById, setSavingById] = useState<Record<string, boolean>>({});
   const goals = useGoalsForPicker(userId);
+
+  const patchDraft = (todo: TodoItem, patch: Partial<TodoDraft>) => {
+    setDraftsById((prev) => {
+      const base = prev[todo.id] ?? draftFromTodo(todo);
+      const next = { ...base, ...patch };
+      if (!isDraftDirty(todo, next)) {
+        const { [todo.id]: _removed, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [todo.id]: next };
+    });
+  };
 
   const todayString = useMemo(() => formatDate(new Date()), []);
 
@@ -448,7 +498,9 @@ export default function TodoPage() {
     if (!userId) return;
 
     const previousTodos = todos;
+    const previousDraft = draftsById[todo.id];
     setTodos((prev) => prev.filter((item) => item.id !== todo.id));
+    handleDiscardTodoDraft(todo.id);
     setAssignOpenById((prev) => {
       const next = { ...prev };
       delete next[todo.id];
@@ -469,11 +521,18 @@ export default function TodoPage() {
     } catch (err) {
       console.error('Error deleting to-do:', err);
       setTodos(previousTodos);
+      if (previousDraft) {
+        setDraftsById((prev) => ({ ...prev, [todo.id]: previousDraft }));
+      }
     }
   };
 
   const handleToggleTodo = async (todo: TodoItem) => {
     if (!userId) return;
+    if (draftsById[todo.id] && isDraftDirty(todo, draftsById[todo.id])) {
+      const proceed = window.confirm('This task has unsaved changes. Mark it done anyway?');
+      if (!proceed) return;
+    }
     const completedAt = new Date().toISOString();
     try {
       if (isBacklogOnly(todo) && todo.backlog_task_id) {
@@ -487,6 +546,7 @@ export default function TodoPage() {
         if (error) throw error;
       }
       setTodos((prev) => prev.filter((item) => item.id !== todo.id));
+      handleDiscardTodoDraft(todo.id);
       setDoneItems((prev) => [
         {
           id: `todo-${todo.daily_todo_id ?? todo.backlog_task_id}`,
@@ -502,139 +562,110 @@ export default function TodoPage() {
     }
   };
 
-  const handleTitleBlur = async (todoId: string, nextTitle: string) => {
-    if (!userId) return;
-    const trimmed = nextTitle.trim();
+  const handleDiscardTodoDraft = (todoId: string) => {
+    setDraftsById((prev) => {
+      const { [todoId]: _removed, ...rest } = prev;
+      return rest;
+    });
+  };
 
-    if (!trimmed) {
-      return;
-    }
+  const handleSaveTodoDraft = async (todoId: string) => {
+    if (!userId) return;
+    const todo = todos.find((item) => item.id === todoId);
+    const draft = draftsById[todoId];
+    if (!todo || !draft || !isDraftDirty(todo, draft)) return;
+
+    const trimmed = draft.title.trim();
+    if (!trimmed) return;
 
     const normalized = normalizeTodoTitle(trimmed);
-    const duplicate = todos.find((todo) => todo.id !== todoId && normalizeTodoTitle(todo.title) === normalized);
-    if (duplicate) {
-      return;
-    }
+    const duplicate = todos.find((item) => item.id !== todoId && normalizeTodoTitle(item.title) === normalized);
+    if (duplicate) return;
 
-    const todo = todos.find((item) => item.id === todoId);
-    if (!todo) return;
-
+    setSavingById((prev) => ({ ...prev, [todoId]: true }));
     try {
+      const titleChanged = trimmed !== todo.title.trim();
+      const eisenhowerChanged =
+        draft.is_important !== todo.is_important || draft.is_urgent !== todo.is_urgent;
+      const dueChanged = draft.due_date !== todo.due_date;
+      const goalChanged = draft.goal_id !== todo.goal_id;
+      const categoriesChanged = !sameCategoryIds(draft.category_ids, todo.category_ids);
+
       if (isBacklogOnly(todo) && todo.backlog_task_id) {
-        await syncBacklogTitle(todo.backlog_task_id, trimmed);
+        if (titleChanged) await syncBacklogTitle(todo.backlog_task_id, trimmed);
+        if (eisenhowerChanged) {
+          await syncBacklogEisenhower(todo.backlog_task_id, {
+            is_important: draft.is_important,
+            is_urgent: draft.is_urgent,
+          });
+        }
+        if (dueChanged) await syncBacklogDueDate(todo.backlog_task_id, draft.due_date);
+        if (goalChanged) await updateBacklogTaskGoal(userId, todo.backlog_task_id, draft.goal_id);
+        if (categoriesChanged) await setBacklogTaskCategories(userId, todo.backlog_task_id, draft.category_ids);
       } else if (todo.daily_todo_id) {
-        const { error } = await supabase
-          .from('habit_daily_todos')
-          .update({ title: trimmed })
-          .eq('id', todo.daily_todo_id)
-          .eq('user_id', userId);
-        if (error) throw error;
+        if (titleChanged) {
+          const { error } = await supabase
+            .from('habit_daily_todos')
+            .update({ title: trimmed })
+            .eq('id', todo.daily_todo_id)
+            .eq('user_id', userId);
+          if (error) throw error;
+        }
+        if (eisenhowerChanged) {
+          await updateTodoEisenhower(
+            todo.daily_todo_id,
+            userId,
+            { is_important: draft.is_important, is_urgent: draft.is_urgent },
+            todo.backlog_task_id
+          );
+        }
+        if (dueChanged && todo.backlog_task_id) {
+          await syncBacklogDueDate(todo.backlog_task_id, draft.due_date);
+        }
+        if (goalChanged) await updateTodoGoal(todo.daily_todo_id, userId, draft.goal_id);
+        if (categoriesChanged) {
+          await setTodoCategories(todo.daily_todo_id, userId, draft.category_ids, todo.backlog_task_id);
+        }
+      } else {
+        return;
       }
-    } catch (err) {
-      console.error('Error renaming to-do item:', err);
-    }
-  };
 
-  const handleDueDateChange = async (todoId: string, dueDate: string) => {
-    if (!userId) return;
-    const previous = todos.find((item) => item.id === todoId);
-    if (!previous?.backlog_task_id) return;
-    const nextDueDate = dueDate || null;
-    setTodos((prev) => prev.map((item) => (item.id === todoId ? { ...item, due_date: nextDueDate } : item)));
-    try {
-      await syncBacklogDueDate(previous.backlog_task_id, nextDueDate);
-    } catch (err) {
-      console.error('Error updating due date:', err);
-      setTodos((prev) =>
-        prev.map((item) => (item.id === todoId ? { ...item, due_date: previous.due_date } : item))
-      );
-    }
-  };
-
-  const handleTodoEisenhowerChange = async (
-    todoId: string,
-    fields: { is_important: boolean | null; is_urgent: boolean | null }
-  ) => {
-    if (!userId) return;
-
-    const previous = todos.find((item) => item.id === todoId);
-    if (!previous) return;
-
-    setTodos((prev) =>
-      prev.map((item) => (item.id === todoId ? { ...item, ...fields } : item))
-    );
-
-    try {
-      if (isBacklogOnly(previous) && previous.backlog_task_id) {
-        await syncBacklogEisenhower(previous.backlog_task_id, fields);
-      } else if (previous.daily_todo_id) {
-        await updateTodoEisenhower(previous.daily_todo_id, userId, fields, previous.backlog_task_id);
-      }
-    } catch (err) {
-      console.error('Error updating task classification:', err);
       setTodos((prev) =>
         prev.map((item) =>
           item.id === todoId
             ? {
                 ...item,
-                is_important: previous.is_important,
-                is_urgent: previous.is_urgent,
+                title: trimmed,
+                is_important: draft.is_important,
+                is_urgent: draft.is_urgent,
+                due_date: draft.due_date,
+                goal_id: draft.goal_id,
+                category_ids: [...draft.category_ids],
               }
             : item
         )
       );
-    }
-  };
-
-  const handleTodoGoalChange = async (todoId: string, goalId: string | null) => {
-    if (!userId) return;
-
-    const previous = todos.find((item) => item.id === todoId);
-    if (!previous) return;
-
-    setTodos((prev) =>
-      prev.map((item) => (item.id === todoId ? { ...item, goal_id: goalId } : item))
-    );
-
-    try {
-      if (isBacklogOnly(previous) && previous.backlog_task_id) {
-        await updateBacklogTaskGoal(userId, previous.backlog_task_id, goalId);
-      } else if (previous.daily_todo_id) {
-        await updateTodoGoal(previous.daily_todo_id, userId, goalId);
-      }
+      handleDiscardTodoDraft(todoId);
     } catch (err) {
-      console.error('Error linking goal:', err);
-      setTodos((prev) =>
-        prev.map((item) => (item.id === todoId ? { ...item, goal_id: previous.goal_id } : item))
-      );
+      console.error('Error saving task changes:', err);
+    } finally {
+      setSavingById((prev) => {
+        const { [todoId]: _removed, ...rest } = prev;
+        return rest;
+      });
     }
   };
 
-  const handleTodoCategoriesChange = async (todoId: string, categoryIds: string[]) => {
-    if (!userId) return;
-
-    const previous = todos.find((item) => item.id === todoId);
-    if (!previous) return;
-
-    setTodos((prev) =>
-      prev.map((item) => (item.id === todoId ? { ...item, category_ids: categoryIds } : item))
-    );
-
-    try {
-      if (isBacklogOnly(previous) && previous.backlog_task_id) {
-        await setBacklogTaskCategories(userId, previous.backlog_task_id, categoryIds);
-      } else if (previous.daily_todo_id) {
-        await setTodoCategories(previous.daily_todo_id, userId, categoryIds, previous.backlog_task_id);
-      }
-    } catch (err) {
-      console.error('Error updating task tags:', err);
-      setTodos((prev) =>
-        prev.map((item) =>
-          item.id === todoId ? { ...item, category_ids: previous.category_ids } : item
-        )
-      );
-    }
-  };
+  useEffect(() => {
+    const dirtyCount = Object.keys(draftsById).length;
+    if (dirtyCount === 0) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [draftsById]);
 
   const filteredTodos = useMemo(() => {
     let items = todos;
@@ -988,8 +1019,20 @@ export default function TodoPage() {
                                 <p className="px-2 py-2 text-[11px] text-slate-500">No tasks in this quadrant.</p>
                               ) : (
                       <ol className="space-y-1 min-w-0">
-                        {quadrantTodos.map((todo, index) => (
-                          <li key={todo.id} className="space-y-1 rounded-md border border-[#ff9d00]/20 bg-[#03060f]/70 p-1.5">
+                        {quadrantTodos.map((todo, index) => {
+                          const draft = draftsById[todo.id];
+                          const view = displayTodo(todo, draft);
+                          const dirty = Boolean(draft && isDraftDirty(todo, draft));
+                          const saving = Boolean(savingById[todo.id]);
+                          return (
+                          <li
+                            key={todo.id}
+                            className={`space-y-1 rounded-md border p-1.5 ${
+                              dirty
+                                ? 'border-[#ffe066]/55 bg-[#ff9d00]/10'
+                                : 'border-[#ff9d00]/20 bg-[#03060f]/70'
+                            }`}
+                          >
                             <div className="flex min-w-0 items-start gap-1">
                               <span className="mt-1 shrink-0 text-[11px] font-semibold text-slate-300">{index + 1}.</span>
                               <input
@@ -1000,13 +1043,14 @@ export default function TodoPage() {
                               />
                               <div className="min-w-0 flex-1 space-y-1">
                                 <textarea
-                                  value={todo.title}
-                                  onChange={(e) => {
-                                    const nextTitle = e.target.value;
-                                    setTodos((prev) => prev.map((item) => (item.id === todo.id ? { ...item, title: nextTitle } : item)));
+                                  value={view.title}
+                                  onChange={(e) => patchDraft(todo, { title: e.target.value })}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                      e.preventDefault();
+                                      (e.target as HTMLTextAreaElement).blur();
+                                    }
                                   }}
-                                  onBlur={(e) => void handleTitleBlur(todo.id, e.target.value)}
-                                  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.target as HTMLTextAreaElement).blur()}
                                   rows={1}
                                   className="min-h-[1.8rem] w-full resize-none break-words overflow-y-auto rounded-md border border-[#ff9d00]/25 bg-[#03060f]/90 px-2 py-1 text-[11px] text-white placeholder-slate-500 focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
                                 />
@@ -1014,45 +1058,69 @@ export default function TodoPage() {
                                   <BacklogCategoryPicker
                                     compact
                                     categories={categories}
-                                    selectedIds={todo.category_ids}
-                                    onChange={(categoryIds) =>
-                                      void handleTodoCategoriesChange(todo.id, categoryIds)
-                                    }
+                                    selectedIds={view.category_ids}
+                                    onChange={(categoryIds) => patchDraft(todo, { category_ids: categoryIds })}
                                   />
                                   <GoalPicker
                                     compact
                                     goals={goals}
-                                    value={todo.goal_id}
-                                    onChange={(goalId) => void handleTodoGoalChange(todo.id, goalId)}
+                                    value={view.goal_id}
+                                    onChange={(goalId) => patchDraft(todo, { goal_id: goalId })}
                                   />
                                   <EisenhowerToggles
                                     compact
                                     value={{
-                                      is_important: todo.is_important ?? null,
-                                      is_urgent: todo.is_urgent ?? null,
+                                      is_important: view.is_important ?? null,
+                                      is_urgent: view.is_urgent ?? null,
                                     }}
-                                    onChange={(fields) => void handleTodoEisenhowerChange(todo.id, fields)}
+                                    onChange={(fields) =>
+                                      patchDraft(todo, {
+                                        is_important: fields.is_important,
+                                        is_urgent: fields.is_urgent,
+                                      })
+                                    }
                                   />
                                   <QuadrantBadge
                                     value={{
-                                      is_important: todo.is_important ?? null,
-                                      is_urgent: todo.is_urgent ?? null,
+                                      is_important: view.is_important ?? null,
+                                      is_urgent: view.is_urgent ?? null,
                                     }}
                                   />
                                   <input
                                     type="date"
-                                    aria-label={`Due date for ${todo.title}`}
-                                    value={todo.due_date ?? ''}
-                                    onChange={(e) => void handleDueDateChange(todo.id, e.target.value)}
+                                    aria-label={`Due date for ${view.title}`}
+                                    value={view.due_date ?? ''}
+                                    onChange={(e) => patchDraft(todo, { due_date: e.target.value || null })}
                                     className="rounded-md border border-[#ff9d00]/35 bg-[#03060f]/90 px-1.5 py-0.5 text-[11px] text-white focus:border-[#ff9d00]/60 focus:outline-none focus:ring-1 focus:ring-[#ff9d00]/30"
                                   />
                                   <span className="text-[10px] font-semibold tabular-nums text-[#ffe066]">
-                                    Score {focusScore(todo, todayString) ?? '—'}
+                                    Score {focusScore(view, todayString) ?? '—'}
                                   </span>
                                   <span className="text-[9px] text-slate-500">
                                     {todo.date ? `Due: ${todo.date}` : 'Unassigned'}
                                   </span>
                                 </div>
+                                {dirty ? (
+                                  <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                                    <span className="text-[10px] font-medium text-[#ffe066]">Unsaved changes</span>
+                                    <button
+                                      type="button"
+                                      disabled={saving || !view.title.trim()}
+                                      onClick={() => void handleSaveTodoDraft(todo.id)}
+                                      className="rounded-md border border-emerald-400/55 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-200 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {saving ? 'Saving…' : 'Save changes'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={saving}
+                                      onClick={() => handleDiscardTodoDraft(todo.id)}
+                                      className="rounded-md border border-slate-500/50 bg-black/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      Discard
+                                    </button>
+                                  </div>
+                                ) : null}
                               </div>
                               <div className="flex shrink-0 flex-col items-center gap-1">
                                 <button
@@ -1064,8 +1132,8 @@ export default function TodoPage() {
                                 </button>
                                 <TodoDeleteButton
                                   compact
-                                  itemLabel={todo.title}
-                                  confirmMessage={`Delete "${todo.title}"? This removes it from your task backlog permanently.`}
+                                  itemLabel={view.title}
+                                  confirmMessage={`Delete "${view.title}"? This removes it from your task backlog permanently.`}
                                   onConfirm={() => void handleDeleteTodo(todo)}
                                 />
                               </div>
@@ -1089,7 +1157,8 @@ export default function TodoPage() {
                               </div>
                             ) : null}
                           </li>
-                        ))}
+                          );
+                        })}
                       </ol>
                               )}
                             </section>
