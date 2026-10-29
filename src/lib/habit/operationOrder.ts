@@ -43,11 +43,16 @@ export function compareOperationOrder(a: OperationHabit, b: OperationHabit): num
     return a.name.localeCompare(b.name);
 }
 
-export function buildOperationQueue<T extends OperationHabit>(habits: T[]): {
+export function buildOperationQueue<T extends OperationHabit>(
+    habits: T[],
+    options?: { skippedIds?: Iterable<string> }
+): {
     steps: OperationStep<T>[];
     now: OperationStep<T> | null;
     completedCount: number;
+    skippedOpenCount: number;
 } {
+    const skipped = new Set(options?.skippedIds ?? []);
     const steps = habits
         .filter((habit) => !habit.is_bad_habit)
         .slice()
@@ -58,9 +63,14 @@ export function buildOperationQueue<T extends OperationHabit>(habits: T[]): {
             done: habit.status === 'checked',
         }));
 
+    const open = steps.filter((step) => !step.done);
+    const now = open.find((step) => !skipped.has(step.id)) ?? null;
+    const skippedOpenCount = open.filter((step) => skipped.has(step.id)).length;
+
     return {
         steps,
-        now: steps.find((step) => !step.done) ?? null,
+        now,
         completedCount: steps.filter((step) => step.done).length,
+        skippedOpenCount,
     };
 }

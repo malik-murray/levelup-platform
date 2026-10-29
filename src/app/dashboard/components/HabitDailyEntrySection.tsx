@@ -145,6 +145,8 @@ export default function HabitDailyEntrySection({
     const [dailyPlanOpen, setDailyPlanOpen] = useState(true);
     const [habitsOpen, setHabitsOpen] = useState(true);
     const [todosOpen, setTodosOpen] = useState(true);
+    const [skippedHabitIds, setSkippedHabitIds] = useState<string[]>([]);
+    const [skippedTaskIds, setSkippedTaskIds] = useState<string[]>([]);
     const [habitSubsectionsOpen, setHabitSubsectionsOpen] = useState({
         morning: true,
         afternoon: true,
@@ -613,6 +615,29 @@ export default function HabitDailyEntrySection({
         }));
     }, [openBacklog, selectedDay]);
 
+    useEffect(() => {
+        setSkippedHabitIds([]);
+        setSkippedTaskIds([]);
+    }, [selectedDay]);
+
+    const skipHabit = (habitId: string) => {
+        setSkippedHabitIds((prev) => (prev.includes(habitId) ? prev : [...prev, habitId]));
+    };
+    const skipTask = (taskId: string) => {
+        setSkippedTaskIds((prev) => (prev.includes(taskId) ? prev : [...prev, taskId]));
+    };
+    const clearSkippedHabits = () => setSkippedHabitIds([]);
+    const clearSkippedTasks = () => setSkippedTaskIds([]);
+
+    const handleHabitToggleAndUnskip = (habitId: string) => {
+        setSkippedHabitIds((prev) => prev.filter((id) => id !== habitId));
+        void handleHabitToggle(habitId);
+    };
+    const handleToggleFocusAndUnskip = (taskId: string, isDone: boolean) => {
+        setSkippedTaskIds((prev) => prev.filter((id) => id !== taskId));
+        void handleToggleFocus(taskId, isDone);
+    };
+
     // Report live-computed scores to dashboard header (fills as user checks off items)
     // Good habits: checked = positive. Bad habits: each checked subtracts 3% from habit score.
     useEffect(() => {
@@ -712,14 +737,20 @@ export default function HabitDailyEntrySection({
                 <div className="grid grid-cols-2 items-stretch gap-3 sm:gap-4">
                     <OperationSequence
                         habits={habitsWithEntries}
-                        onToggle={(habitId) => void handleHabitToggle(habitId)}
+                        onToggle={handleHabitToggleAndUnskip}
+                        skippedIds={skippedHabitIds}
+                        onSkip={skipHabit}
+                        onClearSkips={clearSkippedHabits}
                         mode="card"
                     />
                     <TodoNowSequence
                         tasks={focusTasks}
                         day={selectedDay}
-                        onToggle={(taskId, isDone) => void handleToggleFocus(taskId, isDone)}
+                        onToggle={handleToggleFocusAndUnskip}
                         todoHref={isPreview ? null : '/todo'}
+                        skippedIds={skippedTaskIds}
+                        onSkip={skipTask}
+                        onClearSkips={clearSkippedTasks}
                         mode="card"
                     />
                 </div>
@@ -800,7 +831,10 @@ export default function HabitDailyEntrySection({
                 </div>
                 <OperationSequence
                     habits={habitsWithEntries}
-                    onToggle={(habitId) => void handleHabitToggle(habitId)}
+                    onToggle={handleHabitToggleAndUnskip}
+                    skippedIds={skippedHabitIds}
+                    onSkip={skipHabit}
+                    onClearSkips={clearSkippedHabits}
                     mode="list"
                 />
                 {badHabits.length > 0 && (
@@ -890,8 +924,11 @@ export default function HabitDailyEntrySection({
                         <TodoNowSequence
                             tasks={focusTasks}
                             day={selectedDay}
-                            onToggle={(taskId, isDone) => void handleToggleFocus(taskId, isDone)}
+                            onToggle={handleToggleFocusAndUnskip}
                             todoHref={isPreview ? null : '/todo'}
+                            skippedIds={skippedTaskIds}
+                            onSkip={skipTask}
+                            onClearSkips={clearSkippedTasks}
                             mode="list"
                         />
                     </div>

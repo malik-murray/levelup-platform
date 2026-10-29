@@ -54,4 +54,18 @@ describe('buildOperationQueue', () => {
         expect(queue.now).toBeNull();
         expect(queue.completedCount).toBe(1);
     });
+
+    it('advances past skipped unfinished habits', () => {
+        const queue = buildOperationQueue(
+            [
+                habit({ id: 'wake', name: 'Wake', sort_order: 0, status: 'missed' }),
+                habit({ id: 'water', name: 'Water', sort_order: 1, status: 'missed' }),
+                habit({ id: 'lift', name: 'Lift', sort_order: 2, status: 'missed' }),
+            ],
+            { skippedIds: ['wake'] }
+        );
+
+        expect(queue.now?.id).toBe('water');
+        expect(queue.skippedOpenCount).toBe(1);
+    });
 });

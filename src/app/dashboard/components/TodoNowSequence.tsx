@@ -26,78 +26,119 @@ export default function TodoNowSequence({
     day,
     onToggle,
     todoHref,
+    skippedIds = [],
+    onSkip,
+    onClearSkips,
     mode = 'both',
 }: {
     tasks: FocusTask[];
     day: string;
     onToggle: (taskId: string, isDone: boolean) => void;
     todoHref: string | null;
+    skippedIds?: string[];
+    onSkip?: (taskId: string) => void;
+    onClearSkips?: () => void;
     mode?: 'card' | 'list' | 'both';
 }) {
+    const skipped = new Set(skippedIds);
     const summary = focusSummary(tasks, day);
-    const now = tasks.find((task) => focusScore(task, day) != null) ?? null;
-    const doneCount = tasks.filter((task) => focusScore(task, day) == null).length;
+    const openTasks = tasks.filter((task) => focusScore(task, day) != null);
+    const now = openTasks.find((task) => !skipped.has(task.id)) ?? null;
+    const doneCount = tasks.length - openTasks.length;
+    const skippedOpenCount = openTasks.filter((task) => skipped.has(task.id)).length;
+    const allOpenSkipped = openTasks.length > 0 && now == null && skippedOpenCount > 0;
     const showCard = mode !== 'list';
     const showList = mode !== 'card';
 
     return (
         <div className={showList ? 'space-y-3' : 'h-full'}>
             {showCard ? (
-            <div className="flex h-full flex-col rounded-xl border-2 border-[#93c5fd]/70 bg-[#93c5fd]/10 px-3 py-3 shadow-[0_0_24px_rgba(147,197,253,0.16)] sm:px-4 sm:py-4">
-                {now ? (
-                    <>
-                        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#93c5fd]">
-                            Do this now · {dueDetail(now, day)}
-                            {focusScore(now, day) != null ? ` · Score ${focusScore(now, day)}` : ''}
-                        </p>
-                        <div className="mt-2 flex items-center gap-3">
-                            <span className="text-3xl leading-none" aria-hidden>
-                                📋
-                            </span>
-                            <p className="min-w-0 flex-1 text-base font-bold text-white sm:text-xl">{now.title}</p>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => onToggle(now.id, false)}
-                            className="mt-4 inline-flex items-center justify-center self-start rounded-full bg-[#93c5fd] px-4 py-2 text-sm font-semibold text-black shadow-[0_0_18px_rgba(147,197,253,0.35)] transition hover:bg-[#bfdbfe]"
-                        >
-                            Mark done
-                        </button>
-                    </>
-                ) : tasks.length > 0 ? (
-                    <>
-                        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#93c5fd]">
-                            To-dos complete
-                        </p>
-                        <p className="mt-2 text-base font-bold text-white sm:text-lg">Today&apos;s to-do list is done.</p>
-                    </>
-                ) : (
-                    <>
-                        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#93c5fd]">
-                            Do this now
-                        </p>
-                        <p className="mt-2 text-base font-bold text-white sm:text-lg">Nothing from the to-do list is on today.</p>
-                        {todoHref ? (
-                            <Link
-                                href={todoHref}
-                                className="mt-4 inline-flex items-center justify-center rounded-full bg-[#93c5fd] px-4 py-2 text-sm font-semibold text-black shadow-[0_0_18px_rgba(147,197,253,0.35)] transition hover:bg-[#bfdbfe]"
-                            >
-                                Open to-do
-                            </Link>
-                        ) : null}
-                    </>
-                )}
-                <p className="mt-auto pt-3 text-xs text-slate-400">
-                    {tasks.length === 0
-                        ? 'Add a task on the to-do page and it shows up here by focus score.'
-                        : `${doneCount} of ${tasks.length} to-dos done · highest focus score first`}
-                </p>
-                {tasks.length > 0 ? (
-                    <p className="mt-1 text-[11px] text-slate-500">
-                        {summary.overdue} overdue · {summary.dueToday} due today · {summary.dueNext7} in the next 7 days
+                <div className="flex h-full flex-col rounded-xl border-2 border-[#93c5fd]/70 bg-[#93c5fd]/10 px-3 py-3 shadow-[0_0_24px_rgba(147,197,253,0.16)] sm:px-4 sm:py-4">
+                    {now ? (
+                        <>
+                            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#93c5fd]">
+                                Do this now · {dueDetail(now, day)}
+                                {focusScore(now, day) != null ? ` · Score ${focusScore(now, day)}` : ''}
+                            </p>
+                            <div className="mt-2 flex items-center gap-3">
+                                <span className="text-3xl leading-none" aria-hidden>
+                                    📋
+                                </span>
+                                <p className="min-w-0 flex-1 text-base font-bold text-white sm:text-xl">{now.title}</p>
+                            </div>
+                            <div className="mt-4 flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => onToggle(now.id, false)}
+                                    className="inline-flex items-center justify-center rounded-full bg-[#93c5fd] px-4 py-2 text-sm font-semibold text-black shadow-[0_0_18px_rgba(147,197,253,0.35)] transition hover:bg-[#bfdbfe]"
+                                >
+                                    Mark done
+                                </button>
+                                {onSkip ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => onSkip(now.id)}
+                                        className="inline-flex items-center justify-center rounded-full border border-[#93c5fd]/55 bg-black/30 px-4 py-2 text-sm font-semibold text-[#bfdbfe] transition hover:bg-[#93c5fd]/15"
+                                    >
+                                        Skip
+                                    </button>
+                                ) : null}
+                            </div>
+                        </>
+                    ) : allOpenSkipped ? (
+                        <>
+                            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#93c5fd]">
+                                Skipped for now
+                            </p>
+                            <p className="mt-2 text-base font-bold text-white sm:text-lg">
+                                {skippedOpenCount} to-do{skippedOpenCount === 1 ? '' : 's'} still open were skipped.
+                            </p>
+                            {onClearSkips ? (
+                                <button
+                                    type="button"
+                                    onClick={onClearSkips}
+                                    className="mt-4 inline-flex items-center justify-center self-start rounded-full border border-[#93c5fd]/55 bg-black/30 px-4 py-2 text-sm font-semibold text-[#bfdbfe] transition hover:bg-[#93c5fd]/15"
+                                >
+                                    Bring skipped back
+                                </button>
+                            ) : null}
+                        </>
+                    ) : tasks.length > 0 ? (
+                        <>
+                            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#93c5fd]">
+                                To-dos complete
+                            </p>
+                            <p className="mt-2 text-base font-bold text-white sm:text-lg">Today&apos;s to-do list is done.</p>
+                        </>
+                    ) : (
+                        <>
+                            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#93c5fd]">
+                                Do this now
+                            </p>
+                            <p className="mt-2 text-base font-bold text-white sm:text-lg">Nothing from the to-do list is on today.</p>
+                            {todoHref ? (
+                                <Link
+                                    href={todoHref}
+                                    className="mt-4 inline-flex items-center justify-center rounded-full bg-[#93c5fd] px-4 py-2 text-sm font-semibold text-black shadow-[0_0_18px_rgba(147,197,253,0.35)] transition hover:bg-[#bfdbfe]"
+                                >
+                                    Open to-do
+                                </Link>
+                            ) : null}
+                        </>
+                    )}
+                    <p className="mt-auto pt-3 text-xs text-slate-400">
+                        {tasks.length === 0
+                            ? 'Add a task on the to-do page and it shows up here by focus score.'
+                            : `${doneCount} of ${tasks.length} to-dos done · highest focus score first${
+                                  skippedOpenCount > 0 ? ` · ${skippedOpenCount} skipped` : ''
+                              }`}
                     </p>
-                ) : null}
-            </div>
+                    {tasks.length > 0 ? (
+                        <p className="mt-1 text-[11px] text-slate-500">
+                            {summary.overdue} overdue · {summary.dueToday} due today · {summary.dueNext7} in the next 7 days
+                        </p>
+                    ) : null}
+                </div>
             ) : null}
 
             {showList && tasks.length > 0 ? (
@@ -106,10 +147,13 @@ export default function TodoNowSequence({
                         const done = focusScore(task, day) == null;
                         const previous = index > 0 ? tasks[index - 1] : null;
                         const label = groupLabel(task, day, done);
-                        const previousLabel = previous ? groupLabel(previous, day, focusScore(previous, day) == null) : null;
+                        const previousLabel = previous
+                            ? groupLabel(previous, day, focusScore(previous, day) == null)
+                            : null;
                         const quadrant = QUADRANT_META[getQuadrant(task)];
                         const score = focusScore(task, day);
                         const isNow = now?.id === task.id;
+                        const isSkipped = !done && skipped.has(task.id);
 
                         return (
                             <li key={task.id}>
@@ -120,7 +164,11 @@ export default function TodoNowSequence({
                                 ) : null}
                                 <label
                                     className={`flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border px-2.5 py-2 ${
-                                        isNow ? 'border-[#93c5fd]/70 bg-[#93c5fd]/10' : 'border-transparent hover:bg-white/5'
+                                        isNow
+                                            ? 'border-[#93c5fd]/70 bg-[#93c5fd]/10'
+                                            : isSkipped
+                                              ? 'border-dashed border-[#93c5fd]/35 bg-black/20'
+                                              : 'border-transparent hover:bg-white/5'
                                     }`}
                                 >
                                     <span className="w-5 shrink-0 text-right text-xs font-semibold tabular-nums text-slate-500">
@@ -136,12 +184,21 @@ export default function TodoNowSequence({
                                     <span className="shrink-0 text-lg" aria-hidden>
                                         📋
                                     </span>
-                                    <span className={`min-w-0 flex-1 break-words ${done ? 'text-slate-500 line-through' : 'text-white'}`}>
+                                    <span
+                                        className={`min-w-0 flex-1 break-words ${
+                                            done ? 'text-slate-500 line-through' : isSkipped ? 'text-slate-400' : 'text-white'
+                                        }`}
+                                    >
                                         {task.title}
                                     </span>
                                     {isNow ? (
                                         <span className="shrink-0 rounded-full bg-[#93c5fd] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-black">
                                             Now
+                                        </span>
+                                    ) : null}
+                                    {isSkipped ? (
+                                        <span className="shrink-0 rounded-full border border-[#93c5fd]/45 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#bfdbfe]">
+                                            Skipped
                                         </span>
                                     ) : null}
                                     {score != null ? (
