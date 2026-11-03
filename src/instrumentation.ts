@@ -3,16 +3,18 @@
  * Ensures the iCloud storage tree exists before the app starts serving.
  */
 export async function register() {
-  if (process.env.NEXT_RUNTIME !== "nodejs") return;
-  if (process.env.VERCEL) return; // no iCloud Drive on serverless; local-dev only
-
-  const { ensureIcloudDirs } = await import("./lib/storage/paths");
-  const { failed } = ensureIcloudDirs();
-  if (failed.length > 0) {
-    console.warn(
-      `[storage] iCloud Drive not available; ${failed.length} storage director${
-        failed.length === 1 ? "y" : "ies"
-      } could not be created. Set LEVELUP_STORAGE_DIR to override.`
-    );
+  // Keep the import inside a positive runtime branch so Next can exclude Node
+  // filesystem dependencies from its Edge instrumentation bundle in development.
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    if (process.env.VERCEL) return; // no iCloud Drive on serverless; local-dev only
+    const { ensureIcloudDirs } = await import("./lib/storage/paths");
+    const { failed } = ensureIcloudDirs();
+    if (failed.length > 0) {
+      console.warn(
+        `[storage] iCloud Drive not available; ${failed.length} storage director${
+          failed.length === 1 ? "y" : "ies"
+        } could not be created. Set LEVELUP_STORAGE_DIR to override.`
+      );
+    }
   }
 }

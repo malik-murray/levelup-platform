@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "LevelUpSolutions",
-  "short_name": "LevelUpSolutions",
-  "description": "LevelUp finance, habits, and productivity",
+  "name": "LevelUpOS",
+  "short_name": "LevelUpOS",
+  "description": "Your personal command center for agents, goals, and daily progress",
   "start_url": "/dashboard",
   "display": "standalone",
   "background_color": "#010205",

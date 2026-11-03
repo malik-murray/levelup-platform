@@ -1,5 +1,11 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## LevelUpOS agent command center
+
+The `/levelupos` page adds an authenticated Manager → Workout Agent workflow.
+Deploy its separate AgentOS backend on Railway and connect it through server-only
+Vercel environment variables. See [setup, limits, and verification](docs/LEVELUPOS_SETUP.md).
+
 ## Getting Started
 
 First, run the development server:
