@@ -22,6 +22,7 @@ type App = {
 
 const primaryNavApps: App[] = [
     { name: 'Dashboard', href: '/dashboard', icon: '📊', appKey: 'dashboard' },
+    { name: 'LevelUpOS', href: '/levelupos', icon: '🤖' },
     { name: 'To-Do', href: '/todo', icon: '📝', appKey: 'todo' },
     { name: 'Goals & Vision', href: '/goals', icon: '🎯', appKey: 'goals' },
     { name: 'Trends', href: '/trends', icon: '📉', appKey: 'trends' },
